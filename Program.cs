@@ -95,6 +95,13 @@ app.UseAuthorization();
 
 app.MapGet("/", () => Results.Ok(new { status = "ok", service = "SWP-BE" }));
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
+app.MapGet("/health/db", async (AppDbContext dbContext, CancellationToken cancellationToken) =>
+{
+    var canConnect = await dbContext.Database.CanConnectAsync(cancellationToken);
+    return canConnect
+        ? Results.Ok(new { status = "healthy", database = "connected" })
+        : Results.StatusCode(StatusCodes.Status503ServiceUnavailable);
+});
 app.MapControllers();
 
 app.Run();
