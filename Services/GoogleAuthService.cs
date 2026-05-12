@@ -10,7 +10,6 @@ namespace SWP_BE.Services;
 
 public sealed class GoogleAuthService(
     AppDbContext dbContext,
-    HttpClient httpClient,
     IJwtTokenService jwtTokenService,
     IOptions<GoogleAuthOptions> googleOptions) : IGoogleAuthService
 {
