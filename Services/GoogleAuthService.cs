@@ -1,5 +1,4 @@
-using System.Text.Json;
-using System.Text.Json.Serialization;
+using Google.Apis.Auth;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Options;
 using SWP_BE.Contracts.Auth;
@@ -11,7 +10,6 @@ namespace SWP_BE.Services;
 
 public sealed class GoogleAuthService(
     AppDbContext dbContext,
-    HttpClient httpClient,
     IJwtTokenService jwtTokenService,
     IOptions<GoogleAuthOptions> googleOptions) : IGoogleAuthService
 {
@@ -24,22 +22,11 @@ public sealed class GoogleAuthService(
             throw new InvalidOperationException("Google client id is not configured.");
         }
 
-        var payload = await VerifyGoogleTokenAsync(idToken, cancellationToken);
+        var payload = await VerifyGoogleTokenAsync(idToken);
 
-        if (!IsEmailVerified(payload.EmailVerified))
+        if (!payload.EmailVerified)
         {
             throw new UnauthorizedAccessException("Google email is not verified.");
-        }
-
-        if (!string.Equals(payload.Audience, _googleOptions.ClientId, StringComparison.Ordinal))
-        {
-            throw new UnauthorizedAccessException("Google token audience is invalid.");
-        }
-
-        if (!long.TryParse(payload.ExpiresAtUnixSeconds, out var expiresAtUnixSeconds) ||
-            DateTimeOffset.FromUnixTimeSeconds(expiresAtUnixSeconds) <= DateTimeOffset.UtcNow)
-        {
-            throw new UnauthorizedAccessException("Google token is expired.");
         }
 
         var normalizedEmail = payload.Email.Trim().ToLowerInvariant();
@@ -79,48 +66,20 @@ public sealed class GoogleAuthService(
             new AuthUserResponse(user.Id, user.Email, user.FullName, user.AvatarUrl, user.Role));
     }
 
-    private async Task<GoogleTokenInfoResponse> VerifyGoogleTokenAsync(
-        string idToken,
-        CancellationToken cancellationToken)
+    private async Task<GoogleJsonWebSignature.Payload> VerifyGoogleTokenAsync(string idToken)
     {
-        var response = await httpClient.GetAsync(
-            $"https://oauth2.googleapis.com/tokeninfo?id_token={Uri.EscapeDataString(idToken)}",
-            cancellationToken);
+        var settings = new GoogleJsonWebSignature.ValidationSettings
+        {
+            Audience = [_googleOptions.ClientId]
+        };
 
-        if (!response.IsSuccessStatusCode)
+        try
+        {
+            return await GoogleJsonWebSignature.ValidateAsync(idToken, settings);
+        }
+        catch (InvalidJwtException)
         {
             throw new UnauthorizedAccessException("Invalid Google token.");
         }
-
-        var payload = await response.Content.ReadFromJsonAsync<GoogleTokenInfoResponse>(
-            cancellationToken: cancellationToken);
-
-        if (payload is null ||
-            string.IsNullOrWhiteSpace(payload.Subject) ||
-            string.IsNullOrWhiteSpace(payload.Email))
-        {
-            throw new UnauthorizedAccessException("Invalid Google token payload.");
-        }
-
-        return payload;
     }
-
-    private static bool IsEmailVerified(JsonElement value)
-    {
-        return value.ValueKind switch
-        {
-            JsonValueKind.True => true,
-            JsonValueKind.String => bool.TryParse(value.GetString(), out var result) && result,
-            _ => false
-        };
-    }
-
-    private sealed record GoogleTokenInfoResponse(
-        [property: JsonPropertyName("sub")] string Subject,
-        [property: JsonPropertyName("email")] string Email,
-        [property: JsonPropertyName("email_verified")] JsonElement EmailVerified,
-        [property: JsonPropertyName("name")] string? Name,
-        [property: JsonPropertyName("picture")] string? Picture,
-        [property: JsonPropertyName("aud")] string Audience,
-        [property: JsonPropertyName("exp")] string ExpiresAtUnixSeconds);
 }
