@@ -20,7 +20,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
-builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
+builder.Services.AddHttpClient<IGoogleAuthService, GoogleAuthService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
