@@ -1,0 +1,13 @@
+namespace SWP_BE.Contracts.Auth;
+
+public sealed record AuthResponse(
+    string AccessToken,
+    DateTimeOffset ExpiresAt,
+    AuthUserResponse User);
+
+public sealed record AuthUserResponse(
+    Guid Id,
+    string Email,
+    string FullName,
+    string? AvatarUrl,
+    string Role);
