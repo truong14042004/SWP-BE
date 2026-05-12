@@ -33,11 +33,16 @@ public sealed class AuthController(
         }
         catch (Exception exception)
         {
-            logger.LogError(exception, "Google login failed.");
+            logger.LogError(exception,
+                "Google login failed. Type={ExceptionType} Source={Source}",
+                exception.GetType().FullName,
+                exception.Source);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
                 message = "Google login failed on the server.",
-                detail = exception.Message
+                detail = exception.Message,
+                type = exception.GetType().Name,
+                source = exception.Source
             });
         }
     }
