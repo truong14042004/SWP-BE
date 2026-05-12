@@ -21,8 +21,5 @@ steps:
       - managed
       - --allow-unauthenticated
 
-images:
-  - asia-northeast1-docker.pkg.dev/$PROJECT_ID/cloud-run-source-deploy/swp-be:$COMMIT_SHA
-
 options:
   logging: CLOUD_LOGGING_ONLY
