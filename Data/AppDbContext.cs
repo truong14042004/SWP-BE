@@ -17,6 +17,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
             entity.HasKey(user => user.Id);
 
+            entity.Property(user => user.Username)
+                .HasMaxLength(100);
+
+            entity.HasIndex(user => user.Username)
+                .IsUnique();
+
             entity.Property(user => user.Email)
                 .HasMaxLength(256)
                 .IsRequired();
@@ -36,6 +42,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 
             entity.HasIndex(user => user.GoogleSubject)
                 .IsUnique();
+
+            entity.Property(user => user.PasswordHash)
+                .HasMaxLength(512);
 
             entity.Property(user => user.Role)
                 .HasMaxLength(50)

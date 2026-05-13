@@ -2,6 +2,36 @@
 
 ASP.NET Core Web API (.NET 8) backend with Google login, JWT authentication, and PostgreSQL via Entity Framework Core.
 
+## Username and Password Login API
+
+Register a local account:
+
+```http
+POST /api/auth/register
+Content-Type: application/json
+
+{
+  "username": "student01",
+  "email": "student01@example.com",
+  "fullName": "Student 01",
+  "password": "secret123"
+}
+```
+
+Login with username and password:
+
+```http
+POST /api/auth/login
+Content-Type: application/json
+
+{
+  "username": "student01",
+  "password": "secret123"
+}
+```
+
+Passwords are stored as one-way hashes, not plaintext.
+
 ## Google Login API
 
 Frontend logs in with Google, then sends the Google `id_token` to:

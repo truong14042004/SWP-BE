@@ -63,7 +63,7 @@ public sealed class GoogleAuthService(
         return new AuthResponse(
             token.Token,
             token.ExpiresAt,
-            new AuthUserResponse(user.Id, user.Email, user.FullName, user.AvatarUrl, user.Role));
+            new AuthUserResponse(user.Id, user.Username, user.Email, user.FullName, user.AvatarUrl, user.Role));
     }
 
     private async Task<GoogleJsonWebSignature.Payload> VerifyGoogleTokenAsync(string idToken)

@@ -7,6 +7,7 @@ public sealed record AuthResponse(
 
 public sealed record AuthUserResponse(
     Guid Id,
+    string? Username,
     string Email,
     string FullName,
     string? AvatarUrl,

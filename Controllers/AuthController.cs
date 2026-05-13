@@ -9,8 +9,43 @@ namespace SWP_BE.Controllers;
 [Route("api/auth")]
 public sealed class AuthController(
     IGoogleAuthService googleAuthService,
+    IPasswordAuthService passwordAuthService,
     ILogger<AuthController> logger) : ControllerBase
 {
+    [HttpPost("register")]
+    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AuthResponse>> Register(
+        RegisterRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await passwordAuthService.RegisterAsync(request, cancellationToken));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("login")]
+    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> Login(
+        PasswordLoginRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await passwordAuthService.LoginAsync(request, cancellationToken));
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Unauthorized(new { message = exception.Message });
+        }
+    }
+
     [HttpPost("google")]
     [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
