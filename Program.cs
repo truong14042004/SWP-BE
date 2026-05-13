@@ -111,8 +111,11 @@ builder.Services.AddAuthorization();
 
 var app = builder.Build();
 
-app.UseSwagger();
-app.UseSwaggerUI();
+using (var scope = app.Services.CreateScope())
+{
+    var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+    dbContext.Database.Migrate();
+}
 
 app.Use(async (context, next) =>
 {
@@ -132,8 +135,40 @@ app.Use(async (context, next) =>
         return;
     }
 
-    await next();
+    try
+    {
+        await next();
+    }
+    catch (Exception exception)
+    {
+        var logger = context.RequestServices.GetRequiredService<ILogger<Program>>();
+        logger.LogError(exception, "Unhandled request failure.");
+
+        if (!context.Response.HasStarted)
+        {
+            context.Response.Clear();
+            if (!string.IsNullOrWhiteSpace(origin)
+                && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
+            {
+                context.Response.Headers.AccessControlAllowOrigin = origin;
+                context.Response.Headers.Vary = "Origin";
+                context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
+                context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+            }
+
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            await context.Response.WriteAsJsonAsync(new
+            {
+                message = "Server error.",
+                detail = exception.Message,
+                type = exception.GetType().Name
+            });
+        }
+    }
 });
+
+app.UseSwagger();
+app.UseSwaggerUI();
 
 app.UseCors("Frontend");
 
