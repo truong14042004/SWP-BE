@@ -14,7 +14,20 @@ Content-Type: application/json
   "username": "student01",
   "email": "student01@example.com",
   "fullName": "Student 01",
-  "password": "secret123"
+  "password": "secret123",
+  "confirmPassword": "secret123"
+}
+```
+
+The API sends a 6-digit OTP to the email address. Verify it to activate the account:
+
+```http
+POST /api/auth/verify-email
+Content-Type: application/json
+
+{
+  "email": "student01@example.com",
+  "otp": "123456"
 }
 ```
 
@@ -31,6 +44,7 @@ Content-Type: application/json
 ```
 
 Passwords are stored as one-way hashes, not plaintext.
+OTP values are also stored as one-way hashes and expire after 10 minutes.
 
 ## Google Login API
 
@@ -63,6 +77,15 @@ Update `appsettings.json`, user secrets, or environment variables:
   },
   "Jwt": {
     "Secret": "YOUR_AT_LEAST_32_CHARACTERS_SECRET"
+  },
+  "EmailSettings": {
+    "SmtpHost": "smtp.gmail.com",
+    "SmtpPort": 587,
+    "EnableSsl": true,
+    "Username": "YOUR_GMAIL_ADDRESS",
+    "Password": "YOUR_GOOGLE_APP_PASSWORD",
+    "FromEmail": "YOUR_GMAIL_ADDRESS",
+    "FromName": "CareerMap"
   }
 }
 ```

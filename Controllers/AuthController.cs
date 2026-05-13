@@ -13,9 +13,9 @@ public sealed class AuthController(
     ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("register")]
-    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType<AuthMessageResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
-    public async Task<ActionResult<AuthResponse>> Register(
+    public async Task<ActionResult<AuthMessageResponse>> Register(
         RegisterRequest request,
         CancellationToken cancellationToken)
     {
@@ -26,6 +26,23 @@ public sealed class AuthController(
         catch (InvalidOperationException exception)
         {
             return BadRequest(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("verify-email")]
+    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> VerifyEmailOtp(
+        VerifyEmailOtpRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await passwordAuthService.VerifyEmailOtpAsync(request, cancellationToken));
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Unauthorized(new { message = exception.Message });
         }
     }
 

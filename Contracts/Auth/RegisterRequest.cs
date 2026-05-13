@@ -18,4 +18,8 @@ public sealed record RegisterRequest(
 
     [Required]
     [StringLength(100, MinimumLength = 6)]
-    string Password);
+    string Password,
+
+    [Required]
+    [StringLength(100, MinimumLength = 6)]
+    string ConfirmPassword);

@@ -46,6 +46,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(user => user.PasswordHash)
                 .HasMaxLength(512);
 
+            entity.Property(user => user.EmailVerificationOtpHash)
+                .HasMaxLength(512);
+
             entity.Property(user => user.Role)
                 .HasMaxLength(50)
                 .IsRequired();

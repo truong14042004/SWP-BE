@@ -16,6 +16,14 @@ public sealed class User
 
     public string? PasswordHash { get; set; }
 
+    public bool IsEmailVerified { get; set; } = true;
+
+    public string? EmailVerificationOtpHash { get; set; }
+
+    public DateTimeOffset? EmailVerificationOtpExpiresAt { get; set; }
+
+    public DateTimeOffset? EmailVerifiedAt { get; set; }
+
     public string Role { get; set; } = "User";
 
     public bool IsActive { get; set; } = true;

@@ -43,6 +43,9 @@ public sealed class GoogleAuthService(
                 FullName = payload.Name ?? normalizedEmail,
                 AvatarUrl = payload.Picture,
                 GoogleSubject = payload.Subject,
+                IsActive = true,
+                IsEmailVerified = true,
+                EmailVerifiedAt = now,
                 CreatedAt = now,
                 UpdatedAt = now
             };
@@ -54,6 +57,11 @@ public sealed class GoogleAuthService(
             user.FullName = payload.Name ?? user.FullName;
             user.AvatarUrl = payload.Picture ?? user.AvatarUrl;
             user.GoogleSubject ??= payload.Subject;
+            user.IsActive = true;
+            user.IsEmailVerified = true;
+            user.EmailVerifiedAt ??= now;
+            user.EmailVerificationOtpHash = null;
+            user.EmailVerificationOtpExpiresAt = null;
             user.UpdatedAt = now;
         }
 
