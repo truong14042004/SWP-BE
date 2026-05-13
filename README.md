@@ -88,3 +88,25 @@ dotnet ef database update
 ```powershell
 dotnet run
 ```
+
+## Swagger
+
+Swagger UI is available at:
+
+```text
+/swagger
+```
+
+Local default URL:
+
+```text
+http://localhost:8080/swagger
+```
+
+After deployment, open the deployed backend URL with `/swagger`, for example:
+
+```text
+https://YOUR_BACKEND_URL/swagger
+```
+
+Use the `Authorize` button in Swagger UI to enter a JWT access token when testing protected APIs.
