@@ -66,8 +66,15 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 });
-var allowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
-    ?? ["https://swp-fe-careermap-2026-47ca0.web.app"];
+var defaultAllowedOrigins = new[] { "https://swp-fe-careermap-2026-47ca0.web.app" };
+var configuredAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
+    ?? [];
+var allowedOrigins = defaultAllowedOrigins
+    .Concat(configuredAllowedOrigins)
+    .Where(origin => !string.IsNullOrWhiteSpace(origin))
+    .Select(origin => origin.Trim().TrimEnd('/'))
+    .Distinct(StringComparer.OrdinalIgnoreCase)
+    .ToArray();
 
 builder.Services.AddCors(options =>
 {
@@ -109,10 +116,12 @@ app.UseSwaggerUI();
 
 app.Use(async (context, next) =>
 {
-    var origin = context.Request.Headers.Origin.ToString();
-    if (!string.IsNullOrWhiteSpace(origin) && allowedOrigins.Contains(origin))
+    var origin = context.Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+    if (!string.IsNullOrWhiteSpace(origin)
+        && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
     {
         context.Response.Headers.AccessControlAllowOrigin = origin;
+        context.Response.Headers.Vary = "Origin";
         context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
         context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
     }
