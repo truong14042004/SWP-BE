@@ -6,7 +6,7 @@ using SWP_BE.Models;
 namespace SWP_BE.Controllers;
 
 [ApiController]
-[Route("api/[controller]")]
+[Route("api/career-roles")]
 public class CareerRolesController : ControllerBase
 {
     private readonly AppDbContext _context;
