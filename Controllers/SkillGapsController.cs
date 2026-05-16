@@ -190,4 +190,84 @@ public class SkillGapsController : ControllerBase
             _ => 1 // Default if unknown format
         };
     }
+
+    [HttpGet("latest")]
+    public async Task<IActionResult> GetLatestSkillGapReport([FromQuery] Guid userId)
+    {
+        var report = await _context.SkillGapReports
+            .Include(r => r.CareerRole)
+            .Where(r => r.UserId == userId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync();
+
+        if (report == null)
+        {
+            return NotFound(new { message = "No skill gap report found for this user." });
+        }
+
+        var items = await _context.SkillGapReportItems
+            .Include(i => i.Skill)
+            .Where(i => i.SkillGapReportId == report.Id)
+            .ToListAsync();
+
+        return Ok(new
+        {
+            report.Id,
+            report.UserId,
+            report.CareerRoleId,
+            CareerRoleName = report.CareerRole.Name,
+            report.MatchScore,
+            report.Summary,
+            report.CreatedAt,
+            Items = items.Select(i => new
+            {
+                i.SkillId,
+                SkillName = i.Skill.Name,
+                i.CurrentLevel,
+                i.RequiredLevel,
+                i.Status,
+                i.Priority,
+                i.Recommendation
+            })
+        });
+    }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetSkillGapReportById(Guid id)
+    {
+        var report = await _context.SkillGapReports
+            .Include(r => r.CareerRole)
+            .FirstOrDefaultAsync(r => r.Id == id);
+
+        if (report == null)
+        {
+            return NotFound(new { message = "Skill gap report not found." });
+        }
+
+        var items = await _context.SkillGapReportItems
+            .Include(i => i.Skill)
+            .Where(i => i.SkillGapReportId == report.Id)
+            .ToListAsync();
+
+        return Ok(new
+        {
+            report.Id,
+            report.UserId,
+            report.CareerRoleId,
+            CareerRoleName = report.CareerRole.Name,
+            report.MatchScore,
+            report.Summary,
+            report.CreatedAt,
+            Items = items.Select(i => new
+            {
+                i.SkillId,
+                SkillName = i.Skill.Name,
+                i.CurrentLevel,
+                i.RequiredLevel,
+                i.Status,
+                i.Priority,
+                i.Recommendation
+            })
+        });
+    }
 }
