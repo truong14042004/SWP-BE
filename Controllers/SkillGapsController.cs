@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using SWP_BE.Data;
 using SWP_BE.Models;
 
@@ -7,6 +9,7 @@ namespace SWP_BE.Controllers;
 
 [ApiController]
 [Route("api/skill-gap")]
+[Authorize]
 public class SkillGapsController : ControllerBase
 {
     private readonly AppDbContext _context;
@@ -18,14 +21,19 @@ public class SkillGapsController : ControllerBase
 
     public class AnalyzeSkillGapRequest
     {
-        public Guid UserId { get; set; }
         public Guid? CareerRoleId { get; set; }
     }
 
     [HttpPost("analyze")]
     public async Task<IActionResult> AnalyzeSkillGap([FromBody] AnalyzeSkillGapRequest request)
     {
-        var userExists = await _context.Users.AnyAsync(u => u.Id == request.UserId);
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid token." });
+        }
+
+        var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
         {
             return NotFound(new { message = "User not found." });
@@ -38,7 +46,7 @@ public class SkillGapsController : ControllerBase
         }
         else
         {
-            var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == request.UserId);
+            var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
             if (profile == null || !profile.TargetRoleId.HasValue)
             {
                 return BadRequest(new { message = "Career role not provided and no target role found in student profile." });
@@ -65,13 +73,13 @@ public class SkillGapsController : ControllerBase
 
         // Get user's current skills
         var userSkills = await _context.UserSkills
-            .Where(u => u.UserId == request.UserId)
+            .Where(u => u.UserId == userId)
             .ToListAsync();
 
         var report = new SkillGapReport
         {
             Id = Guid.NewGuid(),
-            UserId = request.UserId,
+            UserId = userId,
             CareerRoleId = targetRoleId,
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
@@ -102,13 +110,22 @@ public class SkillGapsController : ControllerBase
 
             if (userLevelValue >= reqLevelValue)
             {
-                item.Status = "Mastered";
-                item.Recommendation = "Great job! You have mastered this skill.";
-                totalScore += req.Weight; // Full points
+                if (userSkill!.IsVerified)
+                {
+                    item.Status = "Matched";
+                    item.Recommendation = "Great job! You have mastered and verified this skill.";
+                    totalScore += req.Weight; // Full points
+                }
+                else
+                {
+                    item.Status = "NotVerified";
+                    item.Recommendation = "You have the required skill level, but it needs to be verified (provide evidence).";
+                    totalScore += req.Weight * 0.5m; // Partial points for unverified
+                }
             }
             else if (userLevelValue > 0)
             {
-                item.Status = "Needs Improvement";
+                item.Status = "Weak";
                 item.Recommendation = $"You need to improve from {userSkill!.Level} to {req.RequiredLevel}.";
                 totalScore += req.Weight * (decimal)userLevelValue / reqLevelValue; // Partial points
             }
@@ -136,7 +153,7 @@ public class SkillGapsController : ControllerBase
 
         // Delete previous reports for the same user and role
         var previousReports = await _context.SkillGapReports
-            .Where(r => r.UserId == request.UserId && r.CareerRoleId == targetRoleId)
+            .Where(r => r.UserId == userId && r.CareerRoleId == targetRoleId)
             .ToListAsync();
             
         if (previousReports.Any())
@@ -192,8 +209,14 @@ public class SkillGapsController : ControllerBase
     }
 
     [HttpGet("latest")]
-    public async Task<IActionResult> GetLatestSkillGapReport([FromQuery] Guid userId)
+    public async Task<IActionResult> GetLatestSkillGapReport()
     {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid token." });
+        }
+
         var report = await _context.SkillGapReports
             .Include(r => r.CareerRole)
             .Where(r => r.UserId == userId)
@@ -235,6 +258,12 @@ public class SkillGapsController : ControllerBase
     [HttpGet("{id}")]
     public async Task<IActionResult> GetSkillGapReportById(Guid id)
     {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var currentUserId))
+        {
+            return Unauthorized(new { message = "Invalid token." });
+        }
+
         var report = await _context.SkillGapReports
             .Include(r => r.CareerRole)
             .FirstOrDefaultAsync(r => r.Id == id);
@@ -242,6 +271,11 @@ public class SkillGapsController : ControllerBase
         if (report == null)
         {
             return NotFound(new { message = "Skill gap report not found." });
+        }
+
+        if (report.UserId != currentUserId && !User.IsInRole("Admin") && !User.IsInRole("Counselor"))
+        {
+            return Forbid();
         }
 
         var items = await _context.SkillGapReportItems

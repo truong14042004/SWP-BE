@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
@@ -19,7 +20,14 @@ public class SkillsController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetSkills()
     {
-        var skills = await _context.Skills
+        var query = _context.Skills.AsQueryable();
+
+        if (!User.IsInRole("Admin"))
+        {
+            query = query.Where(s => s.IsActive);
+        }
+
+        var skills = await query
             .Select(s => new
             {
                 s.Id,
@@ -43,6 +51,7 @@ public class SkillsController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateSkill([FromBody] CreateSkillRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
@@ -92,6 +101,7 @@ public class SkillsController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdateSkill(Guid id, [FromBody] UpdateSkillRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
@@ -132,6 +142,7 @@ public class SkillsController : ControllerBase
     }
 
     [HttpDelete("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> DeleteSkill(Guid id)
     {
         var skill = await _context.Skills.FindAsync(id);

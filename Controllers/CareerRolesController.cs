@@ -1,5 +1,7 @@
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using System.Security.Claims;
 using SWP_BE.Data;
 using SWP_BE.Models;
 
@@ -19,7 +21,14 @@ public class CareerRolesController : ControllerBase
     [HttpGet]
     public async Task<IActionResult> GetCareerRoles()
     {
-        var roles = await _context.CareerRoles
+        var query = _context.CareerRoles.AsQueryable();
+
+        if (!User.IsInRole("Admin"))
+        {
+            query = query.Where(r => r.IsActive);
+        }
+
+        var roles = await query
             .Select(r => new
             {
                 r.Id,
@@ -68,6 +77,7 @@ public class CareerRolesController : ControllerBase
     }
 
     [HttpPost]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> CreateCareerRole([FromBody] CreateCareerRoleRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -116,6 +126,7 @@ public class CareerRolesController : ControllerBase
     }
 
     [HttpPut("{id}")]
+    [Authorize(Roles = "Admin")]
     public async Task<IActionResult> UpdateCareerRole(Guid id, [FromBody] UpdateCareerRoleRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -157,32 +168,38 @@ public class CareerRolesController : ControllerBase
 
     public class SelectCareerRoleRequest
     {
-        public Guid UserId { get; set; }
         public Guid CareerRoleId { get; set; }
     }
 
     [HttpPost("select")]
+    [Authorize]
     public async Task<IActionResult> SelectCareerRole([FromBody] SelectCareerRoleRequest request)
     {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
+        {
+            return Unauthorized(new { message = "Invalid token." });
+        }
+
         var roleExists = await _context.CareerRoles.AnyAsync(r => r.Id == request.CareerRoleId);
         if (!roleExists)
         {
             return NotFound(new { message = "Career role not found." });
         }
 
-        var userExists = await _context.Users.AnyAsync(u => u.Id == request.UserId);
+        var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
         {
             return NotFound(new { message = "User not found." });
         }
 
-        var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == request.UserId);
+        var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
         if (profile == null)
         {
             profile = new StudentProfile
             {
                 Id = Guid.NewGuid(),
-                UserId = request.UserId,
+                UserId = userId,
                 TargetRoleId = request.CareerRoleId,
                 CreatedAt = DateTimeOffset.UtcNow,
                 UpdatedAt = DateTimeOffset.UtcNow
