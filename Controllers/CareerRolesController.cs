@@ -106,4 +106,52 @@ public class CareerRolesController : ControllerBase
             role.UpdatedAt
         });
     }
+
+    public class UpdateCareerRoleRequest
+    {
+        public string Name { get; set; } = string.Empty;
+        public string? Description { get; set; }
+        public string? Level { get; set; }
+        public bool IsActive { get; set; }
+    }
+
+    [HttpPut("{id}")]
+    public async Task<IActionResult> UpdateCareerRole(Guid id, [FromBody] UpdateCareerRoleRequest request)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return BadRequest(new { message = "Name is required." });
+        }
+
+        var role = await _context.CareerRoles.FindAsync(id);
+        if (role == null)
+        {
+            return NotFound(new { message = "Career role not found." });
+        }
+
+        var exists = await _context.CareerRoles.AnyAsync(r => r.Name == request.Name && r.Id != id);
+        if (exists)
+        {
+            return Conflict(new { message = "Another career role with this name already exists." });
+        }
+
+        role.Name = request.Name;
+        role.Description = request.Description;
+        role.Level = request.Level;
+        role.IsActive = request.IsActive;
+        role.UpdatedAt = DateTime.UtcNow;
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new
+        {
+            role.Id,
+            role.Name,
+            role.Description,
+            role.Level,
+            role.IsActive,
+            role.CreatedAt,
+            role.UpdatedAt
+        });
+    }
 }
