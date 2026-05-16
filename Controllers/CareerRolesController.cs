@@ -154,4 +154,54 @@ public class CareerRolesController : ControllerBase
             role.UpdatedAt
         });
     }
+
+    public class SelectCareerRoleRequest
+    {
+        public Guid UserId { get; set; }
+        public Guid CareerRoleId { get; set; }
+    }
+
+    [HttpPost("select")]
+    public async Task<IActionResult> SelectCareerRole([FromBody] SelectCareerRoleRequest request)
+    {
+        var roleExists = await _context.CareerRoles.AnyAsync(r => r.Id == request.CareerRoleId);
+        if (!roleExists)
+        {
+            return NotFound(new { message = "Career role not found." });
+        }
+
+        var userExists = await _context.Users.AnyAsync(u => u.Id == request.UserId);
+        if (!userExists)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == request.UserId);
+        if (profile == null)
+        {
+            profile = new StudentProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = request.UserId,
+                TargetRoleId = request.CareerRoleId,
+                CreatedAt = DateTimeOffset.UtcNow,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+            _context.StudentProfiles.Add(profile);
+        }
+        else
+        {
+            profile.TargetRoleId = request.CareerRoleId;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await _context.SaveChangesAsync();
+
+        return Ok(new 
+        { 
+            message = "Career role selected successfully.", 
+            profileId = profile.Id, 
+            targetRoleId = profile.TargetRoleId 
+        });
+    }
 }
