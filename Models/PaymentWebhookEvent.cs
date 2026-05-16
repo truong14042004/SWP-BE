@@ -1,21 +1,12 @@
-using System;
-using System.Collections.Generic;
-
 namespace SWP_BE.Models;
 
-public partial class PaymentWebhookEvent
+public sealed class PaymentWebhookEvent
 {
     public Guid Id { get; set; }
-
-    public string Provider { get; set; } = null!;
-
-    public string EventId { get; set; } = null!;
-
-    public string EventType { get; set; } = null!;
-
-    public string PayloadJson { get; set; } = null!;
-
-    public DateTime? ProcessedAt { get; set; }
-
-    public DateTime CreatedAt { get; set; }
+    public string Provider { get; set; } = string.Empty;
+    public string EventId { get; set; } = string.Empty;
+    public string EventType { get; set; } = string.Empty;
+    public string PayloadJson { get; set; } = string.Empty;
+    public DateTimeOffset? ProcessedAt { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 }

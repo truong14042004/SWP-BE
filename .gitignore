@@ -44,6 +44,9 @@ appsettings.Local.json
 appsettings.Production.json
 
 # Others
+.vs/
+*.user
+*.lscache
 ~$*
 *~
 CodeCoverage/

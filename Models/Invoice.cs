@@ -1,29 +1,17 @@
-using System;
-using System.Collections.Generic;
-
 namespace SWP_BE.Models;
 
-public partial class Invoice
+public sealed class Invoice
 {
     public Guid Id { get; set; }
-
     public Guid UserId { get; set; }
-
     public Guid PaymentTransactionId { get; set; }
-
-    public string InvoiceNumber { get; set; } = null!;
-
+    public string InvoiceNumber { get; set; } = string.Empty;
     public decimal Amount { get; set; }
-
-    public string Currency { get; set; } = null!;
-
-    public DateTime IssuedAt { get; set; }
-
+    public string Currency { get; set; } = string.Empty;
+    public DateTimeOffset IssuedAt { get; set; }
     public string? PdfUrl { get; set; }
+    public DateTimeOffset CreatedAt { get; set; }
 
-    public DateTime CreatedAt { get; set; }
-
-    public virtual PaymentTransaction PaymentTransaction { get; set; } = null!;
-
-    public virtual User User { get; set; } = null!;
+    public User User { get; set; } = null!;
+    public PaymentTransaction PaymentTransaction { get; set; } = null!;
 }
