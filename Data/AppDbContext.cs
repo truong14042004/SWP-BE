@@ -7,10 +7,26 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
 {
     public DbSet<User> Users => Set<User>();
     public DbSet<Skill> Skills => Set<Skill>();
+    public DbSet<CareerRole> CareerRoles => Set<CareerRole>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<CareerRole>(entity =>
+        {
+            entity.ToTable("career_roles");
+
+            entity.HasIndex(e => e.IsActive, "IX_career_roles_IsActive");
+
+            entity.HasIndex(e => e.Name, "IX_career_roles_Name").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Description).HasMaxLength(2000);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.Level).HasMaxLength(50);
+            entity.Property(e => e.Name).HasMaxLength(150);
+        });
 
         modelBuilder.Entity<Skill>(entity =>
         {
