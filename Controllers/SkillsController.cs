@@ -130,4 +130,25 @@ public class SkillsController : ControllerBase
             skill.UpdatedAt
         });
     }
+
+    [HttpDelete("{id}")]
+    public async Task<IActionResult> DeleteSkill(Guid id)
+    {
+        var skill = await _context.Skills.FindAsync(id);
+        if (skill == null)
+        {
+            return NotFound(new { message = "Skill not found." });
+        }
+
+        try
+        {
+            _context.Skills.Remove(skill);
+            await _context.SaveChangesAsync();
+            return NoContent();
+        }
+        catch (DbUpdateException)
+        {
+            return BadRequest(new { message = "Cannot delete this skill because it is being referenced by other records." });
+        }
+    }
 }
