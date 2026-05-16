@@ -34,4 +34,29 @@ public class CareerRolesController : ControllerBase
 
         return Ok(roles);
     }
+
+    [HttpGet("{id}")]
+    public async Task<IActionResult> GetCareerRole(Guid id)
+    {
+        var role = await _context.CareerRoles
+            .Where(r => r.Id == id)
+            .Select(r => new
+            {
+                r.Id,
+                r.Name,
+                r.Description,
+                r.Level,
+                r.IsActive,
+                r.CreatedAt,
+                r.UpdatedAt
+            })
+            .FirstOrDefaultAsync();
+
+        if (role == null)
+        {
+            return NotFound(new { message = "Career role not found." });
+        }
+
+        return Ok(role);
+    }
 }
