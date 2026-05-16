@@ -6,10 +6,28 @@ namespace SWP_BE.Data;
 public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbContext(options)
 {
     public DbSet<User> Users => Set<User>();
+    public DbSet<Skill> Skills => Set<Skill>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<Skill>(entity =>
+        {
+            entity.ToTable("skills");
+
+            entity.HasIndex(e => e.Category, "IX_skills_Category");
+
+            entity.HasIndex(e => e.IsActive, "IX_skills_IsActive");
+
+            entity.HasIndex(e => new { e.Name, e.Category }, "IX_skills_Name_Category").IsUnique();
+
+            entity.Property(e => e.Id).ValueGeneratedNever();
+            entity.Property(e => e.Category).HasMaxLength(80);
+            entity.Property(e => e.Description).HasMaxLength(1000);
+            entity.Property(e => e.IsActive).HasDefaultValue(true);
+            entity.Property(e => e.Name).HasMaxLength(150);
+        });
 
         modelBuilder.Entity<User>(entity =>
         {
