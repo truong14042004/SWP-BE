@@ -1,4 +1,5 @@
 using System.Text;
+using System.Diagnostics;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
@@ -11,8 +12,11 @@ using SWP_BE.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
-var port = Environment.GetEnvironmentVariable("PORT") ?? "8080";
-builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+var port = Environment.GetEnvironmentVariable("PORT");
+if (!string.IsNullOrWhiteSpace(port))
+{
+    builder.WebHost.UseUrls($"http://0.0.0.0:{port}");
+}
 
 builder.Services.Configure<GoogleAuthOptions>(
     builder.Configuration.GetSection(GoogleAuthOptions.SectionName));
@@ -20,6 +24,12 @@ builder.Services.Configure<JwtOptions>(
     builder.Configuration.GetSection(JwtOptions.SectionName));
 builder.Services.Configure<SmtpOptions>(
     builder.Configuration.GetSection(SmtpOptions.SectionName));
+builder.Services.Configure<AiOptions>(
+    builder.Configuration.GetSection(AiOptions.SectionName));
+builder.Services.Configure<GithubOptions>(
+    builder.Configuration.GetSection(GithubOptions.SectionName));
+builder.Services.Configure<GithubOAuthOptions>(
+    builder.Configuration.GetSection(GithubOAuthOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -29,6 +39,8 @@ builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddHttpClient();
+builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();
@@ -186,4 +198,33 @@ app.MapGet("/health/db", async (AppDbContext dbContext, CancellationToken cancel
 });
 app.MapControllers();
 
+if (app.Environment.IsDevelopment())
+{
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var urls = app.Urls
+            .Where(url => url.Contains("localhost", StringComparison.OrdinalIgnoreCase)
+                || url.Contains("127.0.0.1", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+        var url = urls.FirstOrDefault() ?? "http://localhost:5019";
+        TryOpenBrowser($"{url.TrimEnd('/')}/swagger");
+    });
+}
+
 app.Run();
+
+static void TryOpenBrowser(string url)
+{
+    try
+    {
+        Process.Start(new ProcessStartInfo
+        {
+            FileName = url,
+            UseShellExecute = true
+        });
+    }
+    catch
+    {
+        // Opening a browser is a local-development convenience only.
+    }
+}

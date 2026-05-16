@@ -24,7 +24,7 @@ public sealed class User
 
     public DateTimeOffset? EmailVerifiedAt { get; set; }
 
-    public string Role { get; set; } = "User";
+    public string Role { get; set; } = UserRoles.Student;
 
     public bool IsActive { get; set; } = true;
 

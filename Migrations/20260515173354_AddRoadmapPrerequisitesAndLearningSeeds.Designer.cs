@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SWP_BE.Data;
@@ -11,9 +12,11 @@ using SWP_BE.Data;
 namespace SWP_BE.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260515173354_AddRoadmapPrerequisitesAndLearningSeeds")]
+    partial class AddRoadmapPrerequisitesAndLearningSeeds
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -247,80 +250,6 @@ namespace SWP_BE.Migrations
                     b.HasIndex("IsActive");
 
                     b.ToTable("coupons", (string)null);
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.GithubConnection", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<string>("AccessToken")
-                        .IsRequired()
-                        .HasColumnType("text");
-
-                    b.Property<DateTimeOffset>("ConnectedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<long?>("GithubUserId")
-                        .HasColumnType("bigint");
-
-                    b.Property<string>("GithubUsername")
-                        .IsRequired()
-                        .HasMaxLength(100)
-                        .HasColumnType("character varying(100)");
-
-                    b.Property<string>("Scope")
-                        .HasMaxLength(500)
-                        .HasColumnType("character varying(500)");
-
-                    b.Property<string>("TokenType")
-                        .IsRequired()
-                        .HasMaxLength(50)
-                        .HasColumnType("character varying(50)");
-
-                    b.Property<DateTimeOffset>("UpdatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("GithubUsername");
-
-                    b.HasIndex("UserId")
-                        .IsUnique();
-
-                    b.ToTable("github_connections", (string)null);
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.GithubOAuthState", b =>
-                {
-                    b.Property<string>("State")
-                        .HasMaxLength(128)
-                        .HasColumnType("character varying(128)");
-
-                    b.Property<DateTimeOffset>("CreatedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<DateTimeOffset>("ExpiresAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<string>("ReturnUrl")
-                        .HasMaxLength(2048)
-                        .HasColumnType("character varying(2048)");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("State");
-
-                    b.HasIndex("ExpiresAt");
-
-                    b.HasIndex("UserId");
-
-                    b.ToTable("github_oauth_states", (string)null);
                 });
 
             modelBuilder.Entity("SWP_BE.Models.GithubRepository", b =>
@@ -2348,28 +2277,6 @@ namespace SWP_BE.Migrations
                     b.Navigation("SkillGapReport");
 
                     b.Navigation("Student");
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.GithubConnection", b =>
-                {
-                    b.HasOne("SWP_BE.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.GithubOAuthState", b =>
-                {
-                    b.HasOne("SWP_BE.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SWP_BE.Models.GithubRepository", b =>
