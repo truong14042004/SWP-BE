@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
+using Google.Cloud.Storage.V1;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Options;
@@ -30,6 +31,8 @@ builder.Services.Configure<GithubOptions>(
     builder.Configuration.GetSection(GithubOptions.SectionName));
 builder.Services.Configure<GithubOAuthOptions>(
     builder.Configuration.GetSection(GithubOAuthOptions.SectionName));
+builder.Services.Configure<StorageOptions>(
+    builder.Configuration.GetSection(StorageOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -39,6 +42,8 @@ builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
+builder.Services.AddSingleton(_ => StorageClient.Create());
+builder.Services.AddScoped<IFileStorageService, GoogleCloudStorageService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
 
@@ -168,10 +173,17 @@ app.Use(async (context, next) =>
                 context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
             }
 
-            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.StatusCode = exception switch
+            {
+                InvalidOperationException => StatusCodes.Status400BadRequest,
+                UnauthorizedAccessException => StatusCodes.Status401Unauthorized,
+                _ => StatusCodes.Status500InternalServerError
+            };
             await context.Response.WriteAsJsonAsync(new
             {
-                message = "Server error.",
+                message = context.Response.StatusCode == StatusCodes.Status500InternalServerError
+                    ? "Server error."
+                    : exception.Message,
                 detail = exception.Message,
                 type = exception.GetType().Name
             });

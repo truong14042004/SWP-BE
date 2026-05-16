@@ -177,6 +177,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
                 project.Title,
                 project.Description,
                 project.TechStackJson,
+                project.ImageUrl,
                 project.DemoUrl,
                 project.SourceUrl,
                 project.OrderIndex))
@@ -257,6 +258,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
                 TechStackJson = string.IsNullOrWhiteSpace(request.TechStackJson)
                     ? repository?.TechStackJson
                     : request.TechStackJson.Trim(),
+                ImageUrl = request.ImageUrl?.Trim(),
                 DemoUrl = request.DemoUrl?.Trim(),
                 SourceUrl = string.IsNullOrWhiteSpace(request.SourceUrl)
                     ? repository?.RepoUrl
@@ -318,6 +320,7 @@ public sealed record SavePortfolioProjectRequest(
     string? Title,
     string? Description,
     string? TechStackJson,
+    string? ImageUrl,
     string? DemoUrl,
     string? SourceUrl,
     int? OrderIndex);
@@ -340,6 +343,7 @@ public sealed record PortfolioProjectResponse(
     string Title,
     string? Description,
     string? TechStackJson,
+    string? ImageUrl,
     string? DemoUrl,
     string? SourceUrl,
     int OrderIndex);

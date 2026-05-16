@@ -8,6 +8,7 @@ public sealed class PortfolioProject
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string? TechStackJson { get; set; }
+    public string? ImageUrl { get; set; }
     public string? DemoUrl { get; set; }
     public string? SourceUrl { get; set; }
     public int OrderIndex { get; set; }
