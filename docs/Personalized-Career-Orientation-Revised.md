@@ -798,773 +798,471 @@ Premium feature nên khóa bằng subscription:
 - Skill readiness score nâng cao.
 - Market Pulse nâng cao.
 
-## 10. Database Chuẩn Đề Xuất
+## 10. Database Chuẩn Hiện Tại
 
-### 10.1 Danh Sách Bảng Chính
+Phần này mô tả schema đang được triển khai bằng Entity Framework Core migration trong backend hiện tại. Database dùng PostgreSQL, kiểu thời gian chuẩn là `timestamptz`, khóa chính dùng `uuid`.
 
-```text
-User
-StudentProfile
-Skill
-UserSkill
-CareerRole
-RoleSkillRequirement
-SkillGapReport
-SkillGapReportItem
-Roadmap
-RoadmapNode
-LearningResource
-MentorSession
-GithubRepository
-GithubRepositorySkill
-Portfolio
-PortfolioProject
-SubscriptionPlan
-Subscription
-PaymentTransaction
-PaymentWebhookEvent
-Invoice
-Coupon
-MentorFeedback
-CounselorFeedback
-```
+### 10.1 Danh Sách Bảng Nghiệp Vụ
 
-### 10.2 User
-
-Lưu thông tin tài khoản, authentication và trạng thái người dùng.
+Hiện tại hệ thống có 26 bảng nghiệp vụ:
 
 ```text
-id
-username
-email
-fullName
-avatarUrl
-googleSubject
-passwordHash
-isEmailVerified
-emailVerificationOtpHash
-emailVerificationOtpExpiresAt
-emailVerifiedAt
-role
-isActive
-createdAt
-updatedAt
+users
+student_profiles
+skills
+user_skills
+career_roles
+role_skill_requirements
+skill_gap_reports
+skill_gap_report_items
+roadmaps
+roadmap_nodes
+learning_resources
+mentor_sessions
+github_repositories
+github_repository_skills
+github_connections
+github_oauth_states
+portfolios
+portfolio_projects
+subscription_plans
+subscriptions
+payment_transactions
+payment_webhook_events
+invoices
+coupons
+mentor_feedbacks
+counselor_feedbacks
 ```
 
-Ghi chú:
+Ngoài ra EF Core tự tạo bảng hệ thống `__EFMigrationsHistory` để lưu lịch sử migration.
 
-- Không lưu password plaintext.
-- Không lưu OTP plaintext.
-- `role`: `Student`, `Admin`, `Counselor`, `Mentor`.
+### 10.2 Quy Ước Kiểu Dữ Liệu
 
-### 10.3 StudentProfile
-
-```text
-id
-userId
-school
-major
-year
-gpa
-targetRoleId
-githubUsername
-careerGoal
-preferredLearningHoursPerWeek
-createdAt
-updatedAt
-```
-
-### 10.4 Skill
-
-```text
-id
-name
-category
-description
-isActive
-createdAt
-updatedAt
-```
-
-### 10.5 UserSkill
-
-```text
-id
-userId
-skillId
-level
-evidenceUrl
-evidenceType
-isVerified
-verifiedByUserId
-verifiedAt
-createdAt
-updatedAt
-```
-
-### 10.6 CareerRole
-
-```text
-id
-name
-description
-level
-isActive
-createdAt
-updatedAt
-```
-
-### 10.7 RoleSkillRequirement
-
-```text
-id
-careerRoleId
-skillId
-requiredLevel
-priority
-weight
-createdAt
-updatedAt
-```
-
-### 10.8 SkillGapReport
-
-```text
-id
-userId
-careerRoleId
-matchScore
-summary
-createdAt
-updatedAt
-```
-
-### 10.9 SkillGapReportItem
-
-```text
-id
-skillGapReportId
-skillId
-currentLevel
-requiredLevel
-status
-priority
-recommendation
-createdAt
-```
-
-### 10.10 Roadmap
-
-```text
-id
-userId
-careerRoleId
-skillGapReportId
-title
-description
-status
-progress
-createdAt
-updatedAt
-```
-
-### 10.11 RoadmapNode
-
-```text
-id
-roadmapId
-skillId
-learningResourceId
-title
-description
-nodeType
-status
-orderIndex
-estimatedHours
-priority
-createdAt
-updatedAt
-```
-
-### 10.12 LearningResource
-
-```text
-id
-skillId
-title
-url
-resourceType
-difficulty
-estimatedHours
-isActive
-createdAt
-updatedAt
-```
-
-### 10.13 MentorSession
-
-```text
-id
-userId
-question
-answer
-contextJson
-model
-tokensUsed
-createdAt
-```
-
-### 10.14 GithubRepository
-
-```text
-id
-userId
-repoName
-repoUrl
-description
-mainLanguage
-readmeContent
-aiSummary
-techStackJson
-qualityScore
-lastSyncedAt
-createdAt
-updatedAt
-```
-
-### 10.15 GithubRepositorySkill
-
-```text
-id
-githubRepositoryId
-skillId
-confidenceScore
-evidenceText
-createdAt
-```
-
-### 10.16 Portfolio
-
-```text
-id
-userId
-slug
-title
-bio
-theme
-isPublished
-publishedAt
-createdAt
-updatedAt
-```
-
-### 10.17 PortfolioProject
-
-```text
-id
-portfolioId
-githubRepositoryId
-title
-description
-techStackJson
-demoUrl
-sourceUrl
-orderIndex
-createdAt
-updatedAt
-```
-
-### 10.18 SubscriptionPlan
-
-```text
-id
-name
-description
-price
-currency
-billingCycle
-featuresJson
-isActive
-createdAt
-updatedAt
-```
-
-### 10.19 Subscription
-
-```text
-id
-userId
-planId
-status
-startedAt
-expiredAt
-cancelledAt
-provider
-providerSubscriptionId
-createdAt
-updatedAt
-```
-
-### 10.20 PaymentTransaction
-
-```text
-id
-userId
-subscriptionId
-planId
-amount
-currency
-status
-provider
-providerTransactionId
-checkoutUrl
-paidAt
-createdAt
-updatedAt
-```
-
-### 10.21 PaymentWebhookEvent
-
-```text
-id
-provider
-eventId
-eventType
-payloadJson
-processedAt
-createdAt
-```
-
-### 10.22 Coupon
-
-```text
-id
-code
-discountType
-discountValue
-maxUsage
-usedCount
-expiredAt
-isActive
-createdAt
-updatedAt
-```
-
-### 10.23 MentorFeedback
-
-```text
-id
-mentorId
-studentId
-portfolioId
-githubRepositoryId
-comment
-rating
-createdAt
-updatedAt
-```
-
-### 10.24 CounselorFeedback
-
-```text
-id
-counselorId
-studentId
-roadmapId
-skillGapReportId
-comment
-createdAt
-updatedAt
-```
-
-### 10.25 Database Attributes Chi Tiết
-
-Phần này chuẩn hóa thuộc tính theo hướng có thể chuyển trực tiếp sang Entity Framework Core migration. Quy ước:
-
-- `uuid`: khóa chính/khóa ngoại.
-- `timestamptz`: `timestamp with time zone`.
-- `jsonb`: dữ liệu JSON cần lưu linh hoạt.
+- `uuid`: khóa chính hoặc khóa ngoại.
+- `timestamptz`: thời gian có timezone, map với `DateTimeOffset`.
+- `jsonb`: dữ liệu JSON linh hoạt.
 - `varchar(n)`: chuỗi có giới hạn độ dài.
 - `text`: nội dung dài.
 - `decimal(p,s)`: số thập phân.
+- `boolean`: true/false.
 
-#### User
+### 10.3 Cấu Trúc Chi Tiết Các Bảng
 
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| username | varchar(100) | Yes | Unique, index |
-| email | varchar(256) | No | Unique, index |
-| fullName | varchar(200) | No |  |
-| avatarUrl | varchar(1024) | Yes |  |
-| googleSubject | varchar(128) | Yes | Unique, index |
-| passwordHash | varchar(512) | Yes |  |
-| isEmailVerified | boolean | No | default false |
-| emailVerificationOtpHash | varchar(512) | Yes |  |
-| emailVerificationOtpExpiresAt | timestamptz | Yes |  |
-| emailVerifiedAt | timestamptz | Yes |  |
-| role | varchar(50) | No | default Student, index |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### StudentProfile
+#### users
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, Unique, index |
-| school | varchar(200) | Yes |  |
-| major | varchar(200) | Yes |  |
-| year | int | Yes | check 1-8 |
-| gpa | decimal(4,2) | Yes | check >= 0 |
-| targetRoleId | uuid | Yes | FK CareerRole.id, index |
-| githubUsername | varchar(100) | Yes | index |
-| careerGoal | varchar(1000) | Yes |  |
-| preferredLearningHoursPerWeek | int | Yes | check >= 0 |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| Username | varchar(100) | Yes | Unique |
+| Email | varchar(256) | No | Unique |
+| FullName | varchar(200) | No |  |
+| AvatarUrl | varchar(1024) | Yes |  |
+| GoogleSubject | varchar(128) | Yes | Unique |
+| PasswordHash | varchar(512) | Yes |  |
+| IsEmailVerified | boolean | No |  |
+| EmailVerificationOtpHash | varchar(512) | Yes |  |
+| EmailVerificationOtpExpiresAt | timestamptz | Yes |  |
+| EmailVerifiedAt | timestamptz | Yes |  |
+| Role | varchar(50) | No | default `Student`, index, check `Student/Admin/AcademicCounselor/IndustryMentor` |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### Skill
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| name | varchar(150) | No | Unique with category |
-| category | varchar(80) | No | Unique with name, index |
-| description | varchar(1000) | Yes |  |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### UserSkill
+#### student_profiles
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, Unique with skillId, index |
-| skillId | uuid | No | FK Skill.id, Unique with userId, index |
-| level | varchar(30) | No | Beginner/Intermediate/Advanced/Verified, index |
-| evidenceUrl | varchar(1024) | Yes |  |
-| evidenceType | varchar(50) | Yes | GitHub/Certificate/Portfolio/Other |
-| isVerified | boolean | No | default false, index |
-| verifiedByUserId | uuid | Yes | FK User.id |
-| verifiedAt | timestamptz | Yes |  |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, unique |
+| School | varchar(200) | Yes |  |
+| Major | varchar(200) | Yes |  |
+| Year | int | Yes | check 1-8 |
+| Gpa | decimal(4,2) | Yes | check >= 0 |
+| TargetRoleId | uuid | Yes | FK `career_roles.Id`, index |
+| GithubUsername | varchar(100) | Yes | index |
+| CareerGoal | varchar(1000) | Yes |  |
+| PreferredLearningHoursPerWeek | int | Yes | check >= 0 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### CareerRole
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| name | varchar(150) | No | Unique |
-| description | varchar(2000) | Yes |  |
-| level | varchar(50) | Yes | Internship/Fresher/Junior |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### RoleSkillRequirement
+#### skills
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| careerRoleId | uuid | No | FK CareerRole.id, Unique with skillId, index |
-| skillId | uuid | No | FK Skill.id, Unique with careerRoleId, index |
-| requiredLevel | varchar(30) | No | Beginner/Intermediate/Advanced/Verified |
-| priority | int | No | check 1-5, index |
-| weight | decimal(5,2) | No | default 1.00, check > 0 |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| Name | varchar(150) | No | unique with `Category` |
+| Category | varchar(80) | No | unique with `Name`, index |
+| Description | varchar(1000) | Yes |  |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### SkillGapReport
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index |
-| careerRoleId | uuid | No | FK CareerRole.id, index |
-| matchScore | decimal(5,2) | No | check 0-100 |
-| summary | varchar(4000) | Yes |  |
-| createdAt | timestamptz | No | index with userId desc |
-| updatedAt | timestamptz | No |  |
-
-#### SkillGapReportItem
+#### user_skills
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| skillGapReportId | uuid | No | FK SkillGapReport.id, Unique with skillId, index |
-| skillId | uuid | No | FK Skill.id, Unique with skillGapReportId, index |
-| currentLevel | varchar(30) | Yes | null if Missing |
-| requiredLevel | varchar(30) | No |  |
-| status | varchar(30) | No | Matched/Weak/Missing/NotVerified, index |
-| priority | int | No | check 1-5, index |
-| recommendation | varchar(2000) | Yes |  |
-| createdAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, unique with `SkillId` |
+| SkillId | uuid | No | FK `skills.Id`, unique with `UserId`, index |
+| Level | varchar(30) | No | index |
+| EvidenceUrl | varchar(1024) | Yes |  |
+| EvidenceType | varchar(50) | Yes |  |
+| IsVerified | boolean | No | default false, index |
+| VerifiedByUserId | uuid | Yes | FK `users.Id` |
+| VerifiedAt | timestamptz | Yes |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### Roadmap
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index |
-| careerRoleId | uuid | No | FK CareerRole.id, index |
-| skillGapReportId | uuid | Yes | FK SkillGapReport.id |
-| title | varchar(200) | No |  |
-| description | varchar(2000) | Yes |  |
-| status | varchar(30) | No | Draft/Active/Completed/Archived, index |
-| progress | decimal(5,2) | No | default 0, check 0-100 |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### RoadmapNode
+#### career_roles
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| roadmapId | uuid | No | FK Roadmap.id, Unique with orderIndex, index |
-| skillId | uuid | Yes | FK Skill.id |
-| learningResourceId | uuid | Yes | FK LearningResource.id |
-| title | varchar(200) | No |  |
-| description | varchar(2000) | Yes |  |
-| nodeType | varchar(30) | No | Skill/Project/Reading/Practice/Assessment |
-| status | varchar(30) | No | NotStarted/InProgress/Completed/Verified/NeedReview, index |
-| orderIndex | int | No | Unique with roadmapId |
-| estimatedHours | int | Yes | check >= 0 |
-| priority | int | No | check 1-5 |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| Name | varchar(150) | No | Unique |
+| Description | varchar(2000) | Yes |  |
+| Level | varchar(50) | Yes |  |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### LearningResource
+#### role_skill_requirements
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| skillId | uuid | Yes | FK Skill.id, index |
-| title | varchar(200) | No |  |
-| url | varchar(1024) | No |  |
-| resourceType | varchar(50) | No | Course/Article/Video/Book/Project/Docs |
-| difficulty | varchar(50) | Yes | Beginner/Intermediate/Advanced |
-| estimatedHours | int | Yes | check >= 0 |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| CareerRoleId | uuid | No | FK `career_roles.Id`, unique with `SkillId` |
+| SkillId | uuid | No | FK `skills.Id`, unique with `CareerRoleId`, index |
+| RequiredLevel | varchar(30) | No |  |
+| Priority | int | No | check 1-5, index |
+| Weight | decimal(5,2) | No | default 1.00, check > 0 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### MentorSession
+#### skill_gap_reports
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index with createdAt desc |
-| question | text | No |  |
-| answer | text | No |  |
-| contextJson | jsonb | Yes |  |
-| model | varchar(100) | Yes |  |
-| tokensUsed | int | Yes | check >= 0 |
-| createdAt | timestamptz | No | index with userId desc |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `CreatedAt` desc |
+| CareerRoleId | uuid | No | FK `career_roles.Id`, index |
+| MatchScore | decimal(5,2) | No | check 0-100 |
+| Summary | varchar(4000) | Yes |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### GithubRepository
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, Unique with repoUrl, index |
-| repoName | varchar(200) | No |  |
-| repoUrl | varchar(1024) | No | Unique with userId |
-| description | varchar(2000) | Yes |  |
-| mainLanguage | varchar(100) | Yes | index |
-| readmeContent | text | Yes |  |
-| aiSummary | text | Yes |  |
-| techStackJson | jsonb | Yes |  |
-| qualityScore | decimal(5,2) | Yes | check 0-100 |
-| lastSyncedAt | timestamptz | Yes |  |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### GithubRepositorySkill
+#### skill_gap_report_items
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| githubRepositoryId | uuid | No | FK GithubRepository.id, Unique with skillId, index |
-| skillId | uuid | No | FK Skill.id, Unique with githubRepositoryId, index |
-| confidenceScore | decimal(5,2) | Yes | check 0-100 |
-| evidenceText | varchar(2000) | Yes |  |
-| createdAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| SkillGapReportId | uuid | No | FK `skill_gap_reports.Id`, unique with `SkillId` |
+| SkillId | uuid | No | FK `skills.Id`, unique with `SkillGapReportId`, index |
+| CurrentLevel | varchar(30) | Yes |  |
+| RequiredLevel | varchar(30) | No |  |
+| Status | varchar(30) | No | index |
+| Priority | int | No | check 1-5, index |
+| Recommendation | varchar(2000) | Yes |  |
+| CreatedAt | timestamptz | No |  |
 
-#### Portfolio
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index |
-| slug | varchar(150) | No | Unique, index |
-| title | varchar(200) | No |  |
-| bio | varchar(2000) | Yes |  |
-| theme | varchar(80) | Yes | default Default |
-| isPublished | boolean | No | default false, index |
-| publishedAt | timestamptz | Yes |  |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### PortfolioProject
+#### roadmaps
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| portfolioId | uuid | No | FK Portfolio.id, index with orderIndex |
-| githubRepositoryId | uuid | Yes | FK GithubRepository.id |
-| title | varchar(200) | No |  |
-| description | varchar(3000) | Yes |  |
-| techStackJson | jsonb | Yes |  |
-| demoUrl | varchar(1024) | Yes |  |
-| sourceUrl | varchar(1024) | Yes |  |
-| orderIndex | int | No | default 0, index with portfolioId |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `Status` |
+| CareerRoleId | uuid | No | FK `career_roles.Id`, index |
+| SkillGapReportId | uuid | Yes | FK `skill_gap_reports.Id` |
+| Title | varchar(200) | No |  |
+| Description | varchar(2000) | Yes |  |
+| Status | varchar(30) | No | default `Draft` |
+| Progress | decimal(5,2) | No | default 0, check 0-100 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### SubscriptionPlan
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| name | varchar(100) | No | Unique |
-| description | varchar(2000) | Yes |  |
-| price | decimal(18,2) | No | default 0 |
-| currency | varchar(10) | No | VND/USD |
-| billingCycle | varchar(30) | No | Monthly/Yearly/OneTime |
-| featuresJson | jsonb | Yes |  |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
-
-#### Subscription
+#### roadmap_nodes
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index with status |
-| planId | uuid | No | FK SubscriptionPlan.id |
-| status | varchar(30) | No | Pending/Active/Cancelled/Expired, index with userId |
-| startedAt | timestamptz | Yes |  |
-| expiredAt | timestamptz | Yes | index |
-| cancelledAt | timestamptz | Yes |  |
-| provider | varchar(50) | Yes | Stripe/PayOS/VNPay/MoMo |
-| providerSubscriptionId | varchar(200) | Yes | index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| RoadmapId | uuid | No | FK `roadmaps.Id`, unique with `OrderIndex` |
+| SkillId | uuid | Yes | FK `skills.Id`, index |
+| LearningResourceId | uuid | Yes | FK `learning_resources.Id`, index |
+| PrerequisiteNodeId | uuid | Yes | self-FK `roadmap_nodes.Id`, index |
+| Title | varchar(200) | No |  |
+| Description | varchar(2000) | Yes |  |
+| NodeType | varchar(30) | No | Skill/Project/Reading/Practice/Assessment |
+| Status | varchar(30) | No | default `NotStarted`, index |
+| OrderIndex | int | No | unique with `RoadmapId` |
+| EstimatedHours | int | Yes | check >= 0 |
+| Priority | int | No | check 1-5 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### PaymentTransaction
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index with createdAt desc |
-| subscriptionId | uuid | Yes | FK Subscription.id |
-| planId | uuid | No | FK SubscriptionPlan.id |
-| amount | decimal(18,2) | No |  |
-| currency | varchar(10) | No |  |
-| status | varchar(30) | No | Created/Pending/Succeeded/Failed/Cancelled/Refunded, index |
-| provider | varchar(50) | No | index |
-| providerTransactionId | varchar(200) | Yes | Unique, index |
-| checkoutUrl | varchar(2048) | Yes |  |
-| paidAt | timestamptz | Yes |  |
-| createdAt | timestamptz | No | index with userId desc |
-| updatedAt | timestamptz | No |  |
-
-#### PaymentWebhookEvent
+#### learning_resources
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| provider | varchar(50) | No | Unique with eventId, index |
-| eventId | varchar(200) | No | Unique with provider |
-| eventType | varchar(100) | No | index |
-| payloadJson | jsonb | No |  |
-| processedAt | timestamptz | Yes |  |
-| createdAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| SkillId | uuid | Yes | FK `skills.Id`, index |
+| Title | varchar(200) | No |  |
+| Url | varchar(1024) | No |  |
+| ResourceType | varchar(50) | No |  |
+| Difficulty | varchar(50) | Yes |  |
+| EstimatedHours | int | Yes | check >= 0 |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### Invoice
-
-| Field | Type | Null | Key / Index / Default |
-|---|---:|---:|---|
-| id | uuid | No | PK |
-| userId | uuid | No | FK User.id, index |
-| paymentTransactionId | uuid | No | FK PaymentTransaction.id, Unique |
-| invoiceNumber | varchar(100) | No | Unique |
-| amount | decimal(18,2) | No |  |
-| currency | varchar(10) | No |  |
-| issuedAt | timestamptz | No |  |
-| pdfUrl | varchar(1024) | Yes |  |
-| createdAt | timestamptz | No |  |
-
-#### Coupon
+#### mentor_sessions
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| code | varchar(80) | No | Unique, index |
-| discountType | varchar(30) | No | Percent/Fixed |
-| discountValue | decimal(18,2) | No |  |
-| maxUsage | int | Yes |  |
-| usedCount | int | No | default 0 |
-| expiredAt | timestamptz | Yes | index |
-| isActive | boolean | No | default true, index |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `CreatedAt` desc |
+| Question | text | No |  |
+| Answer | text | No |  |
+| ContextJson | jsonb | Yes |  |
+| Model | varchar(100) | Yes |  |
+| TokensUsed | int | Yes | check >= 0 |
+| CreatedAt | timestamptz | No |  |
 
-#### MentorFeedback
+#### github_repositories
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| mentorId | uuid | No | FK User.id, index |
-| studentId | uuid | No | FK User.id, index |
-| portfolioId | uuid | Yes | FK Portfolio.id |
-| githubRepositoryId | uuid | Yes | FK GithubRepository.id |
-| comment | text | No |  |
-| rating | int | Yes | check 1-5 |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, unique with `RepoUrl` |
+| RepoName | varchar(200) | No |  |
+| RepoUrl | varchar(1024) | No | unique with `UserId` |
+| Description | varchar(2000) | Yes |  |
+| MainLanguage | varchar(100) | Yes | index |
+| ReadmeContent | text | Yes |  |
+| AiSummary | text | Yes |  |
+| TechStackJson | jsonb | Yes |  |
+| QualityScore | decimal(5,2) | Yes | check 0-100 |
+| LastSyncedAt | timestamptz | Yes |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
 
-#### CounselorFeedback
+#### github_repository_skills
 
 | Field | Type | Null | Key / Index / Default |
 |---|---:|---:|---|
-| id | uuid | No | PK |
-| counselorId | uuid | No | FK User.id, index |
-| studentId | uuid | No | FK User.id, index |
-| roadmapId | uuid | Yes | FK Roadmap.id |
-| skillGapReportId | uuid | Yes | FK SkillGapReport.id |
-| comment | text | No |  |
-| createdAt | timestamptz | No |  |
-| updatedAt | timestamptz | No |  |
+| Id | uuid | No | PK |
+| GithubRepositoryId | uuid | No | FK `github_repositories.Id`, unique with `SkillId` |
+| SkillId | uuid | No | FK `skills.Id`, unique with `GithubRepositoryId`, index |
+| ConfidenceScore | decimal(5,2) | Yes | check 0-100 |
+| EvidenceText | varchar(2000) | Yes |  |
+| CreatedAt | timestamptz | No |  |
 
-### 10.26 Index Và Constraint Tổng Hợp
+#### github_connections
 
-| Bảng | Index / Constraint |
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, unique |
+| GithubUserId | bigint | Yes |  |
+| GithubUsername | varchar(100) | No | index |
+| AccessToken | text | No | GitHub OAuth token |
+| TokenType | varchar(50) | No | default `bearer` |
+| Scope | varchar(500) | Yes | OAuth scopes |
+| ConnectedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+Ghi chú: `AccessToken` là dữ liệu nhạy cảm, chỉ dùng ở backend để gọi GitHub API, không trả về FE và không ghi log.
+
+#### github_oauth_states
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| State | varchar(128) | No | PK |
+| UserId | uuid | No | FK `users.Id`, index |
+| ReturnUrl | varchar(2048) | Yes |  |
+| ExpiresAt | timestamptz | No | index |
+| CreatedAt | timestamptz | No |  |
+
+#### portfolios
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `IsPublished` |
+| Slug | varchar(150) | No | Unique |
+| Title | varchar(200) | No |  |
+| Bio | varchar(2000) | Yes |  |
+| Theme | varchar(80) | Yes | default `Default` |
+| IsPublished | boolean | No | default false |
+| PublishedAt | timestamptz | Yes |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### portfolio_projects
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| PortfolioId | uuid | No | FK `portfolios.Id`, index with `OrderIndex` |
+| GithubRepositoryId | uuid | Yes | FK `github_repositories.Id`, index |
+| Title | varchar(200) | No |  |
+| Description | varchar(3000) | Yes |  |
+| TechStackJson | jsonb | Yes |  |
+| ImageUrl | varchar(1024) | Yes | object path trong private bucket |
+| DemoUrl | varchar(1024) | Yes |  |
+| SourceUrl | varchar(1024) | Yes |  |
+| OrderIndex | int | No | default 0 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### subscription_plans
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| Name | varchar(100) | No | Unique |
+| Description | varchar(2000) | Yes |  |
+| Price | decimal(18,2) | No | default 0 |
+| Currency | varchar(10) | No |  |
+| BillingCycle | varchar(30) | No |  |
+| FeaturesJson | jsonb | Yes |  |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### subscriptions
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `Status` |
+| PlanId | uuid | No | FK `subscription_plans.Id` |
+| Status | varchar(30) | No | index |
+| StartedAt | timestamptz | Yes |  |
+| ExpiredAt | timestamptz | Yes | index |
+| CancelledAt | timestamptz | Yes |  |
+| Provider | varchar(50) | Yes |  |
+| ProviderSubscriptionId | varchar(200) | Yes | index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### payment_transactions
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index with `CreatedAt` desc |
+| SubscriptionId | uuid | Yes | FK `subscriptions.Id`, index |
+| PlanId | uuid | No | FK `subscription_plans.Id`, index |
+| Amount | decimal(18,2) | No |  |
+| Currency | varchar(10) | No |  |
+| Status | varchar(30) | No | index |
+| Provider | varchar(50) | No | index |
+| ProviderTransactionId | varchar(200) | Yes | Unique |
+| CheckoutUrl | varchar(2048) | Yes |  |
+| PaidAt | timestamptz | Yes |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### payment_webhook_events
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| Provider | varchar(50) | No | unique with `EventId` |
+| EventId | varchar(200) | No | unique with `Provider` |
+| EventType | varchar(100) | No | index |
+| PayloadJson | jsonb | No |  |
+| ProcessedAt | timestamptz | Yes |  |
+| CreatedAt | timestamptz | No |  |
+
+#### invoices
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| UserId | uuid | No | FK `users.Id`, index |
+| PaymentTransactionId | uuid | No | FK `payment_transactions.Id`, unique |
+| InvoiceNumber | varchar(100) | No | Unique |
+| Amount | decimal(18,2) | No |  |
+| Currency | varchar(10) | No |  |
+| IssuedAt | timestamptz | No |  |
+| PdfUrl | varchar(1024) | Yes |  |
+| CreatedAt | timestamptz | No |  |
+
+#### coupons
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| Code | varchar(80) | No | Unique |
+| DiscountType | varchar(30) | No |  |
+| DiscountValue | decimal(18,2) | No |  |
+| MaxUsage | int | Yes |  |
+| UsedCount | int | No | default 0 |
+| ExpiredAt | timestamptz | Yes | index |
+| IsActive | boolean | No | default true, index |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### mentor_feedbacks
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| MentorId | uuid | No | FK `users.Id`, index |
+| StudentId | uuid | No | FK `users.Id`, index |
+| PortfolioId | uuid | Yes | FK `portfolios.Id`, index |
+| GithubRepositoryId | uuid | Yes | FK `github_repositories.Id`, index |
+| Comment | text | No |  |
+| Rating | int | Yes | check 1-5 |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+#### counselor_feedbacks
+
+| Field | Type | Null | Key / Index / Default |
+|---|---:|---:|---|
+| Id | uuid | No | PK |
+| CounselorId | uuid | No | FK `users.Id`, index |
+| StudentId | uuid | No | FK `users.Id`, index |
+| RoadmapId | uuid | Yes | FK `roadmaps.Id`, index |
+| SkillGapReportId | uuid | Yes | FK `skill_gap_reports.Id`, index |
+| Comment | text | No |  |
+| CreatedAt | timestamptz | No |  |
+| UpdatedAt | timestamptz | No |  |
+
+### 10.4 Index Và Constraint Tổng Hợp
+
+| Bảng | Index / Constraint chính |
 |---|---|
-| User | Unique `email`, unique nullable `username`, unique nullable `googleSubject` |
-| StudentProfile | Unique `userId`, index `targetRoleId`, index `githubUsername` |
-| Skill | Unique `(name, category)`, index `category`, index `isActive` |
-| UserSkill | Unique `(userId, skillId)`, index `level`, index `isVerified` |
-| CareerRole | Unique `name`, index `isActive` |
-| RoleSkillRequirement | Unique `(careerRoleId, skillId)`, index `priority` |
-| SkillGapReport | Index `(userId, createdAt desc)`, index `careerRoleId` |
-| SkillGapReportItem | Unique `(skillGapReportId, skillId)`, index `status`, index `priority` |
-| Roadmap | Index `(userId, status)`, index `careerRoleId` |
-| RoadmapNode | Unique `(roadmapId, orderIndex)`, index `status` |
-| GithubRepository | Unique `(userId, repoUrl)`, index `mainLanguage` |
-| GithubRepositorySkill | Unique `(githubRepositoryId, skillId)` |
-| Portfolio | Unique `slug`, index `(userId, isPublished)` |
-| Subscription | Index `(userId, status)`, index `expiredAt` |
-| PaymentTransaction | Unique nullable `providerTransactionId`, index `(userId, createdAt desc)` |
-| PaymentWebhookEvent | Unique `(provider, eventId)` |
-| Coupon | Unique `code`, index `expiredAt`, index `isActive` |
+| users | Unique `Email`, `Username`, `GoogleSubject`; index `Role`, `IsActive`; check role |
+| student_profiles | Unique `UserId`; index `TargetRoleId`, `GithubUsername` |
+| skills | Unique `(Name, Category)`; index `Category`, `IsActive` |
+| user_skills | Unique `(UserId, SkillId)`; index `SkillId`, `Level`, `IsVerified` |
+| career_roles | Unique `Name`; index `IsActive` |
+| role_skill_requirements | Unique `(CareerRoleId, SkillId)`; index `SkillId`, `Priority`; check `Priority`, `Weight` |
+| skill_gap_reports | Index `(UserId, CreatedAt desc)`, `CareerRoleId`; check `MatchScore` |
+| skill_gap_report_items | Unique `(SkillGapReportId, SkillId)`; index `SkillId`, `Status`, `Priority`; check `Priority` |
+| roadmaps | Index `(UserId, Status)`, `CareerRoleId`; check `Progress` |
+| roadmap_nodes | Unique `(RoadmapId, OrderIndex)`; index `SkillId`, `LearningResourceId`, `PrerequisiteNodeId`, `Status`; check `EstimatedHours`, `Priority` |
+| learning_resources | Index `SkillId`, `IsActive`; check `EstimatedHours` |
+| mentor_sessions | Index `(UserId, CreatedAt desc)`; check `TokensUsed` |
+| github_repositories | Unique `(UserId, RepoUrl)`; index `MainLanguage`; check `QualityScore` |
+| github_repository_skills | Unique `(GithubRepositoryId, SkillId)`; index `SkillId`; check `ConfidenceScore` |
+| github_connections | Unique `UserId`; index `GithubUsername` |
+| github_oauth_states | PK `State`; index `UserId`, `ExpiresAt` |
+| portfolios | Unique `Slug`; index `(UserId, IsPublished)` |
+| portfolio_projects | Index `(PortfolioId, OrderIndex)`, `GithubRepositoryId` |
+| subscription_plans | Unique `Name`; index `IsActive` |
+| subscriptions | Index `(UserId, Status)`, `ExpiredAt`, `ProviderSubscriptionId` |
+| payment_transactions | Unique nullable `ProviderTransactionId`; index `(UserId, CreatedAt desc)`, `SubscriptionId`, `PlanId`, `Status`, `Provider` |
+| payment_webhook_events | Unique `(Provider, EventId)`; index `EventType` |
+| invoices | Unique `PaymentTransactionId`, `InvoiceNumber`; index `UserId` |
+| coupons | Unique `Code`; index `ExpiredAt`, `IsActive` |
+| mentor_feedbacks | Index `MentorId`, `StudentId`, `PortfolioId`, `GithubRepositoryId`; check `Rating` |
+| counselor_feedbacks | Index `CounselorId`, `StudentId`, `RoadmapId`, `SkillGapReportId` |
 
-### 10.27 Seed Data Cần Có Ban Đầu
+### 10.5 Seed Data Cần Có Ban Đầu
 
 Career roles nên seed trước:
 
@@ -1603,22 +1301,37 @@ Subscription plans nên seed trước nếu có payment:
 ```text
 User 1-1 StudentProfile
 User 1-n UserSkill
-CareerRole 1-n RoleSkillRequirement
-Skill 1-n RoleSkillRequirement
-Skill 1-n UserSkill
 User 1-n SkillGapReport
-SkillGapReport 1-n SkillGapReportItem
 User 1-n Roadmap
-Roadmap 1-n RoadmapNode
-LearningResource có thể gắn với Skill hoặc RoadmapNode
 User 1-n MentorSession
 User 1-n GithubRepository
-GithubRepository n-n Skill thông qua GithubRepositorySkill
-User 1-1 hoặc 1-n Portfolio
-Portfolio 1-n PortfolioProject
+User 1-1 GithubConnection
+User 1-n GithubOAuthState
+User 1-n Portfolio
 User 1-n Subscription
+User 1-n PaymentTransaction
+User 1-n Invoice
+CareerRole 1-n StudentProfile
+CareerRole 1-n RoleSkillRequirement
+CareerRole 1-n SkillGapReport
+CareerRole 1-n Roadmap
+Skill 1-n UserSkill
+Skill 1-n RoleSkillRequirement
+Skill 1-n SkillGapReportItem
+Skill 1-n RoadmapNode
+Skill 1-n LearningResource
+SkillGapReport 1-n SkillGapReportItem
+SkillGapReport 1-n Roadmap
+Roadmap 1-n RoadmapNode
+RoadmapNode có thể phụ thuộc 1 RoadmapNode khác qua PrerequisiteNodeId
+LearningResource 1-n RoadmapNode
+GithubRepository n-n Skill thông qua GithubRepositorySkill
+GithubRepository 1-n PortfolioProject
+Portfolio 1-n PortfolioProject
 SubscriptionPlan 1-n Subscription
-PaymentTransaction liên kết User, Subscription và Plan
+SubscriptionPlan 1-n PaymentTransaction
+Subscription 1-n PaymentTransaction
+PaymentTransaction 1-1 Invoice
 PaymentWebhookEvent lưu webhook để tránh xử lý trùng lặp
 MentorFeedback liên kết Mentor, Student, Portfolio hoặc Repository
 CounselorFeedback liên kết Counselor, Student, Roadmap hoặc SkillGapReport
@@ -1630,8 +1343,8 @@ CounselorFeedback liên kết Counselor, Student, Roadmap hoặc SkillGapReport
 UserRole:
 - Student
 - Admin
-- Counselor
-- Mentor
+- AcademicCounselor
+- IndustryMentor
 
 SkillLevel:
 - Beginner
@@ -1782,7 +1495,37 @@ GET  /api/portfolio/:slug
 POST /api/portfolio/publish
 ```
 
-### 13.10 Payment
+### 13.10 Storage
+
+Bucket dùng private Google Cloud Storage. DB lưu object path, không lưu public URL trực tiếp.
+
+```text
+POST   /api/storage/upload
+POST   /api/storage/import-url
+POST   /api/storage/avatar
+POST   /api/storage/avatar/import-url
+POST   /api/storage/user-skills/:userSkillId/evidence
+POST   /api/storage/user-skills/:userSkillId/evidence/import-url
+POST   /api/storage/portfolio-projects/:projectId/image
+POST   /api/storage/portfolio-projects/:projectId/image/import-url
+GET    /api/storage/download?objectName=:objectName
+GET    /api/storage/signed-url?objectName=:objectName
+GET    /api/storage/public/portfolio-projects/:projectId/image
+GET    /api/storage/public/portfolio-projects/:projectId/image/download
+DELETE /api/storage?objectName=:objectName
+```
+
+Storage env:
+
+```text
+Storage__Provider=GoogleCloudStorage
+Storage__ProjectId=project-e0e65bea-54d9-45cc-83b
+Storage__BucketName=swpsu26
+Storage__SignedUrlMinutes=30
+Storage__MaxUploadBytes=10485760
+```
+
+### 13.11 Payment
 
 ```text
 GET  /api/payment/plans
@@ -1793,7 +1536,7 @@ POST /api/payment/cancel-subscription
 POST /api/payment/refund
 ```
 
-### 13.11 Admin
+### 13.12 Admin
 
 ```text
 GET    /api/admin/users

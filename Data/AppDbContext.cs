@@ -599,6 +599,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(project => project.Title).HasMaxLength(200).IsRequired();
             entity.Property(project => project.Description).HasMaxLength(3000);
             entity.Property(project => project.TechStackJson).HasColumnType("jsonb");
+            entity.Property(project => project.ImageUrl).HasMaxLength(1024);
             entity.Property(project => project.DemoUrl).HasMaxLength(1024);
             entity.Property(project => project.SourceUrl).HasMaxLength(1024);
             entity.Property(project => project.OrderIndex).HasDefaultValue(0);
