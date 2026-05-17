@@ -1,6 +1,10 @@
+using System.Security.Claims;
 using Google.Apis.Auth;
+using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using SWP_BE.Contracts.Auth;
+using SWP_BE.Data;
 using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
@@ -10,6 +14,7 @@ namespace SWP_BE.Controllers;
 public sealed class AuthController(
     IGoogleAuthService googleAuthService,
     IPasswordAuthService passwordAuthService,
+    AppDbContext dbContext,
     ILogger<AuthController> logger) : ControllerBase
 {
     [HttpPost("register")]
@@ -97,5 +102,59 @@ public sealed class AuthController(
                 source = exception.Source
             });
         }
+    }
+
+    [Authorize]
+    [HttpGet("me")]
+    [ProducesResponseType<MeResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MeResponse>> GetMe(CancellationToken cancellationToken)
+    {
+        var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier); //lay chuoi id tu token
+        if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId)) //kiem tra id co hop le khong
+        {
+            return Unauthorized(new { message = "Invalid token." });
+        }
+
+        var user = await dbContext.Users //lay user tu database
+            .AsNoTracking()
+            .SingleOrDefaultAsync(existingUser => existingUser.Id == userId, cancellationToken);
+
+        if (user is null)
+        {
+            return NotFound(new { message = "User not found." });
+        }
+
+        if (!user.IsActive)
+        {
+            return Unauthorized(new { message = "Account is inactive." });
+        }
+
+        return Ok(new MeResponse(
+            user.Id,
+            user.Username,
+            user.Email,
+            user.FullName,
+            user.AvatarUrl,
+            user.Role,
+            user.IsEmailVerified,
+            user.IsActive));
+    }
+
+    /// <summary>
+    /// Acknowledges logout. JWT khong duoc luu tren server, nen client phai xoa token local.
+    /// </summary>
+    [Authorize]
+    [HttpPost("logout")]
+    [ProducesResponseType<AuthMessageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public ActionResult<AuthMessageResponse> Logout()
+    {
+        var email = User.FindFirstValue(ClaimTypes.Email) ?? string.Empty; //lay email tu token
+
+        return Ok(new AuthMessageResponse(
+            "Logged out successfully. Remove the stored JWT access token on the client; the server does not revoke stateless tokens.",
+            email));
     }
 }

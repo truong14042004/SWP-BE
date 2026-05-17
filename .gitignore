@@ -50,7 +50,7 @@ appsettings.Production.json
 ~$*
 *~
 CodeCoverage/
-
+.vscode/
 # MSBuild Binary and Structured Log
 *.binlog
 
