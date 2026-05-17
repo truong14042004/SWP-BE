@@ -22,15 +22,15 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     ];
 
     [HttpGet]
-    [ProducesResponseType<IReadOnlyList<UserSkillResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType<IReadOnlyList<UserSkillResponse>>(StatusCodes.Status200OK)] 
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
-    public async Task<ActionResult<IReadOnlyList<UserSkillResponse>>> GetUserSkills(
+    public async Task<ActionResult<IReadOnlyList<UserSkillResponse>>> GetUserSkills( //tra ve danh sach ky nang cua user
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
         var userSkills = await dbContext.UserSkills
             .AsNoTracking()
-            .Include(item => item.Skill)
+            .Include(item => item.Skill) //nap luon bang skill de lay ten va loai ky nang
             .Where(item => item.UserId == userId)
             .OrderBy(item => item.Skill.Category)
             .ThenBy(item => item.Skill.Name)
@@ -58,7 +58,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         var skill = await dbContext.Skills
             .AsNoTracking()
             .SingleOrDefaultAsync(
-                item => item.Id == request.SkillId && item.IsActive,
+                item => item.Id == request.SkillId && item.IsActive, //kiem tra xem skill co ton tai va active khong
                 cancellationToken);
         if (skill is null)
         {
@@ -79,7 +79,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             Id = Guid.NewGuid(),
             UserId = userId,
             SkillId = request.SkillId,
-            Level = NormalizeLevel(request.Level),
+            Level = NormalizeLevel(request.Level), //chuan hoa chu hoa/thuong
             EvidenceUrl = request.EvidenceUrl?.Trim(),
             EvidenceType = request.EvidenceType?.Trim(),
             IsVerified = false,
@@ -110,18 +110,14 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             var levelError = ValidateLevel(request.Level);
             if (levelError is not null)
             {
-                return BadRequest(new { message = levelError });
+                return BadRequest(new { message = levelError }); 
             }
         }
 
-        if (request.EvidenceUrl is { Length: > 1024 })
+        var evidenceError = ValidateEvidenceFields(request.EvidenceUrl, request.EvidenceType);
+        if (evidenceError is not null)
         {
-            return BadRequest(new { message = "Evidence URL must be at most 1024 characters." });
-        }
-
-        if (request.EvidenceType is { Length: > 50 })
-        {
-            return BadRequest(new { message = "Evidence type must be at most 50 characters." });
+            return BadRequest(new { message = evidenceError });
         }
 
         var userId = GetCurrentUserId();
@@ -141,8 +137,8 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         if (request.EvidenceUrl is not null)
         {
-            userSkill.EvidenceUrl = string.IsNullOrWhiteSpace(request.EvidenceUrl)
-                ? null
+            userSkill.EvidenceUrl = string.IsNullOrWhiteSpace(request.EvidenceUrl) 
+                ? null //trong thi gan null (tuc la xoa URL bang chung)
                 : request.EvidenceUrl.Trim();
         }
 
@@ -195,7 +191,28 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             return "Skill is required.";
         }
 
-        return ValidateLevel(request.Level);
+        var levelError = ValidateLevel(request.Level);
+        if (levelError is not null)
+        {
+            return levelError;
+        }
+
+        return ValidateEvidenceFields(request.EvidenceUrl, request.EvidenceType);
+    }
+
+    private static string? ValidateEvidenceFields(string? evidenceUrl, string? evidenceType)
+    {
+        if (evidenceUrl is { Length: > 1024 })
+        {
+            return "Evidence URL must be at most 1024 characters.";
+        }
+
+        if (evidenceType is { Length: > 50 })
+        {
+            return "Evidence type must be at most 50 characters.";
+        }
+
+        return null;
     }
 
     private static string? ValidateLevel(string? level)

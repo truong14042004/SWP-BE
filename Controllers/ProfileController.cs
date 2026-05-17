@@ -21,9 +21,9 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
     {
         var userId = GetCurrentUserId();
         var profile = await dbContext.StudentProfiles
-            .AsNoTracking()
-            .Include(item => item.TargetRole)
-            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+            .AsNoTracking() // chi doc du lieu tu database chu khong thay doi du lieu
+            .Include(item => item.TargetRole) //lay role tuong ung voi profile
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken); //lay profile tuong ung voi userId
 
         if (profile is null)
         {
@@ -42,7 +42,7 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
         SaveProfileRequest request,
         CancellationToken cancellationToken)
     {
-        var userId = GetCurrentUserId();
+        var userId = GetCurrentUserId(); //lay userId tu token
         var exists = await dbContext.StudentProfiles.AnyAsync(
             item => item.UserId == userId,
             cancellationToken);
@@ -60,17 +60,17 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
         var now = DateTimeOffset.UtcNow;
         var profile = new StudentProfile
         {
-            Id = Guid.NewGuid(),
-            UserId = userId,
+            Id = Guid.NewGuid(), //tao id moi cho profile
+            UserId = userId, //gan userId cho profile
             CreatedAt = now,
             UpdatedAt = now
         };
 
-        ApplyProfileValues(profile, request);
+        ApplyProfileValues(profile, request); 
         dbContext.StudentProfiles.Add(profile);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        await dbContext.Entry(profile).Reference(item => item.TargetRole).LoadAsync(cancellationToken);
+        await dbContext.Entry(profile).Reference(item => item.TargetRole).LoadAsync(cancellationToken); //lay role tuong ung voi profile vi response can targetrolename
 
         return CreatedAtAction(nameof(GetProfile), ToResponse(profile));
     }
@@ -100,8 +100,8 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
             return BadRequest(new { message = validationError });
         }
 
-        ApplyProfileValues(profile, request);
-        profile.UpdatedAt = DateTimeOffset.UtcNow;
+        ApplyProfileValuesForUpdate(profile, request);
+        profile.UpdatedAt = DateTimeOffset.UtcNow; //cap nhat thoi gian update
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -118,6 +118,49 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
         profile.GithubUsername = request.GithubUsername?.Trim();
         profile.CareerGoal = request.CareerGoal?.Trim();
         profile.PreferredLearningHoursPerWeek = request.PreferredLearningHoursPerWeek;
+    }
+
+    private static void ApplyProfileValuesForUpdate(StudentProfile profile, SaveProfileRequest request)
+    {
+        if (request.School is not null)
+        {
+            profile.School = request.School.Trim();
+        }
+
+        if (request.Major is not null)
+        {
+            profile.Major = request.Major.Trim();
+        }
+
+        if (request.Year is not null)
+        {
+            profile.Year = request.Year;
+        }
+
+        if (request.Gpa is not null)
+        {
+            profile.Gpa = request.Gpa;
+        }
+
+        if (request.TargetRoleId is not null)
+        {
+            profile.TargetRoleId = request.TargetRoleId;
+        }
+
+        if (request.GithubUsername is not null)
+        {
+            profile.GithubUsername = request.GithubUsername.Trim();
+        }
+
+        if (request.CareerGoal is not null)
+        {
+            profile.CareerGoal = request.CareerGoal.Trim();
+        }
+
+        if (request.PreferredLearningHoursPerWeek is not null)
+        {
+            profile.PreferredLearningHoursPerWeek = request.PreferredLearningHoursPerWeek;
+        }
     }
 
     private async Task<string?> ValidateProfileRequest(
