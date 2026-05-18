@@ -8,6 +8,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     private static readonly DateTimeOffset SeededAt = new(2026, 5, 15, 0, 0, 0, TimeSpan.Zero);
 
     public DbSet<User> Users => Set<User>();
+    public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();
     public DbSet<StudentProfile> StudentProfiles => Set<StudentProfile>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
@@ -89,6 +90,40 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .HasDefaultValue(true);
 
             entity.HasIndex(user => user.IsActive);
+        });
+
+        modelBuilder.Entity<PendingRegistration>(entity =>
+        {
+            entity.ToTable("pending_registrations");
+            entity.HasKey(registration => registration.Id);
+
+            entity.Property(registration => registration.Username)
+                .HasMaxLength(100)
+                .IsRequired();
+
+            entity.HasIndex(registration => registration.Username)
+                .IsUnique();
+
+            entity.Property(registration => registration.Email)
+                .HasMaxLength(256)
+                .IsRequired();
+
+            entity.HasIndex(registration => registration.Email)
+                .IsUnique();
+
+            entity.Property(registration => registration.FullName)
+                .HasMaxLength(200)
+                .IsRequired();
+
+            entity.Property(registration => registration.PasswordHash)
+                .HasMaxLength(512)
+                .IsRequired();
+
+            entity.Property(registration => registration.EmailVerificationOtpHash)
+                .HasMaxLength(512)
+                .IsRequired();
+
+            entity.HasIndex(registration => registration.EmailVerificationOtpExpiresAt);
         });
 
         modelBuilder.Entity<StudentProfile>(entity =>

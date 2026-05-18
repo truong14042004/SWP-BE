@@ -33,50 +33,55 @@ public sealed class PasswordAuthService(
             throw new InvalidOperationException("Username and full name are required.");
         }
 
-        var matchingUsers = await dbContext.Users
-            .Where(user => user.Username == username || user.Email == email)
-            .ToListAsync(cancellationToken);
-        var existingUser = matchingUsers.Count == 1 ? matchingUsers[0] : null;
+        var now = DateTimeOffset.UtcNow;
+        await dbContext.PendingRegistrations
+            .Where(registration => registration.EmailVerificationOtpExpiresAt < now)
+            .ExecuteDeleteAsync(cancellationToken);
 
-        if (matchingUsers.Count > 1
-            || existingUser is not null
-            && (existingUser.IsEmailVerified || existingUser.IsActive
-                || existingUser.Username != username || existingUser.Email != email))
+        var userExists = await dbContext.Users
+            .AnyAsync(user => user.Username == username || user.Email == email, cancellationToken);
+        if (userExists)
         {
             throw new InvalidOperationException("Username or email already exists.");
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var user = existingUser ?? new User
-        {
-            Id = Guid.NewGuid(),
-            CreatedAt = now,
-        };
-
-        user.Username = username;
-        user.Email = email;
-        user.FullName = fullName;
-        user.PasswordHash = passwordHasher.HashPassword(user, request.Password);
-        user.IsActive = false;
-        user.IsEmailVerified = false;
-        user.EmailVerifiedAt = null;
-        user.UpdatedAt = now;
-
         var otp = CreateOtp();
-        user.EmailVerificationOtpHash = passwordHasher.HashPassword(user, otp);
-        user.EmailVerificationOtpExpiresAt = now.Add(OtpLifetime);
+        var hashUser = new User { Username = username, Email = email, FullName = fullName };
+        var pendingRegistration = await dbContext.PendingRegistrations
+            .SingleOrDefaultAsync(
+                registration => registration.Email == email || registration.Username == username,
+                cancellationToken);
 
-        if (existingUser is null)
+        if (pendingRegistration is not null
+            && (pendingRegistration.Email != email || pendingRegistration.Username != username))
         {
-            dbContext.Users.Add(user);
+            throw new InvalidOperationException("Username or email already exists.");
         }
 
-        await emailSender.SendOtpAsync(user.Email, user.FullName, otp, cancellationToken);
+        if (pendingRegistration is null)
+        {
+            pendingRegistration = new PendingRegistration
+            {
+                Id = Guid.NewGuid(),
+                CreatedAt = now
+            };
+            dbContext.PendingRegistrations.Add(pendingRegistration);
+        }
+
+        pendingRegistration.Username = username;
+        pendingRegistration.Email = email;
+        pendingRegistration.FullName = fullName;
+        pendingRegistration.PasswordHash = passwordHasher.HashPassword(hashUser, request.Password);
+        pendingRegistration.EmailVerificationOtpHash = passwordHasher.HashPassword(hashUser, otp);
+        pendingRegistration.EmailVerificationOtpExpiresAt = now.Add(OtpLifetime);
+        pendingRegistration.UpdatedAt = now;
+
+        await emailSender.SendOtpAsync(pendingRegistration.Email, pendingRegistration.FullName, otp, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new AuthMessageResponse(
             "Verification OTP has been sent to your email.",
-            user.Email);
+            pendingRegistration.Email);
     }
 
     public async Task<AuthResponse> VerifyEmailOtpAsync(
@@ -84,20 +89,24 @@ public sealed class PasswordAuthService(
         CancellationToken cancellationToken)
     {
         var email = Normalize(request.Email);
-        var user = await dbContext.Users
-            .SingleOrDefaultAsync(existingUser => existingUser.Email == email, cancellationToken);
+        var pendingRegistration = await dbContext.PendingRegistrations
+            .SingleOrDefaultAsync(registration => registration.Email == email, cancellationToken);
 
-        if (user is null
-            || user.IsEmailVerified
-            || string.IsNullOrWhiteSpace(user.EmailVerificationOtpHash)
-            || user.EmailVerificationOtpExpiresAt < DateTimeOffset.UtcNow)
+        if (pendingRegistration is null
+            || pendingRegistration.EmailVerificationOtpExpiresAt < DateTimeOffset.UtcNow)
         {
             throw new UnauthorizedAccessException("Invalid or expired OTP.");
         }
 
+        var hashUser = new User
+        {
+            Username = pendingRegistration.Username,
+            Email = pendingRegistration.Email,
+            FullName = pendingRegistration.FullName
+        };
         var result = passwordHasher.VerifyHashedPassword(
-            user,
-            user.EmailVerificationOtpHash,
+            hashUser,
+            pendingRegistration.EmailVerificationOtpHash,
             request.Otp);
 
         if (result == PasswordVerificationResult.Failed)
@@ -105,13 +114,32 @@ public sealed class PasswordAuthService(
             throw new UnauthorizedAccessException("Invalid or expired OTP.");
         }
 
-        user.IsActive = true;
-        user.IsEmailVerified = true;
-        user.EmailVerifiedAt = DateTimeOffset.UtcNow;
-        user.EmailVerificationOtpHash = null;
-        user.EmailVerificationOtpExpiresAt = null;
-        user.UpdatedAt = DateTimeOffset.UtcNow;
+        var userExists = await dbContext.Users.AnyAsync(
+            user => user.Username == pendingRegistration.Username || user.Email == pendingRegistration.Email,
+            cancellationToken);
+        if (userExists)
+        {
+            throw new UnauthorizedAccessException("Username or email already exists.");
+        }
 
+        var now = DateTimeOffset.UtcNow;
+        var user = new User
+        {
+            Id = Guid.NewGuid(),
+            Username = pendingRegistration.Username,
+            Email = pendingRegistration.Email,
+            FullName = pendingRegistration.FullName,
+            PasswordHash = pendingRegistration.PasswordHash,
+            Role = UserRoles.Student,
+            IsActive = true,
+            IsEmailVerified = true,
+            EmailVerifiedAt = now,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.Users.Add(user);
+        dbContext.PendingRegistrations.Remove(pendingRegistration);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return CreateResponse(user);
