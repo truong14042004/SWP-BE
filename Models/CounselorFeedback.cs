@@ -1,3 +1,5 @@
+using System;
+
 namespace SWP_BE.Models;
 
 public sealed class CounselorFeedback
@@ -7,7 +9,10 @@ public sealed class CounselorFeedback
     public Guid StudentId { get; set; }
     public Guid? RoadmapId { get; set; }
     public Guid? SkillGapReportId { get; set; }
-    public string Comment { get; set; } = string.Empty;
+    public string FeedbackText { get; set; } = string.Empty;
+    public int? Rating { get; set; }
+    public string? Recommendations { get; set; }
+    public string? PrivateNotes { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
