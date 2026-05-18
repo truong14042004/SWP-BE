@@ -6,11 +6,13 @@ public sealed class RoadmapNode
     public Guid RoadmapId { get; set; }
     public Guid? SkillId { get; set; }
     public Guid? LearningResourceId { get; set; }
+    public Guid? ParentNodeId { get; set; }
     public Guid? PrerequisiteNodeId { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
     public string NodeType { get; set; } = string.Empty;
     public string Status { get; set; } = "NotStarted";
+    public int Level { get; set; }
     public int OrderIndex { get; set; }
     public int? EstimatedHours { get; set; }
     public int Priority { get; set; }
@@ -21,5 +23,7 @@ public sealed class RoadmapNode
     public Skill? Skill { get; set; }
     public LearningResource? LearningResource { get; set; }
     public ICollection<RoadmapNodeResource> Resources { get; set; } = [];
+    public RoadmapNode? ParentNode { get; set; }
+    public ICollection<RoadmapNode> Children { get; set; } = [];
     public RoadmapNode? PrerequisiteNode { get; set; }
 }

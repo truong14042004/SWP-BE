@@ -470,14 +470,18 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(node => new { node.RoadmapId, node.OrderIndex }).IsUnique();
             entity.HasIndex(node => node.SkillId);
             entity.HasIndex(node => node.LearningResourceId);
+            entity.HasIndex(node => node.ParentNodeId);
             entity.HasIndex(node => node.PrerequisiteNodeId);
             entity.HasIndex(node => node.Status);
             entity.Property(node => node.Title).HasMaxLength(200).IsRequired();
             entity.Property(node => node.Description).HasMaxLength(2000);
             entity.Property(node => node.NodeType).HasMaxLength(30).IsRequired();
             entity.Property(node => node.Status).HasMaxLength(30).HasDefaultValue("NotStarted").IsRequired();
+            entity.Property(node => node.Level).HasDefaultValue(0);
             entity.HasCheckConstraint("CK_roadmap_nodes_EstimatedHours",
                 "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0");
+            entity.HasCheckConstraint("CK_roadmap_nodes_Level",
+                "\"Level\" >= 0 AND \"Level\" <= 8");
             entity.HasCheckConstraint("CK_roadmap_nodes_Priority",
                 "\"Priority\" >= 1 AND \"Priority\" <= 5");
             entity.HasOne(node => node.Roadmap)
@@ -491,6 +495,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne(node => node.LearningResource)
                 .WithMany()
                 .HasForeignKey(node => node.LearningResourceId)
+                .OnDelete(DeleteBehavior.SetNull);
+            entity.HasOne(node => node.ParentNode)
+                .WithMany(node => node.Children)
+                .HasForeignKey(node => node.ParentNodeId)
                 .OnDelete(DeleteBehavior.SetNull);
             entity.HasOne(node => node.PrerequisiteNode)
                 .WithMany()

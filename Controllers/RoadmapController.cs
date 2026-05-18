@@ -84,38 +84,15 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             nodeInputs = GetFallbackNodes(careerRole.Name);
         }
 
-        var nodes = nodeInputs
-            .Select((input, index) => new RoadmapNode
-            {
-                Id = Guid.NewGuid(),
-                RoadmapId = roadmap.Id,
-                SkillId = input.SkillId,
-                LearningResourceId = input.LearningResourceIds.Select(resourceId => (Guid?)resourceId).FirstOrDefault(),
-                Title = input.Title,
-                Description = input.Description,
-                NodeType = input.NodeType,
-                Status = "NotStarted",
-                OrderIndex = index + 1,
-                EstimatedHours = input.EstimatedHours,
-                Priority = input.Priority,
-                CreatedAt = now,
-                UpdatedAt = now
-            })
-            .ToList();
+        var hierarchy = BuildHierarchyNodes(roadmap.Id, nodeInputs, now);
 
-        for (var index = 1; index < nodes.Count; index++)
-        {
-            nodes[index].PrerequisiteNodeId = nodes[index - 1].Id;
-        }
-
-        var nodeResources = nodes
-            .Zip(nodeInputs)
-            .SelectMany(pair => pair.Second.LearningResourceIds
+        var nodeResources = hierarchy.ActionNodes
+            .SelectMany(pair => pair.Input.LearningResourceIds
                 .Distinct()
                 .Select((resourceId, resourceIndex) => new RoadmapNodeResource
                 {
                     Id = Guid.NewGuid(),
-                    RoadmapNodeId = pair.First.Id,
+                    RoadmapNodeId = pair.Node.Id,
                     LearningResourceId = resourceId,
                     OrderIndex = resourceIndex + 1,
                     CreatedAt = now
@@ -123,7 +100,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             .ToList();
 
         dbContext.Roadmaps.Add(roadmap);
-        dbContext.RoadmapNodes.AddRange(nodes);
+        dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
         dbContext.RoadmapNodeResources.AddRange(nodeResources);
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -229,6 +206,11 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             return NotFound(new { message = "Roadmap node was not found." });
         }
 
+        if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Group nodes are roadmap containers. Update the child technical nodes instead." });
+        }
+
         var normalizedStatus = allowedStatuses.Single(status => status.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
         if (node.PrerequisiteNodeId is not null && normalizedStatus is not "NotStarted")
         {
@@ -253,18 +235,94 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         var roadmapNodes = await dbContext.RoadmapNodes
             .Where(item => item.RoadmapId == node.RoadmapId)
             .ToListAsync(cancellationToken);
-        var completedCount = roadmapNodes.Count(item => item.Id == node.Id
+        var progressNodes = roadmapNodes
+            .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var completedCount = progressNodes.Count(item => item.Id == node.Id
             ? node.Status is "Completed" or "Verified"
             : item.Status is "Completed" or "Verified");
 
-        node.Roadmap.Progress = roadmapNodes.Count == 0
+        node.Roadmap.Progress = progressNodes.Count == 0
             ? 0
-            : Math.Round(completedCount * 100m / roadmapNodes.Count, 2);
+            : Math.Round(completedCount * 100m / progressNodes.Count, 2);
         node.Roadmap.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(ToNodeResponse(node));
+    }
+
+    private static RoadmapHierarchy BuildHierarchyNodes(
+        Guid roadmapId,
+        IReadOnlyList<RoadmapNodeInput> nodeInputs,
+        DateTimeOffset now)
+    {
+        var nodes = new List<RoadmapNode>();
+        var actionNodes = new List<RoadmapActionNode>();
+        Guid? previousActionNodeId = null;
+        var orderIndex = 1;
+
+        var groupedInputs = nodeInputs
+            .Select((input, index) => new { Input = input, Index = index })
+            .GroupBy(item => NormalizeGroupName(item.Input.GroupName))
+            .OrderBy(group => group.Min(item => item.Input.Priority))
+            .ThenBy(group => group.Min(item => item.Index));
+
+        foreach (var group in groupedInputs)
+        {
+            var orderedChildren = group
+                .OrderBy(item => item.Input.Priority)
+                .ThenBy(item => item.Index)
+                .ToList();
+            var groupPriority = Math.Clamp(orderedChildren.Min(item => item.Input.Priority), 1, 5);
+            var groupNode = new RoadmapNode
+            {
+                Id = Guid.NewGuid(),
+                RoadmapId = roadmapId,
+                Title = BuildGroupTitle(group.Key),
+                Description = BuildGroupDescription(group.Key),
+                NodeType = "Group",
+                Status = "NotStarted",
+                Level = 0,
+                OrderIndex = orderIndex++,
+                EstimatedHours = orderedChildren.Sum(item => item.Input.EstimatedHours),
+                Priority = groupPriority,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+
+            nodes.Add(groupNode);
+
+            foreach (var item in orderedChildren)
+            {
+                var input = item.Input;
+                var node = new RoadmapNode
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapId = roadmapId,
+                    SkillId = input.SkillId,
+                    LearningResourceId = input.LearningResourceIds.Select(resourceId => (Guid?)resourceId).FirstOrDefault(),
+                    ParentNodeId = groupNode.Id,
+                    PrerequisiteNodeId = previousActionNodeId,
+                    Title = input.Title,
+                    Description = input.Description,
+                    NodeType = input.NodeType,
+                    Status = "NotStarted",
+                    Level = 1,
+                    OrderIndex = orderIndex++,
+                    EstimatedHours = input.EstimatedHours,
+                    Priority = Math.Clamp(input.Priority, 1, 5),
+                    CreatedAt = now,
+                    UpdatedAt = now
+                };
+
+                nodes.Add(node);
+                actionNodes.Add(new RoadmapActionNode(node, input));
+                previousActionNodeId = node.Id;
+            }
+        }
+
+        return new RoadmapHierarchy(nodes, actionNodes);
     }
 
     private async Task<List<RoadmapNodeInput>> GetNodesFromSkillGapAsync(
@@ -286,6 +344,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             .Select(item => new RoadmapNodeInput(
                 item.SkillId,
                 resourcesBySkill.GetValueOrDefault(item.SkillId) ?? [],
+                BuildGroupName(item.Skill.Category, item.Priority),
                 $"Improve {item.Skill.Name}",
                 item.Recommendation ?? $"Reach {item.RequiredLevel} level for {item.Skill.Name}.",
                 "Skill",
@@ -329,6 +388,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 return new RoadmapNodeInput(
                     requirement.SkillId,
                     resourcesBySkill.GetValueOrDefault(requirement.SkillId) ?? [],
+                    BuildGroupName(requirement.Skill.Category, priority),
                     $"Learn {requirement.Skill.Name}",
                     $"{status} Reach {requirement.RequiredLevel} level for {requirement.Skill.Name}.",
                     "Skill",
@@ -379,63 +439,63 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         var normalizedRole = careerRoleName.ToLowerInvariant();
         var common = new List<RoadmapNodeInput>
         {
-            new(null, [], "Clarify target role expectations", $"Review internship/fresher requirements for {careerRoleName} and list the top missing skills.", "Reading", 1, 4),
-            new(null, [], "Build one portfolio project", $"Create a practical project aligned with {careerRoleName} and document the problem, features, tech stack, and setup steps.", "Project", 2, 24),
-            new(null, [], "Improve GitHub presentation", "Add README, screenshots, setup guide, API examples, deployment link, and architecture notes.", "Practice", 3, 6)
+            new(null, [], "Foundation", "Clarify target role expectations", $"Review internship/fresher requirements for {careerRoleName} and list the top missing skills.", "Reading", 1, 4),
+            new(null, [], "Portfolio", "Build one portfolio project", $"Create a practical project aligned with {careerRoleName} and document the problem, features, tech stack, and setup steps.", "Project", 2, 24),
+            new(null, [], "Portfolio", "Improve GitHub presentation", "Add README, screenshots, setup guide, API examples, deployment link, and architecture notes.", "Practice", 3, 6)
         };
 
         if (normalizedRole.Contains("backend"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Master REST API fundamentals", "Design CRUD APIs with validation, authentication, pagination, and clear error responses.", "Skill", 1, 16),
-                new(null, [], "Practice database design", "Model entities, relationships, indexes, migrations, and query patterns for a real backend feature.", "Skill", 2, 14),
-                new(null, [], "Add backend testing", "Write unit and integration tests for service logic, controllers, and database behavior.", "Practice", 3, 10)
+                new(null, [], "Backend Engineering", "Master REST API fundamentals", "Design CRUD APIs with validation, authentication, pagination, and clear error responses.", "Skill", 1, 16),
+                new(null, [], "Backend Engineering", "Practice database design", "Model entities, relationships, indexes, migrations, and query patterns for a real backend feature.", "Skill", 2, 14),
+                new(null, [], "Quality", "Add backend testing", "Write unit and integration tests for service logic, controllers, and database behavior.", "Practice", 3, 10)
             ]);
         }
         else if (normalizedRole.Contains("frontend"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Strengthen React UI architecture", "Build reusable components, route protection, form validation, loading states, and error states.", "Skill", 1, 16),
-                new(null, [], "Integrate real APIs", "Connect frontend pages to authenticated backend APIs with clean API client handling.", "Practice", 2, 12),
-                new(null, [], "Polish responsive UX", "Verify mobile and desktop layouts, accessibility, and empty/error states.", "Assessment", 3, 10)
+                new(null, [], "Frontend Engineering", "Strengthen React UI architecture", "Build reusable components, route protection, form validation, loading states, and error states.", "Skill", 1, 16),
+                new(null, [], "Frontend Engineering", "Integrate real APIs", "Connect frontend pages to authenticated backend APIs with clean API client handling.", "Practice", 2, 12),
+                new(null, [], "Quality", "Polish responsive UX", "Verify mobile and desktop layouts, accessibility, and empty/error states.", "Assessment", 3, 10)
             ]);
         }
         else if (normalizedRole.Contains("devops") || normalizedRole.Contains("cloud"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Containerize the application", "Write Dockerfile and compose setup for backend, frontend, and database.", "Project", 1, 12),
-                new(null, [], "Build CI/CD pipeline", "Automate build, test, migration, and deployment steps.", "Practice", 2, 14),
-                new(null, [], "Add monitoring basics", "Track logs, health checks, deployment status, and rollback process.", "Skill", 3, 8)
+                new(null, [], "DevOps Foundation", "Containerize the application", "Write Dockerfile and compose setup for backend, frontend, and database.", "Project", 1, 12),
+                new(null, [], "DevOps Foundation", "Build CI/CD pipeline", "Automate build, test, migration, and deployment steps.", "Practice", 2, 14),
+                new(null, [], "Operations", "Add monitoring basics", "Track logs, health checks, deployment status, and rollback process.", "Skill", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("data"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Practice SQL and data modeling", "Design analytical schemas, transformations, and query optimization examples.", "Skill", 1, 16),
-                new(null, [], "Build a data pipeline", "Ingest, clean, transform, and export a dataset with reproducible scripts.", "Project", 2, 20),
-                new(null, [], "Document data quality checks", "Add validation rules, data profiling, and pipeline failure handling.", "Practice", 3, 8)
+                new(null, [], "Data Foundation", "Practice SQL and data modeling", "Design analytical schemas, transformations, and query optimization examples.", "Skill", 1, 16),
+                new(null, [], "Data Engineering", "Build a data pipeline", "Ingest, clean, transform, and export a dataset with reproducible scripts.", "Project", 2, 20),
+                new(null, [], "Quality", "Document data quality checks", "Add validation rules, data profiling, and pipeline failure handling.", "Practice", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("qa"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Write test strategy", "Define test scope, acceptance criteria, and regression risks for a sample product.", "Reading", 1, 8),
-                new(null, [], "Automate API and UI tests", "Create repeatable tests for main user flows and API contracts.", "Project", 2, 18),
-                new(null, [], "Set up test reporting", "Publish test results and document bugs with reproduction steps.", "Practice", 3, 8)
+                new(null, [], "QA Foundation", "Write test strategy", "Define test scope, acceptance criteria, and regression risks for a sample product.", "Reading", 1, 8),
+                new(null, [], "QA Automation", "Automate API and UI tests", "Create repeatable tests for main user flows and API contracts.", "Project", 2, 18),
+                new(null, [], "Quality", "Set up test reporting", "Publish test results and document bugs with reproduction steps.", "Practice", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("ai"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Learn AI API integration", "Build prompts, structured outputs, retries, and error handling around an AI provider.", "Skill", 1, 14),
-                new(null, [], "Build an AI-assisted feature", "Create a feature that uses user context and stores generation results.", "Project", 2, 20),
-                new(null, [], "Evaluate AI output quality", "Add validation, safety checks, and feedback capture for generated content.", "Assessment", 3, 10)
+                new(null, [], "AI Engineering", "Learn AI API integration", "Build prompts, structured outputs, retries, and error handling around an AI provider.", "Skill", 1, 14),
+                new(null, [], "AI Engineering", "Build an AI-assisted feature", "Create a feature that uses user context and stores generation results.", "Project", 2, 20),
+                new(null, [], "Quality", "Evaluate AI output quality", "Add validation, safety checks, and feedback capture for generated content.", "Assessment", 3, 10)
             ]);
         }
 
@@ -472,6 +532,33 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             _ => 5
         };
 
+    private static string BuildGroupName(string? category, int priority)
+    {
+        if (!string.IsNullOrWhiteSpace(category))
+        {
+            return category.Trim();
+        }
+
+        return priority switch
+        {
+            <= 1 => "Foundation",
+            2 => "Core Skills",
+            3 => "Applied Practice",
+            _ => "Portfolio"
+        };
+    }
+
+    private static string NormalizeGroupName(string? groupName) =>
+        string.IsNullOrWhiteSpace(groupName) ? "General" : groupName.Trim();
+
+    private static string BuildGroupTitle(string groupName) =>
+        groupName.Equals("General", StringComparison.OrdinalIgnoreCase)
+            ? "General Roadmap"
+            : groupName;
+
+    private static string BuildGroupDescription(string groupName) =>
+        $"Complete the {groupName.ToLowerInvariant()} nodes in priority order before moving to the next learning area.";
+
     private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes) =>
         new(
             roadmap.Id,
@@ -484,9 +571,37 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             roadmap.Progress,
             roadmap.CreatedAt,
             roadmap.UpdatedAt,
-            nodes.OrderBy(node => node.OrderIndex).Select(ToNodeResponse).ToList());
+            nodes.OrderBy(node => node.OrderIndex).Select(node => ToNodeResponse(node)).ToList(),
+            BuildNodeTree(nodes));
 
-    private static RoadmapNodeResponse ToNodeResponse(RoadmapNode node)
+    private static IReadOnlyList<RoadmapNodeResponse> BuildNodeTree(IReadOnlyList<RoadmapNode> nodes)
+    {
+        var nodesByParent = nodes
+            .OrderBy(node => node.OrderIndex)
+            .GroupBy(node => node.ParentNodeId ?? Guid.Empty)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        return BuildNodeChildren(Guid.Empty, nodesByParent);
+    }
+
+    private static IReadOnlyList<RoadmapNodeResponse> BuildNodeChildren(
+        Guid parentNodeId,
+        IReadOnlyDictionary<Guid, List<RoadmapNode>> nodesByParent)
+    {
+        if (!nodesByParent.TryGetValue(parentNodeId, out var children))
+        {
+            return [];
+        }
+
+        return children
+            .OrderBy(node => node.OrderIndex)
+            .Select(node => ToNodeResponse(node, BuildNodeChildren(node.Id, nodesByParent)))
+            .ToList();
+    }
+
+    private static RoadmapNodeResponse ToNodeResponse(
+        RoadmapNode node,
+        IReadOnlyList<RoadmapNodeResponse>? children = null)
     {
         var learningResources = node.Resources
             .OrderBy(item => item.OrderIndex)
@@ -500,15 +615,18 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             node.SkillId,
             node.LearningResourceId,
             node.PrerequisiteNodeId,
+            node.ParentNodeId,
             node.Title,
             node.Description,
             node.NodeType,
             node.Status,
+            node.Level,
             node.OrderIndex,
             node.EstimatedHours,
             node.Priority,
             primaryLearningResource,
-            learningResources);
+            learningResources,
+            children ?? []);
     }
 
     private static RoadmapLearningResourceResponse ToLearningResourceResponse(LearningResource resource) =>
@@ -528,11 +646,18 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
     private sealed record RoadmapNodeInput(
         Guid? SkillId,
         IReadOnlyList<Guid> LearningResourceIds,
+        string GroupName,
         string Title,
         string Description,
         string NodeType,
         int Priority,
         int EstimatedHours);
+
+    private sealed record RoadmapActionNode(RoadmapNode Node, RoadmapNodeInput Input);
+
+    private sealed record RoadmapHierarchy(
+        IReadOnlyList<RoadmapNode> Nodes,
+        IReadOnlyList<RoadmapActionNode> ActionNodes);
 }
 
 public sealed record GenerateRoadmapRequest(
@@ -554,22 +679,26 @@ public sealed record RoadmapResponse(
     decimal Progress,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    IReadOnlyList<RoadmapNodeResponse> Nodes);
+    IReadOnlyList<RoadmapNodeResponse> Nodes,
+    IReadOnlyList<RoadmapNodeResponse> NodeTree);
 
 public sealed record RoadmapNodeResponse(
     Guid Id,
     Guid? SkillId,
     Guid? LearningResourceId,
     Guid? PrerequisiteNodeId,
+    Guid? ParentNodeId,
     string Title,
     string? Description,
     string NodeType,
     string Status,
+    int Level,
     int OrderIndex,
     int? EstimatedHours,
     int Priority,
     RoadmapLearningResourceResponse? LearningResource,
-    IReadOnlyList<RoadmapLearningResourceResponse> LearningResources);
+    IReadOnlyList<RoadmapLearningResourceResponse> LearningResources,
+    IReadOnlyList<RoadmapNodeResponse> Children);
 
 public sealed record RoadmapLearningResourceResponse(
     Guid Id,
