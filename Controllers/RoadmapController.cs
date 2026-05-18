@@ -112,7 +112,15 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         dbContext.RoadmapNodes.AddRange(nodes);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, nodes));
+        var responseNodes = await dbContext.RoadmapNodes
+            .AsNoTracking()
+            .Include(node => node.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
+            .Where(node => node.RoadmapId == roadmap.Id)
+            .OrderBy(node => node.OrderIndex)
+            .ToListAsync(cancellationToken);
+
+        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, responseNodes));
     }
 
     [HttpGet("api/roadmap")]
@@ -129,6 +137,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         var roadmapIds = roadmaps.Select(roadmap => roadmap.Id).ToArray();
         var nodes = await dbContext.RoadmapNodes
             .AsNoTracking()
+            .Include(node => node.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
             .Where(node => roadmapIds.Contains(node.RoadmapId))
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
@@ -159,6 +169,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         var nodes = await dbContext.RoadmapNodes
             .AsNoTracking()
+            .Include(node => node.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
             .Where(node => node.RoadmapId == roadmap.Id)
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
@@ -416,7 +428,22 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             node.Status,
             node.OrderIndex,
             node.EstimatedHours,
-            node.Priority);
+            node.Priority,
+            node.LearningResource is null ? null : ToLearningResourceResponse(node.LearningResource));
+
+    private static RoadmapLearningResourceResponse ToLearningResourceResponse(LearningResource resource) =>
+        new(
+            resource.Id,
+            resource.SkillId,
+            resource.Skill?.Name,
+            resource.Title,
+            resource.Url,
+            resource.StorageObjectName is null ? "Link" : "File",
+            resource.ContentType,
+            resource.FileSize,
+            resource.ResourceType,
+            resource.Difficulty,
+            resource.EstimatedHours);
 
     private sealed record RoadmapNodeInput(
         Guid? SkillId,
@@ -460,4 +487,18 @@ public sealed record RoadmapNodeResponse(
     string Status,
     int OrderIndex,
     int? EstimatedHours,
-    int Priority);
+    int Priority,
+    RoadmapLearningResourceResponse? LearningResource);
+
+public sealed record RoadmapLearningResourceResponse(
+    Guid Id,
+    Guid? SkillId,
+    string? SkillName,
+    string Title,
+    string Url,
+    string SourceType,
+    string? ContentType,
+    long? FileSize,
+    string ResourceType,
+    string? Difficulty,
+    int? EstimatedHours);

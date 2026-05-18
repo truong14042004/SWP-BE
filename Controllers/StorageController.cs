@@ -295,6 +295,38 @@ public sealed partial class StorageController(
         return Ok(new SignedUrlResponse(objectName, url, DateTimeOffset.UtcNow.Add(duration)));
     }
 
+    [Authorize]
+    [HttpGet("learning-resources/{resourceId:guid}/download")]
+    public async Task<IActionResult> DownloadLearningResource(
+        Guid resourceId,
+        CancellationToken cancellationToken)
+    {
+        var resource = await GetReadableLearningResource(resourceId, cancellationToken);
+        if (resource?.StorageObjectName is null)
+        {
+            return NotFound(new { message = "Learning resource file was not found." });
+        }
+
+        return await DownloadObject(resource.StorageObjectName, cancellationToken);
+    }
+
+    [Authorize]
+    [HttpGet("learning-resources/{resourceId:guid}/signed-url")]
+    public async Task<ActionResult<SignedUrlResponse>> CreateLearningResourceSignedUrl(
+        Guid resourceId,
+        CancellationToken cancellationToken)
+    {
+        var resource = await GetReadableLearningResource(resourceId, cancellationToken);
+        if (resource?.StorageObjectName is null)
+        {
+            return NotFound(new { message = "Learning resource file was not found." });
+        }
+
+        var duration = TimeSpan.FromMinutes(Math.Clamp(options.SignedUrlMinutes, 1, 60));
+        var url = await storageService.CreateSignedReadUrlAsync(resource.StorageObjectName, duration, cancellationToken);
+        return Ok(new SignedUrlResponse(resource.StorageObjectName, url, DateTimeOffset.UtcNow.Add(duration)));
+    }
+
     [HttpGet("public/portfolio-projects/{projectId:guid}/image")]
     public async Task<ActionResult<SignedUrlResponse>> CreatePublicPortfolioImageSignedUrl(
         Guid projectId,
@@ -370,6 +402,19 @@ public sealed partial class StorageController(
             .FirstOrDefaultAsync(
                 project => project.Id == projectId && project.Portfolio.IsPublished,
                 cancellationToken);
+    }
+
+    private async Task<LearningResource?> GetReadableLearningResource(
+        Guid resourceId,
+        CancellationToken cancellationToken)
+    {
+        var query = dbContext.LearningResources.AsNoTracking().Where(resource => resource.Id == resourceId);
+        if (!User.IsInRole(UserRoles.Admin))
+        {
+            query = query.Where(resource => resource.IsActive);
+        }
+
+        return await query.SingleOrDefaultAsync(cancellationToken);
     }
 
     private StorageFileResponse ToResponse(StoredFileResult result)

@@ -454,6 +454,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(resource => resource.IsActive);
             entity.Property(resource => resource.Title).HasMaxLength(200).IsRequired();
             entity.Property(resource => resource.Url).HasMaxLength(1024).IsRequired();
+            entity.Property(resource => resource.StorageObjectName).HasMaxLength(1024);
+            entity.Property(resource => resource.ContentType).HasMaxLength(100);
             entity.Property(resource => resource.ResourceType).HasMaxLength(50).IsRequired();
             entity.Property(resource => resource.Difficulty).HasMaxLength(50);
             entity.Property(resource => resource.IsActive).HasDefaultValue(true);

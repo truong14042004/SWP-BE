@@ -3,14 +3,38 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Options;
+using SWP_BE.Services;
+using Microsoft.Extensions.Options;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize(Roles = UserRoles.Admin)]
 [Route("api/admin")]
-public sealed class AdminController(AppDbContext dbContext) : ControllerBase
+public sealed class AdminController(
+    AppDbContext dbContext,
+    IFileStorageService storageService,
+    IOptions<StorageOptions> storageOptions) : ControllerBase
 {
+    private static readonly HashSet<string> LearningResourceContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "application/pdf",
+        "text/plain",
+        "text/markdown",
+        "application/msword",
+        "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        "application/vnd.ms-powerpoint",
+        "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+        "application/vnd.ms-excel",
+        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+        "image/jpeg",
+        "image/png",
+        "image/webp"
+    };
+
+    private readonly StorageOptions options = storageOptions.Value;
+
     [HttpGet("skills")]
     public async Task<ActionResult<IReadOnlyList<SkillResponse>>> GetSkills(CancellationToken cancellationToken)
     {
@@ -192,6 +216,52 @@ public sealed class AdminController(AppDbContext dbContext) : ControllerBase
             SkillId = request.SkillId,
             Title = request.Title!.Trim(),
             Url = request.Url!.Trim(),
+            StorageObjectName = null,
+            ContentType = null,
+            FileSize = null,
+            ResourceType = request.ResourceType!.Trim(),
+            Difficulty = request.Difficulty?.Trim(),
+            EstimatedHours = request.EstimatedHours,
+            IsActive = request.IsActive ?? true,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.LearningResources.Add(resource);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
+
+        return CreatedAtAction(nameof(GetLearningResource), new { id = resource.Id }, ToResponse(resource));
+    }
+
+    [HttpPost("learning-resources/upload")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<LearningResourceResponse>> UploadLearningResource(
+        [FromForm] UploadLearningResourceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validationError = await ValidateUploadLearningResourceRequest(request, cancellationToken);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var resourceId = Guid.NewGuid();
+        var objectName = BuildLearningResourceObjectName(resourceId, request.File.FileName, request.File.ContentType);
+
+        await using var stream = request.File.OpenReadStream();
+        var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
+
+        var resource = new LearningResource
+        {
+            Id = resourceId,
+            SkillId = request.SkillId,
+            Title = request.Title!.Trim(),
+            Url = $"/api/storage/learning-resources/{resourceId}/download",
+            StorageObjectName = result.ObjectName,
+            ContentType = result.ContentType,
+            FileSize = result.Size,
             ResourceType = request.ResourceType!.Trim(),
             Difficulty = request.Difficulty?.Trim(),
             EstimatedHours = request.EstimatedHours,
@@ -226,9 +296,17 @@ public sealed class AdminController(AppDbContext dbContext) : ControllerBase
             return NotFound(new { message = "Learning resource was not found." });
         }
 
+        if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+        {
+            await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+        }
+
         resource.SkillId = request.SkillId;
         resource.Title = request.Title!.Trim();
         resource.Url = request.Url!.Trim();
+        resource.StorageObjectName = null;
+        resource.ContentType = null;
+        resource.FileSize = null;
         resource.ResourceType = request.ResourceType!.Trim();
         resource.Difficulty = request.Difficulty?.Trim();
         resource.EstimatedHours = request.EstimatedHours;
@@ -250,10 +328,63 @@ public sealed class AdminController(AppDbContext dbContext) : ControllerBase
             return NotFound(new { message = "Learning resource was not found." });
         }
 
+        if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+        {
+            await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+        }
+
         dbContext.LearningResources.Remove(resource);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
+    }
+
+    private async Task<string?> ValidateUploadLearningResourceRequest(
+        UploadLearningResourceRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(request.Title))
+        {
+            return "Learning resource title is required.";
+        }
+
+        if (string.IsNullOrWhiteSpace(request.ResourceType))
+        {
+            return "Learning resource type is required.";
+        }
+
+        if (request.EstimatedHours is < 0)
+        {
+            return "Estimated hours must be greater than or equal to 0.";
+        }
+
+        if (request.File is null || request.File.Length == 0)
+        {
+            return "Learning resource file is required.";
+        }
+
+        if (request.File.Length > options.MaxUploadBytes)
+        {
+            return $"File is too large. Max size is {options.MaxUploadBytes} bytes.";
+        }
+
+        if (!LearningResourceContentTypes.Contains(request.File.ContentType))
+        {
+            return $"Unsupported content type: {request.File.ContentType}.";
+        }
+
+        if (request.SkillId is not null)
+        {
+            var skillExists = await dbContext.Skills.AnyAsync(
+                skill => skill.Id == request.SkillId && skill.IsActive,
+                cancellationToken);
+            if (!skillExists)
+            {
+                return "Active skill was not found.";
+            }
+        }
+
+        return null;
     }
 
     [HttpGet("role-skill-requirements")]
@@ -519,6 +650,9 @@ public sealed class AdminController(AppDbContext dbContext) : ControllerBase
             resource.Skill?.Name,
             resource.Title,
             resource.Url,
+            resource.StorageObjectName is null ? "Link" : "File",
+            resource.ContentType,
+            resource.FileSize,
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
@@ -538,6 +672,62 @@ public sealed class AdminController(AppDbContext dbContext) : ControllerBase
             requirement.Weight,
             requirement.CreatedAt,
             requirement.UpdatedAt);
+
+    private static string BuildLearningResourceObjectName(
+        Guid resourceId,
+        string? originalFileName,
+        string? contentType)
+    {
+        var extension = Path.GetExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = GetExtension(contentType);
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(originalFileName);
+        baseName = string.IsNullOrWhiteSpace(baseName)
+            ? "resource"
+            : new string(baseName
+                .Trim()
+                .ToLowerInvariant()
+                .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+                .ToArray())
+                .Trim('-');
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "resource";
+        }
+
+        extension = !string.IsNullOrWhiteSpace(extension)
+            && extension.Length <= 11
+            && extension[0] == '.'
+            && extension.Skip(1).All(char.IsLetterOrDigit)
+                ? extension.ToLowerInvariant()
+                : string.Empty;
+
+        return $"learning-resources/{resourceId}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{baseName}{extension}";
+    }
+
+    private static string GetExtension(string? contentType)
+    {
+        return contentType?.ToLowerInvariant() switch
+        {
+            "application/pdf" => ".pdf",
+            "text/plain" => ".txt",
+            "text/markdown" => ".md",
+            "application/msword" => ".doc",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document" => ".docx",
+            "application/vnd.ms-powerpoint" => ".ppt",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation" => ".pptx",
+            "application/vnd.ms-excel" => ".xls",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" => ".xlsx",
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            _ => string.Empty
+        };
+    }
 }
 
 public sealed record SaveSkillRequest(
@@ -564,12 +754,26 @@ public sealed record SaveLearningResourceRequest(
     int? EstimatedHours,
     bool? IsActive);
 
+public sealed class UploadLearningResourceRequest
+{
+    public Guid? SkillId { get; set; }
+    public string? Title { get; set; }
+    public string? ResourceType { get; set; }
+    public string? Difficulty { get; set; }
+    public int? EstimatedHours { get; set; }
+    public bool? IsActive { get; set; }
+    public IFormFile File { get; set; } = null!;
+}
+
 public sealed record LearningResourceResponse(
     Guid Id,
     Guid? SkillId,
     string? SkillName,
     string Title,
     string Url,
+    string SourceType,
+    string? ContentType,
+    long? FileSize,
     string ResourceType,
     string? Difficulty,
     int? EstimatedHours,
