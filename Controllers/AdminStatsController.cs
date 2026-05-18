@@ -202,17 +202,33 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
     {
         var totalCareerRoles = await dbContext.CareerRoles.CountAsync(cancellationToken);
         var activeCareerRoles = await dbContext.CareerRoles.CountAsync(role => role.IsActive, cancellationToken);
-        var popularCareerRoles = await dbContext.StudentProfiles
+
+        var selectedRoleCounts = await dbContext.StudentProfiles
             .AsNoTracking()
             .Where(profile => profile.TargetRoleId != null)
-            .GroupBy(profile => new { profile.TargetRoleId, profile.TargetRole!.Name })
-            .Select(group => new PopularCareerRoleResponse(
-                group.Key.TargetRoleId!.Value,
-                group.Key.Name,
-                group.Count()))
+            .GroupBy(profile => profile.TargetRoleId!.Value)
+            .Select(group => new
+            {
+                RoleId = group.Key,
+                SelectedCount = group.Count()
+            })
             .OrderByDescending(item => item.SelectedCount)
             .Take(10)
             .ToListAsync(cancellationToken);
+
+        var roleIds = selectedRoleCounts.Select(item => item.RoleId).ToList();
+        var roleNames = await dbContext.CareerRoles
+            .AsNoTracking()
+            .Where(role => roleIds.Contains(role.Id))
+            .Select(role => new { role.Id, role.Name })
+            .ToDictionaryAsync(role => role.Id, role => role.Name, cancellationToken);
+
+        var popularCareerRoles = selectedRoleCounts
+            .Select(item => new PopularCareerRoleResponse(
+                item.RoleId,
+                roleNames.GetValueOrDefault(item.RoleId, "Unknown role"),
+                item.SelectedCount))
+            .ToList();
 
         return new AdminCareerRoleStatsResponse(totalCareerRoles, activeCareerRoles, popularCareerRoles);
     }
