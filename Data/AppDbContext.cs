@@ -36,6 +36,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<MentorFeedback> MentorFeedbacks => Set<MentorFeedback>();
     public DbSet<CounselorFeedback> CounselorFeedbacks => Set<CounselorFeedback>();
+    public DbSet<CounselorAssignment> CounselorAssignments => Set<CounselorAssignment>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -870,7 +871,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(feedback => feedback.StudentId);
             entity.HasIndex(feedback => feedback.RoadmapId);
             entity.HasIndex(feedback => feedback.SkillGapReportId);
-            entity.Property(feedback => feedback.Comment).HasColumnType("text").IsRequired();
+            entity.Property(feedback => feedback.FeedbackText).HasColumnType("text").IsRequired();
+            entity.Property(feedback => feedback.Recommendations).HasColumnType("text");
+            entity.Property(feedback => feedback.PrivateNotes).HasColumnType("text");
+            entity.HasCheckConstraint("CK_counselor_feedbacks_Rating",
+                "\"Rating\" IS NULL OR (\"Rating\" >= 1 AND \"Rating\" <= 5)");
             entity.HasOne(feedback => feedback.Counselor)
                 .WithMany()
                 .HasForeignKey(feedback => feedback.CounselorId)
@@ -887,6 +892,27 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(feedback => feedback.SkillGapReportId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<CounselorAssignment>(entity =>
+        {
+            entity.ToTable("counselor_assignments");
+            entity.HasKey(assignment => assignment.Id);
+            entity.HasIndex(assignment => new { assignment.CounselorId, assignment.StudentId }).IsUnique();
+            entity.Property(assignment => assignment.Status).HasMaxLength(30).IsRequired();
+            entity.Property(assignment => assignment.Note).HasMaxLength(1000);
+            entity.HasOne(assignment => assignment.Counselor)
+                .WithMany()
+                .HasForeignKey(assignment => assignment.CounselorId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(assignment => assignment.Student)
+                .WithMany()
+                .HasForeignKey(assignment => assignment.StudentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(assignment => assignment.AssignedByAdmin)
+                .WithMany()
+                .HasForeignKey(assignment => assignment.AssignedByAdminId)
+                .OnDelete(DeleteBehavior.Restrict);
         });
     }
 }

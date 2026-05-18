@@ -1,4 +1,10 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
@@ -6,12 +12,12 @@ using SWP_BE.Data;
 namespace SWP_BE.Controllers;
 
 [ApiController]
-[Authorize]
+[AllowAnonymous] // Public autocomplete search cho guest
 [Route("api/search")]
 public sealed class SearchController(AppDbContext dbContext) : ControllerBase
 {
     // GET /api/search/skills?q=keyword
-    // Tìm kiếm kỹ năng theo keyword tên, phục vụ autocomplete
+    // Tìm kiếm kỹ năng theo keyword tên hoặc danh mục, phục vụ autocomplete
     [HttpGet("skills")]
     [ProducesResponseType<IReadOnlyList<SkillSearchResultResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<SkillSearchResultResponse>>> SearchSkills(
@@ -49,7 +55,7 @@ public sealed class SearchController(AppDbContext dbContext) : ControllerBase
     }
 
     // GET /api/search/learning-resources?q=keyword&skillId=...
-    // Tìm kiếm tài nguyên học tập theo keyword và/hoặc skillId
+    // Tìm kiếm tài nguyên học tập nâng cao, mở rộng từ khóa tìm kiếm
     [HttpGet("learning-resources")]
     [ProducesResponseType<IReadOnlyList<LearningResourceSearchResultResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<LearningResourceSearchResultResponse>>> SearchLearningResources(
@@ -68,32 +74,35 @@ public sealed class SearchController(AppDbContext dbContext) : ControllerBase
             .Include(r => r.Skill)
             .Where(r => r.IsActive);
 
-        // Filter by skillId
+        // Lọc theo skillId
         if (skillId is not null)
         {
             query = query.Where(r => r.SkillId == skillId);
         }
 
-        // Filter by resourceType
+        // Lọc theo resourceType
         if (!string.IsNullOrWhiteSpace(resourceType))
         {
             var rt = resourceType.Trim();
             query = query.Where(r => r.ResourceType == rt);
         }
 
-        // Filter by difficulty
+        // Lọc theo difficulty
         if (!string.IsNullOrWhiteSpace(difficulty))
         {
             var diff = difficulty.Trim();
             query = query.Where(r => r.Difficulty == diff);
         }
 
-        // Keyword search across title, skill name and skill category
+        // Tìm kiếm từ khóa mở rộng qua: Title, Url, ResourceType, Difficulty, Skill.Name, Skill.Category
         if (!string.IsNullOrWhiteSpace(q))
         {
             var keyword = q.Trim().ToLower();
             query = query.Where(r =>
                 r.Title.ToLower().Contains(keyword) ||
+                r.Url.ToLower().Contains(keyword) ||
+                r.ResourceType.ToLower().Contains(keyword) ||
+                (r.Difficulty != null && r.Difficulty.ToLower().Contains(keyword)) ||
                 (r.Skill != null && r.Skill.Name.ToLower().Contains(keyword)) ||
                 (r.Skill != null && r.Skill.Category.ToLower().Contains(keyword)));
         }
@@ -112,6 +121,7 @@ public sealed class SearchController(AppDbContext dbContext) : ControllerBase
                 r.Url,
                 r.StorageObjectName == null ? "Link" : "File",
                 r.ContentType,
+                r.FileSize,
                 r.ResourceType,
                 r.Difficulty,
                 r.EstimatedHours))
@@ -138,6 +148,7 @@ public sealed record LearningResourceSearchResultResponse(
     string Url,
     string SourceType,
     string? ContentType,
+    long? FileSize,
     string ResourceType,
     string? Difficulty,
     int? EstimatedHours);

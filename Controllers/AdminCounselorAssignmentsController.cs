@@ -1,0 +1,207 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
+using SWP_BE.Data;
+using SWP_BE.Models;
+
+namespace SWP_BE.Controllers;
+
+[ApiController]
+[Authorize(Roles = UserRoles.Admin)]
+[Route("api/admin/counselor-assignments")]
+public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) : ControllerBase
+{
+    // GET /api/admin/counselor-assignments
+    // Lấy toàn bộ danh sách phân công cố vấn - sinh viên
+    [HttpGet]
+    [ProducesResponseType<IReadOnlyList<CounselorAssignmentResponse>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<CounselorAssignmentResponse>>> GetAll(CancellationToken cancellationToken)
+    {
+        var assignments = await dbContext.CounselorAssignments
+            .AsNoTracking()
+            .Include(a => a.Counselor)
+            .Include(a => a.Student)
+            .Include(a => a.AssignedByAdmin)
+            .OrderByDescending(a => a.CreatedAt)
+            .Select(a => ToResponse(a))
+            .ToListAsync(cancellationToken);
+
+        return Ok(assignments);
+    }
+
+    // POST /api/admin/counselor-assignments
+    // Phân công cố vấn cho sinh viên
+    [HttpPost]
+    [ProducesResponseType<CounselorAssignmentResponse>(StatusCodes.Status201Created)]
+    public async Task<ActionResult<CounselorAssignmentResponse>> Create(
+        CreateCounselorAssignmentRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.CounselorId == Guid.Empty)
+        {
+            return BadRequest(new { message = "Counselor ID is required." });
+        }
+
+        if (request.StudentId == Guid.Empty)
+        {
+            return BadRequest(new { message = "Student ID is required." });
+        }
+
+        // 1. Kiểm tra Counselor tồn tại và đúng role
+        var counselor = await dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == request.CounselorId && u.IsActive, cancellationToken);
+
+        if (counselor is null)
+        {
+            return NotFound(new { message = "Active counselor was not found." });
+        }
+
+        if (counselor.Role != UserRoles.AcademicCounselor)
+        {
+            return BadRequest(new { message = $"User with ID {request.CounselorId} is not an Academic Counselor." });
+        }
+
+        // 2. Kiểm tra Student tồn tại và đúng role
+        var student = await dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(u => u.Id == request.StudentId && u.IsActive, cancellationToken);
+
+        if (student is null)
+        {
+            return NotFound(new { message = "Active student was not found." });
+        }
+
+        if (student.Role != UserRoles.Student)
+        {
+            return BadRequest(new { message = $"User with ID {request.StudentId} is not a Student." });
+        }
+
+        // 3. Kiểm tra trùng lặp
+        var existingAssignment = await dbContext.CounselorAssignments
+            .SingleOrDefaultAsync(a => a.CounselorId == request.CounselorId && a.StudentId == request.StudentId, cancellationToken);
+
+        if (existingAssignment is not null)
+        {
+            if (existingAssignment.Status == "Active")
+            {
+                return Conflict(new { message = "This assignment is already active." });
+            }
+            else
+            {
+                // Kích hoạt lại phân công cũ
+                var adminUserId = GetCurrentUserId();
+                existingAssignment.Status = "Active";
+                existingAssignment.Note = request.Note?.Trim() ?? existingAssignment.Note;
+                existingAssignment.AssignedByAdminId = adminUserId;
+                existingAssignment.UpdatedAt = DateTimeOffset.UtcNow;
+
+                await dbContext.SaveChangesAsync(cancellationToken);
+                await dbContext.Entry(existingAssignment).Reference(a => a.Counselor).LoadAsync(cancellationToken);
+                await dbContext.Entry(existingAssignment).Reference(a => a.Student).LoadAsync(cancellationToken);
+                await dbContext.Entry(existingAssignment).Reference(a => a.AssignedByAdmin).LoadAsync(cancellationToken);
+
+                return Ok(ToResponse(existingAssignment));
+            }
+        }
+
+        // 4. Tạo phân công mới
+        var adminId = GetCurrentUserId();
+        var now = DateTimeOffset.UtcNow;
+        var assignment = new CounselorAssignment
+        {
+            Id = Guid.NewGuid(),
+            CounselorId = request.CounselorId,
+            StudentId = request.StudentId,
+            AssignedByAdminId = adminId,
+            Status = "Active",
+            Note = request.Note?.Trim(),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.CounselorAssignments.Add(assignment);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Load navigation properties for response
+        await dbContext.Entry(assignment).Reference(a => a.Counselor).LoadAsync(cancellationToken);
+        await dbContext.Entry(assignment).Reference(a => a.Student).LoadAsync(cancellationToken);
+        await dbContext.Entry(assignment).Reference(a => a.AssignedByAdmin).LoadAsync(cancellationToken);
+
+        return CreatedAtAction(nameof(GetAll), ToResponse(assignment));
+    }
+
+    // DELETE /api/admin/counselor-assignments/{id}
+    // Hủy phân công cố vấn - sinh viên
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
+    {
+        var assignment = await dbContext.CounselorAssignments
+            .SingleOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        if (assignment is null)
+        {
+            return NotFound(new { message = "Counselor assignment was not found." });
+        }
+
+        dbContext.CounselorAssignments.Remove(assignment);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    private Guid GetCurrentUserId()
+    {
+        var nameIdentifier = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(nameIdentifier) || !Guid.TryParse(nameIdentifier, out var userId))
+        {
+            throw new InvalidOperationException("User ID is missing or invalid in JWT token.");
+        }
+        return userId;
+    }
+
+    private static CounselorAssignmentResponse ToResponse(CounselorAssignment a) =>
+        new(
+            a.Id,
+            a.CounselorId,
+            a.Counselor.FullName,
+            a.Counselor.Email,
+            a.StudentId,
+            a.Student.FullName,
+            a.Student.Email,
+            a.AssignedByAdminId,
+            a.AssignedByAdmin.FullName,
+            a.Status,
+            a.Note,
+            a.CreatedAt,
+            a.UpdatedAt);
+}
+
+// ── DTOs ─────────────────────────────────────────────────────────────────────
+
+public sealed record CreateCounselorAssignmentRequest(
+    Guid CounselorId,
+    Guid StudentId,
+    string? Note);
+
+public sealed record CounselorAssignmentResponse(
+    Guid Id,
+    Guid CounselorId,
+    string CounselorName,
+    string CounselorEmail,
+    Guid StudentId,
+    string StudentName,
+    string StudentEmail,
+    Guid AssignedByAdminId,
+    string AssignedByAdminName,
+    string Status,
+    string? Note,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

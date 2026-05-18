@@ -1,5 +1,11 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
@@ -13,15 +19,33 @@ namespace SWP_BE.Controllers;
 public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 {
     // GET /api/counselor/students
-    // Lấy danh sách tất cả sinh viên (role = Student, isActive = true)
+    // Lấy danh sách sinh viên active được phân công cho cố vấn đang đăng nhập
     [HttpGet("students")]
     [ProducesResponseType<IReadOnlyList<CounselorStudentSummaryResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<CounselorStudentSummaryResponse>>> GetStudents(
         CancellationToken cancellationToken)
     {
-        var students = await dbContext.Users
+        var counselorId = GetCurrentUserId();
+
+        var query = dbContext.Users
             .AsNoTracking()
-            .Where(user => user.Role == UserRoles.Student && user.IsActive)
+            .Where(user => user.Role == UserRoles.Student && user.IsActive);
+
+        // Kiểm tra xem cố vấn hiện tại có phân công nào không
+        var hasAssignments = await dbContext.CounselorAssignments
+            .AnyAsync(a => a.CounselorId == counselorId && a.Status == "Active", cancellationToken);
+
+        if (hasAssignments)
+        {
+            var assignedStudentIds = await dbContext.CounselorAssignments
+                .Where(a => a.CounselorId == counselorId && a.Status == "Active")
+                .Select(a => a.StudentId)
+                .ToListAsync(cancellationToken);
+
+            query = query.Where(user => assignedStudentIds.Contains(user.Id));
+        }
+
+        var students = await query
             .OrderBy(user => user.FullName)
             .Select(user => new CounselorStudentSummaryResponse(
                 user.Id,
@@ -36,14 +60,21 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
     }
 
     // GET /api/counselor/students/{studentId}/profile
-    // Lấy profile chi tiết của một sinh viên
+    // Lấy profile chi tiết của một sinh viên (yêu cầu thuộc phân công)
     [HttpGet("students/{studentId:guid}/profile")]
     [ProducesResponseType<CounselorStudentProfileResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CounselorStudentProfileResponse>> GetStudentProfile(
         Guid studentId,
         CancellationToken cancellationToken)
     {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
         var user = await dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
@@ -81,14 +112,21 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
     }
 
     // GET /api/counselor/students/{studentId}/skills
-    // Lấy danh sách kỹ năng của một sinh viên
+    // Lấy danh sách kỹ năng của sinh viên (yêu cầu thuộc phân công)
     [HttpGet("students/{studentId:guid}/skills")]
     [ProducesResponseType<IReadOnlyList<CounselorStudentSkillResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<CounselorStudentSkillResponse>>> GetStudentSkills(
         Guid studentId,
         CancellationToken cancellationToken)
     {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
         var studentExists = await dbContext.Users
             .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
 
@@ -122,15 +160,22 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         return Ok(skills);
     }
 
-    // GET /api/counselor/students/{studentId}/skill-gap
-    // Lấy báo cáo skill gap gần nhất của một sinh viên
-    [HttpGet("students/{studentId:guid}/skill-gap")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // GET /api/counselor/students/{studentId}/skill-gap/latest
+    // Lấy báo cáo skill gap gần nhất của sinh viên (yêu cầu thuộc phân công)
+    [HttpGet("students/{studentId:guid}/skill-gap/latest")]
+    [ProducesResponseType<CounselorSkillGapReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetStudentSkillGap(
+    public async Task<ActionResult<CounselorSkillGapReportResponse>> GetStudentSkillGapLatest(
         Guid studentId,
         CancellationToken cancellationToken)
     {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
         var studentExists = await dbContext.Users
             .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
 
@@ -151,46 +196,105 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return NotFound(new { message = "No skill gap report found for this student." });
         }
 
-        var items = await dbContext.SkillGapReportItems
-            .AsNoTracking()
-            .Include(i => i.Skill)
-            .Where(i => i.SkillGapReportId == report.Id)
-            .OrderBy(i => i.Priority)
-            .ThenBy(i => i.Skill.Name)
-            .ToListAsync(cancellationToken);
-
-        return Ok(new
-        {
-            report.Id,
-            report.UserId,
-            report.CareerRoleId,
-            CareerRoleName = report.CareerRole.Name,
-            report.MatchScore,
-            report.Summary,
-            report.CreatedAt,
-            Items = items.Select(i => new
-            {
-                i.SkillId,
-                SkillName = i.Skill.Name,
-                SkillCategory = i.Skill.Category,
-                i.CurrentLevel,
-                i.RequiredLevel,
-                i.Status,
-                i.Priority,
-                i.Recommendation
-            })
-        });
+        return await GetSkillGapReportInternalAsync(report, cancellationToken);
     }
 
-    // GET /api/counselor/students/{studentId}/roadmap
-    // Lấy roadmap gần nhất của một sinh viên
-    [HttpGet("students/{studentId:guid}/roadmap")]
-    [ProducesResponseType(StatusCodes.Status200OK)]
+    // GET /api/counselor/students/{studentId}/skill-gaps
+    // Lấy lịch sử danh sách báo cáo skill gap của sinh viên (yêu cầu thuộc phân công)
+    [HttpGet("students/{studentId:guid}/skill-gaps")]
+    [ProducesResponseType<IReadOnlyList<CounselorSkillGapHistoryResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<IActionResult> GetStudentRoadmap(
+    public async Task<ActionResult<IReadOnlyList<CounselorSkillGapHistoryResponse>>> GetStudentSkillGapsHistory(
         Guid studentId,
         CancellationToken cancellationToken)
     {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
+        var studentExists = await dbContext.Users
+            .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
+
+        if (!studentExists)
+        {
+            return NotFound(new { message = "Student was not found." });
+        }
+
+        var reports = await dbContext.SkillGapReports
+            .AsNoTracking()
+            .Include(r => r.CareerRole)
+            .Where(r => r.UserId == studentId)
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new CounselorSkillGapHistoryResponse(
+                r.Id,
+                r.UserId,
+                r.CareerRoleId,
+                r.CareerRole.Name,
+                r.MatchScore,
+                r.Summary,
+                r.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return Ok(reports);
+    }
+
+    // GET /api/counselor/students/{studentId}/skill-gap/{reportId}
+    // Xem một báo cáo skill gap cụ thể của sinh viên (yêu cầu thuộc phân công)
+    [HttpGet("students/{studentId:guid}/skill-gap/{reportId:guid}")]
+    [ProducesResponseType<CounselorSkillGapReportResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<CounselorSkillGapReportResponse>> GetStudentSkillGapById(
+        Guid studentId,
+        Guid reportId,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
+        var studentExists = await dbContext.Users
+            .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
+
+        if (!studentExists)
+        {
+            return NotFound(new { message = "Student was not found." });
+        }
+
+        var report = await dbContext.SkillGapReports
+            .AsNoTracking()
+            .Include(r => r.CareerRole)
+            .SingleOrDefaultAsync(r => r.Id == reportId && r.UserId == studentId, cancellationToken);
+
+        if (report is null)
+        {
+            return NotFound(new { message = "Skill gap report was not found for this student." });
+        }
+
+        return await GetSkillGapReportInternalAsync(report, cancellationToken);
+    }
+
+    // GET /api/counselor/students/{studentId}/roadmap
+    // Lấy roadmap gần nhất của sinh viên (yêu cầu thuộc phân công) với đầy đủ thông tin cha-con & tài nguyên
+    [HttpGet("students/{studentId:guid}/roadmap")]
+    [ProducesResponseType<RoadmapResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RoadmapResponse>> GetStudentRoadmap(
+        Guid studentId,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
         var studentExists = await dbContext.Users
             .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
 
@@ -213,61 +317,48 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         var nodes = await dbContext.RoadmapNodes
             .AsNoTracking()
-            .Include(n => n.Skill)
-            .Where(n => n.RoadmapId == roadmap.Id)
-            .OrderBy(n => n.OrderIndex)
+            .Include(node => node.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
+            .Include(node => node.Resources)
+            .ThenInclude(item => item.LearningResource)
+            .ThenInclude(resource => resource.Skill)
+            .Where(node => node.RoadmapId == roadmap.Id)
+            .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return Ok(new
-        {
-            roadmap.Id,
-            roadmap.UserId,
-            roadmap.CareerRoleId,
-            CareerRoleName = roadmap.CareerRole.Name,
-            roadmap.SkillGapReportId,
-            roadmap.Title,
-            roadmap.Description,
-            roadmap.Status,
-            roadmap.Progress,
-            roadmap.CreatedAt,
-            roadmap.UpdatedAt,
-            Nodes = nodes.Select(n => new
-            {
-                n.Id,
-                n.SkillId,
-                SkillName = n.Skill != null ? n.Skill.Name : null,
-                n.ParentNodeId,
-                n.PrerequisiteNodeId,
-                n.Title,
-                n.Description,
-                n.NodeType,
-                n.Status,
-                n.Level,
-                n.OrderIndex,
-                n.EstimatedHours,
-                n.Priority
-            })
-        });
+        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, nodes));
     }
 
     // POST /api/counselor/feedback
-    // Tạo feedback cho sinh viên
+    // Tạo feedback đầy đủ nghiệp vụ cho sinh viên (yêu cầu thuộc phân công)
     [HttpPost("feedback")]
     [ProducesResponseType<CounselorFeedbackResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<CounselorFeedbackResponse>> CreateFeedback(
         CreateCounselorFeedbackRequest request,
         CancellationToken cancellationToken)
     {
-        if (string.IsNullOrWhiteSpace(request.Comment))
+        if (string.IsNullOrWhiteSpace(request.FeedbackText))
         {
-            return BadRequest(new { message = "Comment is required." });
+            return BadRequest(new { message = "FeedbackText is required." });
+        }
+
+        if (request.Rating is < 1 or > 5)
+        {
+            return BadRequest(new { message = "Rating must be between 1 and 5." });
         }
 
         var counselorId = GetCurrentUserId();
 
-        // Xác nhận sinh viên tồn tại
+        // 1. Xác thực phân công cố vấn - sinh viên
+        if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
+
+        // 2. Xác nhận sinh viên tồn tại
         var studentExists = await dbContext.Users
             .AnyAsync(u => u.Id == request.StudentId && u.Role == UserRoles.Student, cancellationToken);
 
@@ -276,7 +367,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return NotFound(new { message = "Student was not found." });
         }
 
-        // Xác nhận roadmapId nếu được cung cấp
+        // 3. Xác nhận roadmapId nếu được cung cấp
         if (request.RoadmapId is not null)
         {
             var roadmapExists = await dbContext.Roadmaps
@@ -287,7 +378,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             }
         }
 
-        // Xác nhận skillGapReportId nếu được cung cấp
+        // 4. Xác nhận skillGapReportId nếu được cung cấp
         if (request.SkillGapReportId is not null)
         {
             var reportExists = await dbContext.SkillGapReports
@@ -306,7 +397,10 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             StudentId = request.StudentId,
             RoadmapId = request.RoadmapId,
             SkillGapReportId = request.SkillGapReportId,
-            Comment = request.Comment.Trim(),
+            FeedbackText = request.FeedbackText.Trim(),
+            Rating = request.Rating,
+            Recommendations = request.Recommendations?.Trim(),
+            PrivateNotes = request.PrivateNotes?.Trim(),
             CreatedAt = now,
             UpdatedAt = now
         };
@@ -319,11 +413,11 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         return CreatedAtAction(
             nameof(GetMyFeedbacks),
-            ToFeedbackResponse(feedback, null));
+            ToFeedbackResponse(feedback));
     }
 
     // GET /api/counselor/feedback
-    // Lấy danh sách các feedback mà counselor đang login đã viết
+    // Lấy danh sách các feedback mà cố vấn đang đăng nhập tự viết
     [HttpGet("feedback")]
     [ProducesResponseType<IReadOnlyList<CounselorFeedbackResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<CounselorFeedbackResponse>>> GetMyFeedbacks(
@@ -338,19 +432,24 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return Ok(feedbacks.Select(f => ToFeedbackResponse(f, null)).ToList());
+        return Ok(feedbacks.Select(f => ToFeedbackResponse(f)).ToList());
     }
 
     // GET /api/counselor/students/{studentId}/feedback
-    // Lấy các feedback counselor đã gửi cho một sinh viên cụ thể
+    // Lấy danh sách feedback mà cố vấn đang đăng nhập đã gửi riêng cho sinh viên này (yêu cầu thuộc phân công)
     [HttpGet("students/{studentId:guid}/feedback")]
     [ProducesResponseType<IReadOnlyList<CounselorFeedbackResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<IReadOnlyList<CounselorFeedbackResponse>>> GetFeedbacksForStudent(
         Guid studentId,
         CancellationToken cancellationToken)
     {
         var counselorId = GetCurrentUserId();
+        if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+        }
 
         var studentExists = await dbContext.Users
             .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
@@ -367,18 +466,70 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             .OrderByDescending(f => f.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        return Ok(feedbacks.Select(f => ToFeedbackResponse(f, studentId)).ToList());
+        return Ok(feedbacks.Select(f => ToFeedbackResponse(f)).ToList());
+    }
+
+    // ── Helper Methods ──────────────────────────────────────────────────────────
+
+    private async Task<bool> IsStudentAssignedToCounselorAsync(Guid studentId, Guid counselorId, CancellationToken cancellationToken)
+    {
+        var hasAssignments = await dbContext.CounselorAssignments
+            .AnyAsync(a => a.CounselorId == counselorId && a.Status == "Active", cancellationToken);
+
+        if (!hasAssignments)
+        {
+            // Trả về true để bỏ qua việc lọc nếu hệ thống chưa có phân công nào (tiện lợi cho việc Demo/Test ban đầu)
+            return true;
+        }
+
+        return await dbContext.CounselorAssignments
+            .AnyAsync(a => a.CounselorId == counselorId && a.StudentId == studentId && a.Status == "Active", cancellationToken);
     }
 
     private Guid GetCurrentUserId()
     {
-        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.TryParse(value, out var userId)
-            ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+        var nameIdentifier = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (string.IsNullOrEmpty(nameIdentifier) || !Guid.TryParse(nameIdentifier, out var userId))
+        {
+            throw new InvalidOperationException("User ID is missing or invalid in JWT token.");
+        }
+        return userId;
     }
 
-    private static CounselorFeedbackResponse ToFeedbackResponse(CounselorFeedback feedback, Guid? fixedStudentId) =>
+    private async Task<ActionResult<CounselorSkillGapReportResponse>> GetSkillGapReportInternalAsync(
+        SkillGapReport report,
+        CancellationToken cancellationToken)
+    {
+        var items = await dbContext.SkillGapReportItems
+            .AsNoTracking()
+            .Include(i => i.Skill)
+            .Where(i => i.SkillGapReportId == report.Id)
+            .OrderBy(i => i.Priority)
+            .ThenBy(i => i.Skill.Name)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new CounselorSkillGapReportResponse(
+            report.Id,
+            report.UserId,
+            report.CareerRoleId,
+            report.CareerRole.Name,
+            report.MatchScore,
+            report.Summary,
+            report.CreatedAt,
+            items.Select(i => new CounselorSkillGapReportItemResponse(
+                i.SkillId,
+                i.Skill.Name,
+                i.Skill.Category,
+                i.CurrentLevel,
+                i.RequiredLevel,
+                i.Status,
+                i.Priority,
+                i.Recommendation
+            )).ToList()
+        ));
+    }
+
+    private static CounselorFeedbackResponse ToFeedbackResponse(CounselorFeedback feedback) =>
         new(
             feedback.Id,
             feedback.CounselorId,
@@ -387,18 +538,110 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             feedback.Student?.Email,
             feedback.RoadmapId,
             feedback.SkillGapReportId,
-            feedback.Comment,
+            feedback.FeedbackText,
+            feedback.Rating,
+            feedback.Recommendations,
+            feedback.PrivateNotes,
             feedback.CreatedAt,
             feedback.UpdatedAt);
+
+    // ── Mappers for RoadmapResponse ──────────────────────────────────────────
+
+    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes) =>
+        new(
+            roadmap.Id,
+            roadmap.CareerRoleId,
+            careerRoleName,
+            roadmap.SkillGapReportId,
+            roadmap.Title,
+            roadmap.Description,
+            roadmap.Status,
+            roadmap.Progress,
+            roadmap.CreatedAt,
+            roadmap.UpdatedAt,
+            nodes.OrderBy(node => node.OrderIndex).Select(node => ToNodeResponse(node)).ToList(),
+            BuildNodeTree(nodes));
+
+    private static IReadOnlyList<RoadmapNodeResponse> BuildNodeTree(IReadOnlyList<RoadmapNode> nodes)
+    {
+        var nodesByParent = nodes
+            .OrderBy(node => node.OrderIndex)
+            .GroupBy(node => node.ParentNodeId ?? Guid.Empty)
+            .ToDictionary(group => group.Key, group => group.ToList());
+
+        return BuildNodeChildren(Guid.Empty, nodesByParent);
+    }
+
+    private static IReadOnlyList<RoadmapNodeResponse> BuildNodeChildren(
+        Guid parentNodeId,
+        IReadOnlyDictionary<Guid, List<RoadmapNode>> nodesByParent)
+    {
+        if (!nodesByParent.TryGetValue(parentNodeId, out var children))
+        {
+            return [];
+        }
+
+        return children
+            .OrderBy(node => node.OrderIndex)
+            .Select(node => ToNodeResponse(node, BuildNodeChildren(node.Id, nodesByParent)))
+            .ToList();
+    }
+
+    private static RoadmapNodeResponse ToNodeResponse(
+        RoadmapNode node,
+        IReadOnlyList<RoadmapNodeResponse>? children = null)
+    {
+        var learningResources = node.Resources
+            .OrderBy(item => item.OrderIndex)
+            .Select(item => ToLearningResourceResponse(item.LearningResource))
+            .ToList();
+        var primaryLearningResource = learningResources.FirstOrDefault()
+            ?? (node.LearningResource is null ? null : ToLearningResourceResponse(node.LearningResource));
+
+        return new(
+            node.Id,
+            node.SkillId,
+            node.LearningResourceId,
+            node.PrerequisiteNodeId,
+            node.ParentNodeId,
+            node.Title,
+            node.Description,
+            node.NodeType,
+            node.Status,
+            node.Level,
+            node.OrderIndex,
+            node.EstimatedHours,
+            node.Priority,
+            primaryLearningResource,
+            learningResources,
+            children ?? []);
+    }
+
+    private static RoadmapLearningResourceResponse ToLearningResourceResponse(LearningResource resource) =>
+        new(
+            resource.Id,
+            resource.SkillId,
+            resource.Skill?.Name,
+            resource.Title,
+            resource.Url,
+            resource.StorageObjectName is null ? "Link" : "File",
+            resource.ContentType,
+            resource.FileSize,
+            resource.ResourceType,
+            resource.Difficulty,
+            resource.EstimatedHours);
 }
 
 // ── Request DTOs ─────────────────────────────────────────────────────────────
 
 public sealed record CreateCounselorFeedbackRequest(
     Guid StudentId,
-    string Comment,
+    string FeedbackText,
     Guid? RoadmapId,
-    Guid? SkillGapReportId);
+    Guid? SkillGapReportId,
+    int? Rating,
+    string? Recommendations,
+    string? PrivateNotes);
 
 // ── Response DTOs ─────────────────────────────────────────────────────────────
 
@@ -455,6 +698,38 @@ public sealed record CounselorFeedbackResponse(
     string? StudentEmail,
     Guid? RoadmapId,
     Guid? SkillGapReportId,
-    string Comment,
+    string FeedbackText,
+    int? Rating,
+    string? Recommendations,
+    string? PrivateNotes,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record CounselorSkillGapHistoryResponse(
+    Guid Id,
+    Guid UserId,
+    Guid CareerRoleId,
+    string CareerRoleName,
+    decimal MatchScore,
+    string? Summary,
+    DateTimeOffset CreatedAt);
+
+public sealed record CounselorSkillGapReportResponse(
+    Guid Id,
+    Guid UserId,
+    Guid CareerRoleId,
+    string CareerRoleName,
+    decimal MatchScore,
+    string? Summary,
+    DateTimeOffset CreatedAt,
+    IReadOnlyList<CounselorSkillGapReportItemResponse> Items);
+
+public sealed record CounselorSkillGapReportItemResponse(
+    Guid SkillId,
+    string SkillName,
+    string SkillCategory,
+    string CurrentLevel,
+    string RequiredLevel,
+    string Status,
+    int Priority,
+    string? Recommendation);
