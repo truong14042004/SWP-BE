@@ -10,7 +10,7 @@ namespace SWP_BE.Services;
 
 public sealed class GoogleAuthService(
     AppDbContext dbContext,
-    IJwtTokenService jwtTokenService,
+    IRefreshTokenService refreshTokenService,
     IOptions<GoogleAuthOptions> googleOptions) : IGoogleAuthService
 {
     private readonly GoogleAuthOptions _googleOptions = googleOptions.Value;
@@ -67,11 +67,7 @@ public sealed class GoogleAuthService(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        var token = jwtTokenService.CreateAccessToken(user);
-        return new AuthResponse(
-            token.Token,
-            token.ExpiresAt,
-            new AuthUserResponse(user.Id, user.Username, user.Email, user.FullName, user.AvatarUrl, user.Role));
+        return await refreshTokenService.CreateSessionAsync(user, cancellationToken);
     }
 
     private async Task<GoogleJsonWebSignature.Payload> VerifyGoogleTokenAsync(string idToken)

@@ -2,6 +2,7 @@ namespace SWP_BE.Contracts.Auth;
 
 public sealed record AuthResponse(
     string AccessToken,
+    string RefreshToken,
     DateTimeOffset ExpiresAt,
     AuthUserResponse User);
 

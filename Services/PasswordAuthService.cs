@@ -9,7 +9,7 @@ namespace SWP_BE.Services;
 
 public sealed class PasswordAuthService(
     AppDbContext dbContext,
-    IJwtTokenService jwtTokenService,
+    IRefreshTokenService refreshTokenService,
     IPasswordHasher<User> passwordHasher,
     IEmailSender emailSender) : IPasswordAuthService
 {
@@ -142,7 +142,7 @@ public sealed class PasswordAuthService(
         dbContext.PendingRegistrations.Remove(pendingRegistration);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreateResponse(user);
+        return await refreshTokenService.CreateSessionAsync(user, cancellationToken);
     }
 
     public async Task<AuthResponse> LoginAsync(
@@ -179,16 +179,7 @@ public sealed class PasswordAuthService(
             await dbContext.SaveChangesAsync(cancellationToken);
         }
 
-        return CreateResponse(user);
-    }
-
-    private AuthResponse CreateResponse(User user)
-    {
-        var token = jwtTokenService.CreateAccessToken(user);
-        return new AuthResponse(
-            token.Token,
-            token.ExpiresAt,
-            new AuthUserResponse(user.Id, user.Username, user.Email, user.FullName, user.AvatarUrl, user.Role));
+        return await refreshTokenService.CreateSessionAsync(user, cancellationToken);
     }
 
     private static string CreateOtp() =>

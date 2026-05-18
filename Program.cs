@@ -41,6 +41,7 @@ builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
 builder.Services.AddScoped<IJwtTokenService, JwtTokenService>();
+builder.Services.AddScoped<IRefreshTokenService, RefreshTokenService>();
 builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
@@ -95,7 +96,14 @@ builder.Services.AddSwaggerGen(options =>
         }
     });
 });
-var defaultAllowedOrigins = new[] { "https://swp-fe-careermap-2026-47ca0.web.app" };
+var defaultAllowedOrigins = new[]
+{
+    "https://swp-fe-careermap-2026-47ca0.web.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:5173",
+    "http://localhost:5174",
+    "http://127.0.0.1:5174"
+};
 var configuredAllowedOrigins = builder.Configuration.GetSection("Cors:AllowedOrigins").Get<string[]>()
     ?? [];
 var allowedOrigins = defaultAllowedOrigins

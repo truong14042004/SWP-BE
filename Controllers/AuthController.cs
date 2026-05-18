@@ -14,6 +14,7 @@ namespace SWP_BE.Controllers;
 public sealed class AuthController(
     IGoogleAuthService googleAuthService,
     IPasswordAuthService passwordAuthService,
+    IRefreshTokenService refreshTokenService,
     AppDbContext dbContext,
     ILogger<AuthController> logger) : ControllerBase
 {
@@ -102,6 +103,33 @@ public sealed class AuthController(
                 source = exception.Source
             });
         }
+    }
+
+    [HttpPost("refresh")]
+    [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    public async Task<ActionResult<AuthResponse>> Refresh(
+        RefreshTokenRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await refreshTokenService.RefreshAsync(request.RefreshToken, cancellationToken));
+        }
+        catch (UnauthorizedAccessException exception)
+        {
+            return Unauthorized(new { message = exception.Message });
+        }
+    }
+
+    [HttpPost("revoke")]
+    [ProducesResponseType<AuthMessageResponse>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<AuthMessageResponse>> Revoke(
+        RefreshTokenRequest request,
+        CancellationToken cancellationToken)
+    {
+        await refreshTokenService.RevokeAsync(request.RefreshToken, cancellationToken);
+        return Ok(new AuthMessageResponse("Refresh token revoked.", string.Empty));
     }
 
     [Authorize]
