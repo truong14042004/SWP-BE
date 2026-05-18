@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
 using Microsoft.OpenApi.Models;
 using Google.Cloud.Storage.V1;
+using PayOS;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Options;
@@ -33,6 +34,8 @@ builder.Services.Configure<GithubOAuthOptions>(
     builder.Configuration.GetSection(GithubOAuthOptions.SectionName));
 builder.Services.Configure<StorageOptions>(
     builder.Configuration.GetSection(StorageOptions.SectionName));
+builder.Services.Configure<PayOsOptions>(
+    builder.Configuration.GetSection(PayOsOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -46,6 +49,14 @@ builder.Services.AddSingleton(_ => StorageClient.Create());
 builder.Services.AddScoped<IFileStorageService, GoogleCloudStorageService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
+builder.Services.AddSingleton(serviceProvider =>
+{
+    var options = serviceProvider.GetRequiredService<IConfiguration>()
+        .GetSection(PayOsOptions.SectionName)
+        .Get<PayOsOptions>() ?? new PayOsOptions();
+
+    return new PayOSClient(options.ClientId, options.ApiKey, options.ChecksumKey);
+});
 
 builder.Services.AddControllers();
 builder.Services.AddEndpointsApiExplorer();

@@ -663,6 +663,34 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(plan => plan.BillingCycle).HasMaxLength(30).IsRequired();
             entity.Property(plan => plan.FeaturesJson).HasColumnType("jsonb");
             entity.Property(plan => plan.IsActive).HasDefaultValue(true);
+
+            entity.HasData(
+                new SubscriptionPlan
+                {
+                    Id = Guid.Parse("44444444-4444-4444-4444-444444444101"),
+                    Name = "Free",
+                    Description = "Free access with 2 mentor reviews.",
+                    Price = 0m,
+                    Currency = "VND",
+                    BillingCycle = "Free",
+                    FeaturesJson = """{"mentorReviewLimit":2,"features":["2 mentor reviews","Basic roadmap resources"]}""",
+                    IsActive = true,
+                    CreatedAt = SeededAt,
+                    UpdatedAt = SeededAt
+                },
+                new SubscriptionPlan
+                {
+                    Id = Guid.Parse("44444444-4444-4444-4444-444444444102"),
+                    Name = "Premium Monthly",
+                    Description = "Monthly access with 5 mentor reviews.",
+                    Price = 99000m,
+                    Currency = "VND",
+                    BillingCycle = "Monthly",
+                    FeaturesJson = """{"mentorReviewLimit":5,"features":["5 mentor reviews per month","AI mentor chat","GitHub analysis","Roadmap resources"]}""",
+                    IsActive = true,
+                    CreatedAt = SeededAt,
+                    UpdatedAt = SeededAt
+                });
         });
 
         modelBuilder.Entity<Subscription>(entity =>
@@ -678,7 +706,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne(subscription => subscription.User)
                 .WithMany()
                 .HasForeignKey(subscription => subscription.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(subscription => subscription.Plan)
                 .WithMany()
                 .HasForeignKey(subscription => subscription.PlanId)
@@ -704,7 +732,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne(transaction => transaction.User)
                 .WithMany()
                 .HasForeignKey(transaction => transaction.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(transaction => transaction.Subscription)
                 .WithMany()
                 .HasForeignKey(transaction => transaction.SubscriptionId)
@@ -741,7 +769,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne(invoice => invoice.User)
                 .WithMany()
                 .HasForeignKey(invoice => invoice.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
             entity.HasOne(invoice => invoice.PaymentTransaction)
                 .WithOne()
                 .HasForeignKey<Invoice>(invoice => invoice.PaymentTransactionId)
