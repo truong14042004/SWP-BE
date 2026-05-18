@@ -6,6 +6,7 @@ using PayOS.Exceptions;
 using PayOS.Models.Webhooks;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -14,6 +15,7 @@ namespace SWP_BE.Controllers;
 public sealed class PayOsController(
     AppDbContext dbContext,
     PayOSClient payOsClient,
+    IPaymentProcessingService paymentProcessingService,
     ILogger<PayOsController> logger) : ControllerBase
 {
     private const string Provider = "PayOS";
@@ -45,6 +47,7 @@ public sealed class PayOsController(
                 "PayOS webhook was verified but processing failed. OrderCode={OrderCode} Reference={Reference}",
                 webhookData.OrderCode,
                 webhookData.Reference);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "PayOS webhook processing failed." });
         }
 
         return Ok(new { success = true });
@@ -94,52 +97,27 @@ public sealed class PayOsController(
 
         if (payment is null)
         {
-            webhookEvent.ProcessedAt = now;
-            await dbContext.SaveChangesAsync(cancellationToken);
-            return;
+            if (IsLikelyVerificationWebhook(webhookData))
+            {
+                webhookEvent.ProcessedAt = now;
+                await dbContext.SaveChangesAsync(cancellationToken);
+                return;
+            }
+
+            throw new InvalidOperationException($"Payment transaction was not found for PayOS order code {webhookData.OrderCode}.");
         }
 
         if (webhookData.Code == "00")
         {
-            payment.Status = "Paid";
-            payment.PaidAt ??= now;
-
-            if (payment.Subscription is not null)
-            {
-                payment.Subscription.Status = "Active";
-                payment.Subscription.StartedAt ??= now;
-                payment.Subscription.ExpiredAt ??= CalculateExpiredAt(
-                    payment.Subscription.StartedAt.Value,
-                    payment.Subscription.Plan.BillingCycle);
-                payment.Subscription.ProviderSubscriptionId = webhookData.PaymentLinkId;
-                payment.Subscription.UpdatedAt = now;
-            }
-
-            var hasInvoice = await dbContext.Invoices
-                .AnyAsync(invoice => invoice.PaymentTransactionId == payment.Id, cancellationToken);
-            if (!hasInvoice)
-            {
-                dbContext.Invoices.Add(new Invoice
-                {
-                    Id = Guid.NewGuid(),
-                    UserId = payment.UserId,
-                    PaymentTransactionId = payment.Id,
-                    InvoiceNumber = $"INV-{webhookData.OrderCode}",
-                    Amount = payment.Amount,
-                    Currency = payment.Currency,
-                    IssuedAt = now,
-                    CreatedAt = now
-                });
-            }
+            await paymentProcessingService.MarkPaidAsync(
+                payment,
+                now,
+                webhookData.PaymentLinkId,
+                cancellationToken);
         }
         else
         {
-            payment.Status = "Failed";
-            if (payment.Subscription is not null)
-            {
-                payment.Subscription.Status = "PaymentFailed";
-                payment.Subscription.UpdatedAt = now;
-            }
+            paymentProcessingService.MarkFailed(payment, now);
         }
 
         payment.UpdatedAt = now;
@@ -147,8 +125,6 @@ public sealed class PayOsController(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
-    private static DateTimeOffset CalculateExpiredAt(DateTimeOffset startedAt, string billingCycle) =>
-        billingCycle.Equals("Free", StringComparison.OrdinalIgnoreCase)
-            ? startedAt.AddYears(100)
-            : startedAt.AddMonths(1);
+    private static bool IsLikelyVerificationWebhook(WebhookData webhookData) =>
+        webhookData.OrderCode <= 0 || webhookData.OrderCode.ToString().Length < 13;
 }

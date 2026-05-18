@@ -3,13 +3,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize(Roles = UserRoles.Admin)]
 [Route("api/admin/payments")]
-public sealed class AdminPaymentsController(AppDbContext dbContext) : ControllerBase
+public sealed class AdminPaymentsController(
+    AppDbContext dbContext,
+    IPaymentProcessingService paymentProcessingService) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<AdminPaymentTransactionResponse>>> GetPayments(
@@ -72,6 +75,7 @@ public sealed class AdminPaymentsController(AppDbContext dbContext) : Controller
             .Include(item => item.User)
             .Include(item => item.Plan)
             .Include(item => item.Subscription)
+            .ThenInclude(subscription => subscription!.Plan)
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return payment is null
@@ -94,6 +98,7 @@ public sealed class AdminPaymentsController(AppDbContext dbContext) : Controller
             .Include(item => item.User)
             .Include(item => item.Plan)
             .Include(item => item.Subscription)
+            .ThenInclude(subscription => subscription!.Plan)
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (payment is null)
         {
@@ -101,11 +106,20 @@ public sealed class AdminPaymentsController(AppDbContext dbContext) : Controller
         }
 
         var now = DateTimeOffset.UtcNow;
-        payment.Status = request.Status.Trim();
-        payment.UpdatedAt = now;
-        if (payment.Status.Equals("Paid", StringComparison.OrdinalIgnoreCase))
+        var normalizedStatus = request.Status.Trim();
+        if (normalizedStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
         {
-            payment.PaidAt ??= now;
+            await paymentProcessingService.MarkPaidAsync(payment, now, payment.Subscription?.ProviderSubscriptionId, cancellationToken);
+        }
+        else if (normalizedStatus.Equals("Failed", StringComparison.OrdinalIgnoreCase)
+            || normalizedStatus.Equals("PaymentFailed", StringComparison.OrdinalIgnoreCase))
+        {
+            paymentProcessingService.MarkFailed(payment, now);
+        }
+        else
+        {
+            payment.Status = normalizedStatus;
+            payment.UpdatedAt = now;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);

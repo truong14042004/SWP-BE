@@ -9,6 +9,7 @@ using PayOS.Models.V2.PaymentRequests;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Options;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -17,7 +18,8 @@ namespace SWP_BE.Controllers;
 public sealed class SubscriptionsController(
     AppDbContext dbContext,
     PayOSClient payOsClient,
-    IOptions<PayOsOptions> payOsOptions) : ControllerBase
+    IOptions<PayOsOptions> payOsOptions,
+    IPaymentProcessingService paymentProcessingService) : ControllerBase
 {
     private const string Provider = "PayOS";
 
@@ -64,9 +66,57 @@ public sealed class SubscriptionsController(
         }
 
         var amount = decimal.ToInt32(decimal.Round(plan.Price, 0, MidpointRounding.AwayFromZero));
-        if (amount <= 0)
+        if (amount < 0)
         {
-            return BadRequest(new { message = "Plan price must be greater than zero." });
+            return BadRequest(new { message = "Plan price cannot be negative." });
+        }
+
+        if (amount == 0)
+        {
+            var existingFreeSubscription = await dbContext.Subscriptions
+                .Include(subscription => subscription.Plan)
+                .Where(subscription => subscription.UserId == userId
+                    && subscription.PlanId == plan.Id
+                    && subscription.Status == "Active")
+                .OrderByDescending(subscription => subscription.CreatedAt)
+                .FirstOrDefaultAsync(cancellationToken);
+
+            if (existingFreeSubscription is not null)
+            {
+                return Ok(new SubscriptionCheckoutResponse(
+                    null,
+                    existingFreeSubscription.Id,
+                    null,
+                    0,
+                    plan.Currency,
+                    existingFreeSubscription.Status,
+                    string.Empty));
+            }
+
+            var activatedAt = DateTimeOffset.UtcNow;
+            var freeSubscription = new Subscription
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                PlanId = plan.Id,
+                Status = "Active",
+                StartedAt = activatedAt,
+                ExpiredAt = paymentProcessingService.CalculateExpiredAt(activatedAt, plan.BillingCycle),
+                Provider = "Free",
+                CreatedAt = activatedAt,
+                UpdatedAt = activatedAt
+            };
+            dbContext.Subscriptions.Add(freeSubscription);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            return Ok(new SubscriptionCheckoutResponse(
+                null,
+                freeSubscription.Id,
+                null,
+                0,
+                plan.Currency,
+                freeSubscription.Status,
+                string.Empty));
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -101,23 +151,36 @@ public sealed class SubscriptionsController(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         var options = payOsOptions.Value;
-        var paymentLink = await payOsClient.PaymentRequests.CreateAsync(
-            new CreatePaymentLinkRequest
-            {
-                OrderCode = orderCode,
-                Amount = amount,
-                Description = $"CareerMap {orderCode}",
-                ReturnUrl = string.IsNullOrWhiteSpace(request.ReturnUrl) ? options.ReturnUrl : request.ReturnUrl,
-                CancelUrl = string.IsNullOrWhiteSpace(request.CancelUrl) ? options.CancelUrl : request.CancelUrl
-            },
-            new RequestOptions<CreatePaymentLinkRequest>
-            {
-                CancellationToken = cancellationToken
-            });
+        try
+        {
+            var paymentLink = await payOsClient.PaymentRequests.CreateAsync(
+                new CreatePaymentLinkRequest
+                {
+                    OrderCode = orderCode,
+                    Amount = amount,
+                    Description = $"CareerMap {orderCode}",
+                    ReturnUrl = string.IsNullOrWhiteSpace(request.ReturnUrl) ? options.ReturnUrl : request.ReturnUrl,
+                    CancelUrl = string.IsNullOrWhiteSpace(request.CancelUrl) ? options.CancelUrl : request.CancelUrl
+                },
+                new RequestOptions<CreatePaymentLinkRequest>
+                {
+                    CancellationToken = cancellationToken
+                });
 
-        payment.CheckoutUrl = paymentLink.CheckoutUrl;
-        payment.UpdatedAt = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
+            payment.CheckoutUrl = paymentLink.CheckoutUrl;
+            payment.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch
+        {
+            var failedAt = DateTimeOffset.UtcNow;
+            payment.Status = "PaymentLinkFailed";
+            payment.UpdatedAt = failedAt;
+            subscription.Status = "CheckoutFailed";
+            subscription.UpdatedAt = failedAt;
+            await dbContext.SaveChangesAsync(CancellationToken.None);
+            throw;
+        }
 
         return Ok(new SubscriptionCheckoutResponse(
             payment.Id,
@@ -211,9 +274,9 @@ public sealed record SubscriptionPlanResponse(
     string? FeaturesJson);
 
 public sealed record SubscriptionCheckoutResponse(
-    Guid PaymentTransactionId,
+    Guid? PaymentTransactionId,
     Guid SubscriptionId,
-    long OrderCode,
+    long? OrderCode,
     decimal Amount,
     string Currency,
     string Status,
