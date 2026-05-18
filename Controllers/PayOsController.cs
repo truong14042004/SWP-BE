@@ -34,10 +34,34 @@ public sealed class PayOsController(
             return Unauthorized(new { message = "Invalid PayOS webhook signature." });
         }
 
+        try
+        {
+            await ProcessWebhook(webhook, webhookData, cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(
+                exception,
+                "PayOS webhook was verified but processing failed. OrderCode={OrderCode} Reference={Reference}",
+                webhookData.OrderCode,
+                webhookData.Reference);
+        }
+
+        return Ok(new { success = true });
+    }
+
+    private async Task ProcessWebhook(
+        Webhook webhook,
+        WebhookData webhookData,
+        CancellationToken cancellationToken)
+    {
         var payloadJson = JsonSerializer.Serialize(webhook);
-        var eventId = string.IsNullOrWhiteSpace(webhookData.Reference)
-            ? $"{webhookData.OrderCode}:{webhookData.Code}:{webhookData.PaymentLinkId}"
-            : webhookData.Reference;
+        var eventId = !string.IsNullOrWhiteSpace(webhookData.Reference)
+            ? webhookData.Reference
+            : !string.IsNullOrWhiteSpace(webhookData.PaymentLinkId)
+                ? webhookData.PaymentLinkId
+                : $"{webhookData.OrderCode}:{webhookData.Code ?? webhook.Code ?? "Unknown"}";
+        var eventType = webhookData.Code ?? webhook.Code ?? "Unknown";
 
         var existingEvent = await dbContext.PaymentWebhookEvents
             .SingleOrDefaultAsync(
@@ -45,7 +69,7 @@ public sealed class PayOsController(
                 cancellationToken);
         if (existingEvent is not null)
         {
-            return Ok(new { success = true, message = "Webhook already processed." });
+            return;
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -54,7 +78,7 @@ public sealed class PayOsController(
             Id = Guid.NewGuid(),
             Provider = Provider,
             EventId = eventId,
-            EventType = webhookData.Code,
+            EventType = eventType,
             PayloadJson = payloadJson,
             CreatedAt = now
         };
@@ -72,7 +96,7 @@ public sealed class PayOsController(
         {
             webhookEvent.ProcessedAt = now;
             await dbContext.SaveChangesAsync(cancellationToken);
-            return Ok(new { success = true, message = "Payment transaction was not found." });
+            return;
         }
 
         if (webhookData.Code == "00")
@@ -121,8 +145,6 @@ public sealed class PayOsController(
         payment.UpdatedAt = now;
         webhookEvent.ProcessedAt = now;
         await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new { success = true });
     }
 
     private static DateTimeOffset CalculateExpiredAt(DateTimeOffset startedAt, string billingCycle) =>
