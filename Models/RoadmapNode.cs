@@ -20,5 +20,6 @@ public sealed class RoadmapNode
     public Roadmap Roadmap { get; set; } = null!;
     public Skill? Skill { get; set; }
     public LearningResource? LearningResource { get; set; }
+    public ICollection<RoadmapNodeResource> Resources { get; set; } = [];
     public RoadmapNode? PrerequisiteNode { get; set; }
 }

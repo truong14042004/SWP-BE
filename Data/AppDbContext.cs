@@ -19,6 +19,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<SkillGapReportItem> SkillGapReportItems => Set<SkillGapReportItem>();
     public DbSet<Roadmap> Roadmaps => Set<Roadmap>();
     public DbSet<RoadmapNode> RoadmapNodes => Set<RoadmapNode>();
+    public DbSet<RoadmapNodeResource> RoadmapNodeResources => Set<RoadmapNodeResource>();
     public DbSet<LearningResource> LearningResources => Set<LearningResource>();
     public DbSet<MentorSession> MentorSessions => Set<MentorSession>();
     public DbSet<GithubRepository> GithubRepositories => Set<GithubRepository>();
@@ -495,6 +496,24 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(node => node.PrerequisiteNodeId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<RoadmapNodeResource>(entity =>
+        {
+            entity.ToTable("roadmap_node_resources");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.RoadmapNodeId, item.LearningResourceId }).IsUnique();
+            entity.HasIndex(item => item.LearningResourceId);
+            entity.HasIndex(item => new { item.RoadmapNodeId, item.OrderIndex });
+            entity.HasCheckConstraint("CK_roadmap_node_resources_OrderIndex", "\"OrderIndex\" >= 1");
+            entity.HasOne(item => item.RoadmapNode)
+                .WithMany(node => node.Resources)
+                .HasForeignKey(item => item.RoadmapNodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.LearningResource)
+                .WithMany()
+                .HasForeignKey(item => item.LearningResourceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<LearningResource>(entity =>
