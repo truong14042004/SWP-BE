@@ -182,6 +182,74 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         });
     }
 
+    // GET /api/counselor/students/{studentId}/roadmap
+    // Lấy roadmap gần nhất của một sinh viên
+    [HttpGet("students/{studentId:guid}/roadmap")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetStudentRoadmap(
+        Guid studentId,
+        CancellationToken cancellationToken)
+    {
+        var studentExists = await dbContext.Users
+            .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
+
+        if (!studentExists)
+        {
+            return NotFound(new { message = "Student was not found." });
+        }
+
+        var roadmap = await dbContext.Roadmaps
+            .AsNoTracking()
+            .Include(r => r.CareerRole)
+            .Where(r => r.UserId == studentId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (roadmap is null)
+        {
+            return NotFound(new { message = "No roadmap found for this student." });
+        }
+
+        var nodes = await dbContext.RoadmapNodes
+            .AsNoTracking()
+            .Include(n => n.Skill)
+            .Where(n => n.RoadmapId == roadmap.Id)
+            .OrderBy(n => n.OrderIndex)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new
+        {
+            roadmap.Id,
+            roadmap.UserId,
+            roadmap.CareerRoleId,
+            CareerRoleName = roadmap.CareerRole.Name,
+            roadmap.SkillGapReportId,
+            roadmap.Title,
+            roadmap.Description,
+            roadmap.Status,
+            roadmap.Progress,
+            roadmap.CreatedAt,
+            roadmap.UpdatedAt,
+            Nodes = nodes.Select(n => new
+            {
+                n.Id,
+                n.SkillId,
+                SkillName = n.Skill != null ? n.Skill.Name : null,
+                n.ParentNodeId,
+                n.PrerequisiteNodeId,
+                n.Title,
+                n.Description,
+                n.NodeType,
+                n.Status,
+                n.Level,
+                n.OrderIndex,
+                n.EstimatedHours,
+                n.Priority
+            })
+        });
+    }
+
     private Guid GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
