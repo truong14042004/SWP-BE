@@ -12,13 +12,14 @@ using SWP_BE.Data;
 namespace SWP_BE.Controllers;
 
 [ApiController]
-[AllowAnonymous] // Public autocomplete search cho guest
+[Authorize] // Yêu cầu đăng nhập ở mức controller
 [Route("api/search")]
 public sealed class SearchController(AppDbContext dbContext) : ControllerBase
 {
     // GET /api/search/skills?q=keyword
     // Tìm kiếm kỹ năng theo keyword tên hoặc danh mục, phục vụ autocomplete
     [HttpGet("skills")]
+    [AllowAnonymous] // Cho phép Guest tìm kỹ năng công khai
     [ProducesResponseType<IReadOnlyList<SkillSearchResultResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<SkillSearchResultResponse>>> SearchSkills(
         [FromQuery] string? q,

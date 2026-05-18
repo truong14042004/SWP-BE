@@ -27,25 +27,14 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
     {
         var counselorId = GetCurrentUserId();
 
-        var query = dbContext.Users
+        var assignedStudentIds = await dbContext.CounselorAssignments
+            .Where(a => a.CounselorId == counselorId && a.Status == "Active")
+            .Select(a => a.StudentId)
+            .ToListAsync(cancellationToken);
+
+        var students = await dbContext.Users
             .AsNoTracking()
-            .Where(user => user.Role == UserRoles.Student && user.IsActive);
-
-        // Kiểm tra xem cố vấn hiện tại có phân công nào không
-        var hasAssignments = await dbContext.CounselorAssignments
-            .AnyAsync(a => a.CounselorId == counselorId && a.Status == "Active", cancellationToken);
-
-        if (hasAssignments)
-        {
-            var assignedStudentIds = await dbContext.CounselorAssignments
-                .Where(a => a.CounselorId == counselorId && a.Status == "Active")
-                .Select(a => a.StudentId)
-                .ToListAsync(cancellationToken);
-
-            query = query.Where(user => assignedStudentIds.Contains(user.Id));
-        }
-
-        var students = await query
+            .Where(user => user.Role == UserRoles.Student && user.IsActive && assignedStudentIds.Contains(user.Id))
             .OrderBy(user => user.FullName)
             .Select(user => new CounselorStudentSummaryResponse(
                 user.Id,
@@ -160,8 +149,10 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         return Ok(skills);
     }
 
+    // GET /api/counselor/students/{studentId}/skill-gap
     // GET /api/counselor/students/{studentId}/skill-gap/latest
     // Lấy báo cáo skill gap gần nhất của sinh viên (yêu cầu thuộc phân công)
+    [HttpGet("students/{studentId:guid}/skill-gap")]
     [HttpGet("students/{studentId:guid}/skill-gap/latest")]
     [ProducesResponseType<CounselorSkillGapReportResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]
@@ -473,15 +464,6 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
     private async Task<bool> IsStudentAssignedToCounselorAsync(Guid studentId, Guid counselorId, CancellationToken cancellationToken)
     {
-        var hasAssignments = await dbContext.CounselorAssignments
-            .AnyAsync(a => a.CounselorId == counselorId && a.Status == "Active", cancellationToken);
-
-        if (!hasAssignments)
-        {
-            // Trả về true để bỏ qua việc lọc nếu hệ thống chưa có phân công nào (tiện lợi cho việc Demo/Test ban đầu)
-            return true;
-        }
-
         return await dbContext.CounselorAssignments
             .AnyAsync(a => a.CounselorId == counselorId && a.StudentId == studentId && a.Status == "Active", cancellationToken);
     }

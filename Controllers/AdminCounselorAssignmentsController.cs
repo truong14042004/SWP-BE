@@ -139,7 +139,7 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
     }
 
     // DELETE /api/admin/counselor-assignments/{id}
-    // Hủy phân công cố vấn - sinh viên
+    // Hủy phân công cố vấn - sinh viên (Soft delete - Chuyển sang Inactive)
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> Delete(Guid id, CancellationToken cancellationToken)
     {
@@ -151,7 +151,8 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
             return NotFound(new { message = "Counselor assignment was not found." });
         }
 
-        dbContext.CounselorAssignments.Remove(assignment);
+        assignment.Status = "Inactive";
+        assignment.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
