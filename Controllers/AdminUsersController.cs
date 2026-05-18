@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -13,8 +14,17 @@ namespace SWP_BE.Controllers;
 [Route("api/admin/users")]
 public sealed class AdminUsersController(
     AppDbContext dbContext,
-    IPasswordHasher<User> passwordHasher) : ControllerBase
+    IPasswordHasher<User> passwordHasher,
+    IFileStorageService storageService) : ControllerBase
 {
+    private static readonly HashSet<string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif"
+    };
+
     private static readonly HashSet<string> AllowedRoles = new(StringComparer.Ordinal)
     {
         UserRoles.Student,
@@ -239,6 +249,42 @@ public sealed class AdminUsersController(
         return Ok(ToResponse(user));
     }
 
+    [HttpPost("{id:guid}/avatar")]
+    [Consumes("multipart/form-data")]
+    public async Task<ActionResult<AdminUserResponse>> UploadAvatar(
+        Guid id,
+        [FromForm] UploadAdminUserAvatarRequest request,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (user is null)
+        {
+            return NotFound(new { message = "User was not found." });
+        }
+
+        var validationError = ValidateAvatarFile(request.File);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
+        }
+
+        var oldAvatarObjectName = IsUserObject(id, user.AvatarUrl) ? user.AvatarUrl : null;
+        var objectName = BuildUserObjectName(id, "avatar", request.File!.FileName, request.File.ContentType);
+        await using var stream = request.File.OpenReadStream();
+        var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
+
+        user.AvatarUrl = result.ObjectName;
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (!string.IsNullOrWhiteSpace(oldAvatarObjectName))
+        {
+            await storageService.DeleteAsync(oldAvatarObjectName, cancellationToken);
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+        return Ok(ToResponse(user));
+    }
+
     [HttpDelete("{id:guid}")]
     public async Task<IActionResult> DeleteUser(Guid id, CancellationToken cancellationToken)
     {
@@ -338,10 +384,84 @@ public sealed class AdminUsersController(
         return null;
     }
 
+    private static string? ValidateAvatarFile(IFormFile? file)
+    {
+        if (file is null || file.Length == 0)
+        {
+            return "Avatar image is required.";
+        }
+
+        if (file.Length > 5 * 1024 * 1024)
+        {
+            return "Avatar image must be 5 MB or smaller.";
+        }
+
+        if (!ImageContentTypes.Contains(file.ContentType))
+        {
+            return $"Unsupported avatar content type: {file.ContentType}.";
+        }
+
+        return null;
+    }
+
     private static string NormalizeRequired(string value) => value.Trim().ToLowerInvariant();
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
+
+    private static bool IsUserObject(Guid userId, string? objectName) =>
+        !string.IsNullOrWhiteSpace(objectName)
+        && !objectName.Contains("..", StringComparison.Ordinal)
+        && objectName.StartsWith($"users/{userId}/", StringComparison.Ordinal);
+
+    private static string BuildUserObjectName(
+        Guid userId,
+        string category,
+        string? originalFileName,
+        string? contentType)
+    {
+        var extension = Path.GetExtension(originalFileName);
+        if (string.IsNullOrWhiteSpace(extension))
+        {
+            extension = GetExtension(contentType);
+        }
+
+        var baseName = Path.GetFileNameWithoutExtension(originalFileName);
+        baseName = string.IsNullOrWhiteSpace(baseName)
+            ? "avatar"
+            : new string(baseName
+                .Trim()
+                .ToLowerInvariant()
+                .Select(character => char.IsLetterOrDigit(character) ? character : '-')
+                .ToArray())
+                .Trim('-');
+
+        if (string.IsNullOrWhiteSpace(baseName))
+        {
+            baseName = "avatar";
+        }
+
+        extension = !string.IsNullOrWhiteSpace(extension)
+            && extension.Length <= 11
+            && extension[0] == '.'
+            && extension.Skip(1).All(char.IsLetterOrDigit)
+                ? extension.ToLowerInvariant()
+                : string.Empty;
+
+        return $"users/{userId}/{category}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{baseName}{extension}";
+    }
+
+    private static string GetExtension(string? contentType)
+    {
+        return contentType?.ToLowerInvariant() switch
+        {
+            "image/jpeg" => ".jpg",
+            "image/png" => ".png",
+            "image/webp" => ".webp",
+            "image/gif" => ".gif",
+            _ => string.Empty
+        };
+    }
 
     private static AdminUserResponse ToResponse(User user) =>
         new(
@@ -376,6 +496,11 @@ public sealed record UpdateAdminUserRequest(
     string? Password,
     bool? IsEmailVerified,
     bool? IsActive);
+
+public sealed class UploadAdminUserAvatarRequest
+{
+    public IFormFile File { get; set; } = null!;
+}
 
 public sealed record UpdateUserStatusRequest(bool IsActive);
 

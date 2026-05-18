@@ -357,6 +357,33 @@ public sealed partial class StorageController(
         return await DownloadObject(project.ImageUrl, cancellationToken);
     }
 
+    [HttpGet("public/users/{userId:guid}/avatar/download")]
+    public async Task<IActionResult> DownloadPublicUserAvatar(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+
+        if (user?.AvatarUrl is null)
+        {
+            return NotFound(new { message = "User avatar was not found." });
+        }
+
+        if (Uri.TryCreate(user.AvatarUrl, UriKind.Absolute, out var avatarUri))
+        {
+            return Redirect(avatarUri.ToString());
+        }
+
+        if (!IsUserObject(userId, user.AvatarUrl))
+        {
+            return NotFound(new { message = "User avatar was not found." });
+        }
+
+        return await DownloadObject(user.AvatarUrl, cancellationToken);
+    }
+
     [Authorize]
     [HttpDelete]
     public async Task<IActionResult> Delete(
