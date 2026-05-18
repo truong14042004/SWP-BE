@@ -72,12 +72,19 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
         var activeUsers = await dbContext.Users.CountAsync(user => user.IsActive, cancellationToken);
         var inactiveUsers = totalUsers - activeUsers;
 
-        var usersByRole = await dbContext.Users
+        var userRoleCounts = await dbContext.Users
             .AsNoTracking()
             .GroupBy(user => user.Role)
-            .Select(group => new CountByNameResponse(group.Key, group.Count()))
+            .Select(group => new
+            {
+                Name = group.Key,
+                Count = group.Count()
+            })
             .OrderByDescending(item => item.Count)
             .ToListAsync(cancellationToken);
+        var usersByRole = userRoleCounts
+            .Select(item => new CountByNameResponse(item.Name, item.Count))
+            .ToList();
 
         var usersByStatus = new List<CountByNameResponse>
         {
@@ -100,12 +107,19 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
             .Where(payment => payment.Status == "Paid" && payment.PaidAt >= monthStart)
             .SumAsync(payment => (decimal?)payment.Amount, cancellationToken) ?? 0m;
 
-        var paymentsByStatus = await dbContext.PaymentTransactions
+        var paymentStatusCounts = await dbContext.PaymentTransactions
             .AsNoTracking()
             .GroupBy(payment => payment.Status)
-            .Select(group => new CountByNameResponse(group.Key, group.Count()))
+            .Select(group => new
+            {
+                Name = group.Key,
+                Count = group.Count()
+            })
             .OrderByDescending(item => item.Count)
             .ToListAsync(cancellationToken);
+        var paymentsByStatus = paymentStatusCounts
+            .Select(item => new CountByNameResponse(item.Name, item.Count))
+            .ToList();
 
         return new AdminPaymentStatsResponse(totalRevenue, monthlyRevenue, paymentsByStatus);
     }
@@ -119,12 +133,19 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
         var cancelledSubscriptions = await dbContext.Subscriptions
             .CountAsync(subscription => subscription.Status == "Cancelled", cancellationToken);
 
-        var subscriptionsByStatus = await dbContext.Subscriptions
+        var subscriptionStatusCounts = await dbContext.Subscriptions
             .AsNoTracking()
             .GroupBy(subscription => subscription.Status)
-            .Select(group => new CountByNameResponse(group.Key, group.Count()))
+            .Select(group => new
+            {
+                Name = group.Key,
+                Count = group.Count()
+            })
             .OrderByDescending(item => item.Count)
             .ToListAsync(cancellationToken);
+        var subscriptionsByStatus = subscriptionStatusCounts
+            .Select(item => new CountByNameResponse(item.Name, item.Count))
+            .ToList();
 
         var plans = await dbContext.SubscriptionPlans
             .AsNoTracking()
@@ -158,34 +179,56 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
             .CountAsync(resource => resource.StorageObjectName != null, cancellationToken);
         var linkLearningResources = totalLearningResources - fileLearningResources;
 
-        var resourcesBySkill = await (
-                from resource in dbContext.LearningResources.AsNoTracking()
-                join skill in dbContext.Skills.AsNoTracking()
-                    on resource.SkillId equals skill.Id into skillJoin
-                from skill in skillJoin.DefaultIfEmpty()
-                group resource by new
-                {
-                    resource.SkillId,
-                    SkillName = skill == null ? "No skill" : skill.Name
-                }
-                into groupBySkill
-                select new LearningResourceSkillStatResponse(
-                    groupBySkill.Key.SkillId,
-                    groupBySkill.Key.SkillName,
-                    groupBySkill.Count(),
-                    groupBySkill.Count(resource => resource.IsActive),
-                    groupBySkill.Count(resource => resource.StorageObjectName != null),
-                    groupBySkill.Count(resource => resource.StorageObjectName == null)))
+        var resourceSkillCounts = await dbContext.LearningResources
+            .AsNoTracking()
+            .GroupBy(resource => resource.SkillId)
+            .Select(group => new
+            {
+                SkillId = group.Key,
+                Total = group.Count(),
+                Active = group.Count(resource => resource.IsActive),
+                FileResources = group.Count(resource => resource.StorageObjectName != null),
+                LinkResources = group.Count(resource => resource.StorageObjectName == null)
+            })
             .OrderByDescending(item => item.Total)
-            .ThenBy(item => item.SkillName)
             .ToListAsync(cancellationToken);
 
-        var resourcesByType = await dbContext.LearningResources
+        var skillIds = resourceSkillCounts
+            .Where(item => item.SkillId != null)
+            .Select(item => item.SkillId!.Value)
+            .ToList();
+        var skillNames = await dbContext.Skills
+            .AsNoTracking()
+            .Where(skill => skillIds.Contains(skill.Id))
+            .Select(skill => new { skill.Id, skill.Name })
+            .ToDictionaryAsync(skill => skill.Id, skill => skill.Name, cancellationToken);
+        var resourcesBySkill = resourceSkillCounts
+            .Select(item => new LearningResourceSkillStatResponse(
+                item.SkillId,
+                item.SkillId is null
+                    ? "No skill"
+                    : skillNames.GetValueOrDefault(item.SkillId.Value, "Unknown skill"),
+                item.Total,
+                item.Active,
+                item.FileResources,
+                item.LinkResources))
+            .OrderByDescending(item => item.Total)
+            .ThenBy(item => item.SkillName)
+            .ToList();
+
+        var resourceTypeCounts = await dbContext.LearningResources
             .AsNoTracking()
             .GroupBy(resource => resource.ResourceType)
-            .Select(group => new CountByNameResponse(group.Key, group.Count()))
+            .Select(group => new
+            {
+                Name = group.Key,
+                Count = group.Count()
+            })
             .OrderByDescending(item => item.Count)
             .ToListAsync(cancellationToken);
+        var resourcesByType = resourceTypeCounts
+            .Select(item => new CountByNameResponse(item.Name, item.Count))
+            .ToList();
 
         return new AdminLearningResourceStatsResponse(
             totalSkills,
