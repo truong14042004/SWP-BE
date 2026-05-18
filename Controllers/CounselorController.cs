@@ -80,6 +80,108 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 profile.UpdatedAt)));
     }
 
+    // GET /api/counselor/students/{studentId}/skills
+    // Lấy danh sách kỹ năng của một sinh viên
+    [HttpGet("students/{studentId:guid}/skills")]
+    [ProducesResponseType<IReadOnlyList<CounselorStudentSkillResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<IReadOnlyList<CounselorStudentSkillResponse>>> GetStudentSkills(
+        Guid studentId,
+        CancellationToken cancellationToken)
+    {
+        var studentExists = await dbContext.Users
+            .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
+
+        if (!studentExists)
+        {
+            return NotFound(new { message = "Student was not found." });
+        }
+
+        var skills = await dbContext.UserSkills
+            .AsNoTracking()
+            .Include(us => us.Skill)
+            .Include(us => us.VerifiedByUser)
+            .Where(us => us.UserId == studentId)
+            .OrderBy(us => us.Skill.Category)
+            .ThenBy(us => us.Skill.Name)
+            .Select(us => new CounselorStudentSkillResponse(
+                us.Id,
+                us.SkillId,
+                us.Skill.Name,
+                us.Skill.Category,
+                us.Level,
+                us.IsVerified,
+                us.VerifiedByUserId,
+                us.VerifiedByUser != null ? us.VerifiedByUser.FullName : null,
+                us.EvidenceUrl,
+                us.EvidenceType,
+                us.CreatedAt,
+                us.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        return Ok(skills);
+    }
+
+    // GET /api/counselor/students/{studentId}/skill-gap
+    // Lấy báo cáo skill gap gần nhất của một sinh viên
+    [HttpGet("students/{studentId:guid}/skill-gap")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<IActionResult> GetStudentSkillGap(
+        Guid studentId,
+        CancellationToken cancellationToken)
+    {
+        var studentExists = await dbContext.Users
+            .AnyAsync(u => u.Id == studentId && u.Role == UserRoles.Student, cancellationToken);
+
+        if (!studentExists)
+        {
+            return NotFound(new { message = "Student was not found." });
+        }
+
+        var report = await dbContext.SkillGapReports
+            .AsNoTracking()
+            .Include(r => r.CareerRole)
+            .Where(r => r.UserId == studentId)
+            .OrderByDescending(r => r.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (report is null)
+        {
+            return NotFound(new { message = "No skill gap report found for this student." });
+        }
+
+        var items = await dbContext.SkillGapReportItems
+            .AsNoTracking()
+            .Include(i => i.Skill)
+            .Where(i => i.SkillGapReportId == report.Id)
+            .OrderBy(i => i.Priority)
+            .ThenBy(i => i.Skill.Name)
+            .ToListAsync(cancellationToken);
+
+        return Ok(new
+        {
+            report.Id,
+            report.UserId,
+            report.CareerRoleId,
+            CareerRoleName = report.CareerRole.Name,
+            report.MatchScore,
+            report.Summary,
+            report.CreatedAt,
+            Items = items.Select(i => new
+            {
+                i.SkillId,
+                SkillName = i.Skill.Name,
+                SkillCategory = i.Skill.Category,
+                i.CurrentLevel,
+                i.RequiredLevel,
+                i.Status,
+                i.Priority,
+                i.Recommendation
+            })
+        });
+    }
+
     private Guid GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
@@ -119,5 +221,19 @@ public sealed record CounselorProfileDetailsResponse(
     string? GithubUsername,
     string? CareerGoal,
     int? PreferredLearningHoursPerWeek,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record CounselorStudentSkillResponse(
+    Guid Id,
+    Guid SkillId,
+    string SkillName,
+    string SkillCategory,
+    string Level,
+    bool IsVerified,
+    Guid? VerifiedByUserId,
+    string? VerifiedByFullName,
+    string? EvidenceUrl,
+    string? EvidenceType,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
