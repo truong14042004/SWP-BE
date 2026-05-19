@@ -19,7 +19,7 @@ namespace SWP_BE.Controllers;
 public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 {
     // GET /api/counselor/students
-    // Lấy danh sách sinh viên active được phân công cho cố vấn đang đăng nhập
+    // Lấy danh sách sinh viên active được phân công cho cố vấn đang đăng nhập, kèm target role và match score gần nhất
     [HttpGet("students")]
     [ProducesResponseType<IReadOnlyList<CounselorStudentSummaryResponse>>(StatusCodes.Status200OK)]
     public async Task<ActionResult<IReadOnlyList<CounselorStudentSummaryResponse>>> GetStudents(
@@ -28,24 +28,82 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
 
         var assignedStudentIds = await dbContext.CounselorAssignments
+            .AsNoTracking()
             .Where(a => a.CounselorId == counselorId && a.Status == "Active")
             .Select(a => a.StudentId)
             .ToListAsync(cancellationToken);
 
+        if (assignedStudentIds.Count == 0)
+        {
+            return Ok(Array.Empty<CounselorStudentSummaryResponse>());
+        }
+
+        // Lấy thông tin user cơ bản
         var students = await dbContext.Users
             .AsNoTracking()
             .Where(user => user.Role == UserRoles.Student && user.IsActive && assignedStudentIds.Contains(user.Id))
             .OrderBy(user => user.FullName)
-            .Select(user => new CounselorStudentSummaryResponse(
+            .Select(user => new
+            {
                 user.Id,
                 user.FullName,
                 user.Email,
                 user.Username,
                 user.AvatarUrl,
-                user.CreatedAt))
+                user.CreatedAt
+            })
             .ToListAsync(cancellationToken);
 
-        return Ok(students);
+        var studentIds = students.Select(s => s.Id).ToList();
+
+        // Lấy target role của từng sinh viên (1 query)
+        var profiles = await dbContext.StudentProfiles
+            .AsNoTracking()
+            .Include(p => p.TargetRole)
+            .Where(p => studentIds.Contains(p.UserId))
+            .Select(p => new
+            {
+                p.UserId,
+                p.TargetRoleId,
+                TargetRoleName = p.TargetRole == null ? null : p.TargetRole.Name
+            })
+            .ToDictionaryAsync(p => p.UserId, cancellationToken);
+
+        // Lấy skill gap report mới nhất của từng sinh viên (1 query, group + max)
+        var latestGaps = await dbContext.SkillGapReports
+            .AsNoTracking()
+            .Where(report => studentIds.Contains(report.UserId))
+            .GroupBy(report => report.UserId)
+            .Select(group => group
+                .OrderByDescending(report => report.CreatedAt)
+                .Select(report => new
+                {
+                    report.UserId,
+                    report.MatchScore,
+                    report.CreatedAt
+                })
+                .First())
+            .ToDictionaryAsync(report => report.UserId, cancellationToken);
+
+        var result = students.Select(student =>
+        {
+            profiles.TryGetValue(student.Id, out var profile);
+            latestGaps.TryGetValue(student.Id, out var gap);
+
+            return new CounselorStudentSummaryResponse(
+                student.Id,
+                student.FullName,
+                student.Email,
+                student.Username,
+                student.AvatarUrl,
+                student.CreatedAt,
+                profile?.TargetRoleId,
+                profile?.TargetRoleName,
+                gap?.MatchScore,
+                gap?.CreatedAt);
+        }).ToList();
+
+        return Ok(result);
     }
 
     // GET /api/counselor/students/{studentId}/profile
@@ -633,7 +691,11 @@ public sealed record CounselorStudentSummaryResponse(
     string Email,
     string? Username,
     string? AvatarUrl,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    Guid? TargetRoleId,
+    string? TargetRoleName,
+    decimal? LatestMatchScore,
+    DateTimeOffset? LatestSkillGapAt);
 
 public sealed record CounselorStudentProfileResponse(
     Guid Id,
