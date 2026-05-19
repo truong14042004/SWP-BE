@@ -68,58 +68,79 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
 
     [HttpGet("daily")]
     public async Task<ActionResult<AdminDailyStatsResponse>> GetDaily(
-        int? days,
+        int? year,
+        int? month,
         CancellationToken cancellationToken)
     {
-        var window = Math.Clamp(days ?? 30, 7, 90);
         var today = DateTimeOffset.UtcNow.Date;
-        var start = today.AddDays(-(window - 1));
-        var startOffset = new DateTimeOffset(start, TimeSpan.Zero);
+        var resolvedYear = year ?? today.Year;
+        var resolvedMonth = month ?? today.Month;
 
-        var newUsers = await dbContext.Users
+        if (resolvedMonth is < 1 or > 12)
+        {
+            return BadRequest(new { message = "month must be between 1 and 12." });
+        }
+
+        if (resolvedYear is < 2000 or > 2100)
+        {
+            return BadRequest(new { message = "year must be between 2000 and 2100." });
+        }
+
+        var monthStart = new DateTime(resolvedYear, resolvedMonth, 1);
+        var monthEnd = monthStart.AddMonths(1);
+        var startOffset = new DateTimeOffset(monthStart, TimeSpan.Zero);
+        var endOffset = new DateTimeOffset(monthEnd, TimeSpan.Zero);
+        var daysInMonth = DateTime.DaysInMonth(resolvedYear, resolvedMonth);
+
+        var newUserStamps = await dbContext.Users
             .AsNoTracking()
-            .Where(user => user.CreatedAt >= startOffset)
-            .GroupBy(user => user.CreatedAt.UtcDateTime.Date)
-            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .Where(user => user.CreatedAt >= startOffset && user.CreatedAt < endOffset)
+            .Select(user => user.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var newSubscriptions = await dbContext.Subscriptions
+        var newSubscriptionStamps = await dbContext.Subscriptions
             .AsNoTracking()
-            .Where(subscription => subscription.CreatedAt >= startOffset)
-            .GroupBy(subscription => subscription.CreatedAt.UtcDateTime.Date)
-            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .Where(subscription => subscription.CreatedAt >= startOffset && subscription.CreatedAt < endOffset)
+            .Select(subscription => subscription.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var paidPayments = await dbContext.PaymentTransactions
+        var paidPaymentRows = await dbContext.PaymentTransactions
             .AsNoTracking()
             .Where(payment => payment.Status == "Paid"
                 && payment.PaidAt != null
-                && payment.PaidAt >= startOffset)
-            .GroupBy(payment => payment.PaidAt!.Value.UtcDateTime.Date)
-            .Select(group => new
-            {
-                Date = group.Key,
-                Count = group.Count(),
-                Revenue = group.Sum(payment => (decimal?)payment.Amount) ?? 0m
-            })
+                && payment.PaidAt >= startOffset
+                && payment.PaidAt < endOffset)
+            .Select(payment => new { PaidAt = payment.PaidAt!.Value, payment.Amount })
             .ToListAsync(cancellationToken);
 
-        var newResources = await dbContext.LearningResources
+        var newResourceStamps = await dbContext.LearningResources
             .AsNoTracking()
-            .Where(resource => resource.CreatedAt >= startOffset)
-            .GroupBy(resource => resource.CreatedAt.UtcDateTime.Date)
-            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .Where(resource => resource.CreatedAt >= startOffset && resource.CreatedAt < endOffset)
+            .Select(resource => resource.CreatedAt)
             .ToListAsync(cancellationToken);
 
-        var userMap = newUsers.ToDictionary(item => item.Date, item => item.Count);
-        var subMap = newSubscriptions.ToDictionary(item => item.Date, item => item.Count);
-        var paidMap = paidPayments.ToDictionary(item => item.Date, item => item);
-        var resourceMap = newResources.ToDictionary(item => item.Date, item => item.Count);
+        var userMap = newUserStamps
+            .GroupBy(stamp => stamp.UtcDateTime.Date)
+            .ToDictionary(group => group.Key, group => group.Count());
 
-        var series = new List<AdminDailyPointResponse>(window);
-        for (var index = 0; index < window; index++)
+        var subMap = newSubscriptionStamps
+            .GroupBy(stamp => stamp.UtcDateTime.Date)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        var paidMap = paidPaymentRows
+            .GroupBy(row => row.PaidAt.UtcDateTime.Date)
+            .ToDictionary(
+                group => group.Key,
+                group => new { Count = group.Count(), Revenue = group.Sum(row => row.Amount) });
+
+        var resourceMap = newResourceStamps
+            .GroupBy(stamp => stamp.UtcDateTime.Date)
+            .ToDictionary(group => group.Key, group => group.Count());
+
+        var series = new List<AdminDailyPointResponse>(daysInMonth);
+        for (var index = 0; index < daysInMonth; index++)
         {
-            var day = start.AddDays(index);
+            var day = monthStart.AddDays(index);
             paidMap.TryGetValue(day, out var paid);
             series.Add(new AdminDailyPointResponse(
                 DateOnly.FromDateTime(day),
@@ -130,7 +151,7 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
                 resourceMap.GetValueOrDefault(day, 0)));
         }
 
-        return Ok(new AdminDailyStatsResponse(window, series));
+        return Ok(new AdminDailyStatsResponse(resolvedYear, resolvedMonth, daysInMonth, series));
     }
 
 
@@ -421,7 +442,9 @@ public sealed record PopularCareerRoleResponse(
     int SelectedCount);
 
 public sealed record AdminDailyStatsResponse(
-    int Window,
+    int Year,
+    int Month,
+    int DaysInMonth,
     IReadOnlyList<AdminDailyPointResponse> Series);
 
 public sealed record AdminDailyPointResponse(
