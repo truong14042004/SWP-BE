@@ -66,6 +66,74 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
         return Ok(await BuildCareerRoleStats(cancellationToken));
     }
 
+    [HttpGet("daily")]
+    public async Task<ActionResult<AdminDailyStatsResponse>> GetDaily(
+        int? days,
+        CancellationToken cancellationToken)
+    {
+        var window = Math.Clamp(days ?? 30, 7, 90);
+        var today = DateTimeOffset.UtcNow.Date;
+        var start = today.AddDays(-(window - 1));
+        var startOffset = new DateTimeOffset(start, TimeSpan.Zero);
+
+        var newUsers = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.CreatedAt >= startOffset)
+            .GroupBy(user => user.CreatedAt.UtcDateTime.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var newSubscriptions = await dbContext.Subscriptions
+            .AsNoTracking()
+            .Where(subscription => subscription.CreatedAt >= startOffset)
+            .GroupBy(subscription => subscription.CreatedAt.UtcDateTime.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var paidPayments = await dbContext.PaymentTransactions
+            .AsNoTracking()
+            .Where(payment => payment.Status == "Paid"
+                && payment.PaidAt != null
+                && payment.PaidAt >= startOffset)
+            .GroupBy(payment => payment.PaidAt!.Value.UtcDateTime.Date)
+            .Select(group => new
+            {
+                Date = group.Key,
+                Count = group.Count(),
+                Revenue = group.Sum(payment => (decimal?)payment.Amount) ?? 0m
+            })
+            .ToListAsync(cancellationToken);
+
+        var newResources = await dbContext.LearningResources
+            .AsNoTracking()
+            .Where(resource => resource.CreatedAt >= startOffset)
+            .GroupBy(resource => resource.CreatedAt.UtcDateTime.Date)
+            .Select(group => new { Date = group.Key, Count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        var userMap = newUsers.ToDictionary(item => item.Date, item => item.Count);
+        var subMap = newSubscriptions.ToDictionary(item => item.Date, item => item.Count);
+        var paidMap = paidPayments.ToDictionary(item => item.Date, item => item);
+        var resourceMap = newResources.ToDictionary(item => item.Date, item => item.Count);
+
+        var series = new List<AdminDailyPointResponse>(window);
+        for (var index = 0; index < window; index++)
+        {
+            var day = start.AddDays(index);
+            paidMap.TryGetValue(day, out var paid);
+            series.Add(new AdminDailyPointResponse(
+                DateOnly.FromDateTime(day),
+                userMap.GetValueOrDefault(day, 0),
+                subMap.GetValueOrDefault(day, 0),
+                paid?.Count ?? 0,
+                paid?.Revenue ?? 0m,
+                resourceMap.GetValueOrDefault(day, 0)));
+        }
+
+        return Ok(new AdminDailyStatsResponse(window, series));
+    }
+
+
     private async Task<AdminUserStatsResponse> BuildUserStats(CancellationToken cancellationToken)
     {
         var totalUsers = await dbContext.Users.CountAsync(cancellationToken);
@@ -351,3 +419,15 @@ public sealed record PopularCareerRoleResponse(
     Guid Id,
     string Name,
     int SelectedCount);
+
+public sealed record AdminDailyStatsResponse(
+    int Window,
+    IReadOnlyList<AdminDailyPointResponse> Series);
+
+public sealed record AdminDailyPointResponse(
+    DateOnly Date,
+    int NewUsers,
+    int NewSubscriptions,
+    int PaidPayments,
+    decimal PaidRevenue,
+    int NewResources);
