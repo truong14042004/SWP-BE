@@ -2,17 +2,33 @@ using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Options;
 using SWP_BE.Contracts.Profile;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Options;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/profile")]
-public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
+public sealed class ProfileController(
+    AppDbContext dbContext,
+    IFileStorageService storageService,
+    IOptions<StorageOptions> storageOptions) : ControllerBase
 {
+    private static readonly HashSet<string> AvatarContentTypes = new(StringComparer.OrdinalIgnoreCase) //danh sach cac content type cho phep luu tru avatar
+    {
+        "image/jpeg",
+        "image/png",
+        "image/webp",
+        "image/gif"
+    };
+
+    private readonly StorageOptions storageOpts = storageOptions.Value; //cau hinh luu tru avatar
+
     [HttpGet]
     [ProducesResponseType<ProfileResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -104,6 +120,68 @@ public sealed class ProfileController(AppDbContext dbContext) : ControllerBase
         profile.UpdatedAt = DateTimeOffset.UtcNow; //cap nhat thoi gian update
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToResponse(profile));
+    }
+
+    [HttpPost("avatar")]
+    [Consumes("multipart/form-data")] //dinh dang file chuan HTTP de upload file
+    [Authorize(Roles = UserRoles.Student)]
+    [ProducesResponseType<ProfileResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProfileResponse>> UploadAvatar(
+        [FromForm] UploadAvatarRequest request,
+        CancellationToken cancellationToken)
+    {
+        var file = request.File;
+
+        var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier); //lay chuoi id tu token dang duoc ma hoa bang JWT
+        if (!Guid.TryParse(userIdValue, out var userId)) //kiem tra id dung dinh dang GUID
+        {
+            return Unauthorized(new { message = "Invalid user token." });
+        }
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "File is required." });
+        }
+
+        if (file.Length > storageOpts.MaxUploadBytes)
+        {
+            return BadRequest(new { message = $"File is too large. Max size is {storageOpts.MaxUploadBytes} bytes." });
+        }
+
+        if (!AvatarContentTypes.Contains(file.ContentType))
+        {
+            return BadRequest(new { message = $"Unsupported content type: {file.ContentType}." });
+        }
+
+        var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == userId, cancellationToken); //lay user tu database de tim user co id khop voi token
+        if (user is null || user.Role != UserRoles.Student)
+        {
+            return NotFound(new { message = "Student user was not found." });
+        }
+
+        var objectName = $"users/{userId}/avatar/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}"; //tao duong dan luu tru tren cloud storage
+        await using var stream = file.OpenReadStream(); //doc file tu client vao stream
+        var result = await storageService.UploadAsync(stream, objectName, file.ContentType, cancellationToken); //goi service de day stream len cloud voi duong dan objectName
+
+        user.AvatarUrl = result.ObjectName; //gan avatarurl = duong dan object tren cloud
+        user.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken); //luu thay doi vao database
+
+        //tra ve du lieu profile moi nhat cho frontend
+        var profile = await dbContext.StudentProfiles
+            .AsNoTracking()
+            .Include(item => item.TargetRole)
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+
+        if (profile is null)
+        {
+            return NotFound(new { message = "Profile was not found." });
+        }
 
         return Ok(ToResponse(profile));
     }
