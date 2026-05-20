@@ -11,7 +11,9 @@ namespace SWP_BE.Controllers;
 [ApiController]
 [Authorize]
 [Route("api/ai-mentor")]
-public sealed class AiMentorActionsController(AppDbContext dbContext) : ControllerBase
+public sealed class AiMentorActionsController(
+    AppDbContext dbContext,
+    ILogger<AiMentorActionsController> logger) : ControllerBase
 {
     [HttpPost("apply-roadmap")]
     public async Task<ActionResult<ApplyAiRoadmapResponse>> ApplyRoadmap(
@@ -86,15 +88,30 @@ public sealed class AiMentorActionsController(AppDbContext dbContext) : Controll
         dbContext.Roadmaps.Add(roadmap);
 
         var nodes = new List<RoadmapNode>();
-        FlattenNodes(request.Roadmap.Nodes, roadmap.Id, parentId: null, level: 0, orderOffset: 0, now, nodes);
+        var globalOrder = 0;
+        FlattenNodes(request.Roadmap.Nodes, roadmap.Id, parentId: null, level: 0, ref globalOrder, now, nodes);
 
         if (nodes.Count == 0)
         {
             return BadRequest(new { message = "Roadmap must contain at least one node." });
         }
 
-        dbContext.RoadmapNodes.AddRange(nodes);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            dbContext.RoadmapNodes.AddRange(nodes);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException dbEx)
+        {
+            var inner = dbEx.InnerException?.Message ?? dbEx.Message;
+            logger.LogError(dbEx, "Failed to apply AI roadmap for user {UserId}. Inner: {Inner}", userId, inner);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Không tạo được roadmap từ gợi ý AI.",
+                detail = inner,
+                type = "DbUpdateException"
+            });
+        }
 
         return Ok(new ApplyAiRoadmapResponse(
             roadmap.Id,
@@ -102,18 +119,22 @@ public sealed class AiMentorActionsController(AppDbContext dbContext) : Controll
             nodes.Count));
     }
 
-    private static int FlattenNodes(
+    private static void FlattenNodes(
         IReadOnlyList<AiRoadmapNodeDto>? source,
         Guid roadmapId,
         Guid? parentId,
         int level,
-        int orderOffset,
+        ref int globalOrder,
         DateTimeOffset now,
         List<RoadmapNode> output)
     {
-        if (source is null) return orderOffset;
+        if (source is null) return;
 
-        var index = 0;
+        // Hard caps to satisfy DB check constraints.
+        // Level: 0..8 (CK_roadmap_nodes_Level)
+        // Priority: 1..5 (CK_roadmap_nodes_Priority)
+        var safeLevel = Math.Clamp(level, 0, 8);
+
         foreach (var item in source)
         {
             if (string.IsNullOrWhiteSpace(item.Title)) continue;
@@ -121,6 +142,15 @@ public sealed class AiMentorActionsController(AppDbContext dbContext) : Controll
             var nodeType = string.IsNullOrWhiteSpace(item.NodeType)
                 ? (item.Children?.Count > 0 ? "Group" : "Module")
                 : item.NodeType.Trim();
+
+            // Squash any AI-supplied 1-10 priority down to 1-5.
+            int priority = item.Priority switch
+            {
+                null or < 1 => 3,
+                <= 5 => item.Priority.Value,
+                <= 10 => (int)Math.Ceiling(item.Priority.Value / 2.0),
+                _ => 5
+            };
 
             var node = new RoadmapNode
             {
@@ -131,22 +161,20 @@ public sealed class AiMentorActionsController(AppDbContext dbContext) : Controll
                 Description = item.Description?.Trim(),
                 NodeType = nodeType,
                 Status = "NotStarted",
-                Level = level,
-                OrderIndex = orderOffset + index,
+                Level = safeLevel,
+                OrderIndex = globalOrder,
                 EstimatedHours = item.EstimatedHours.HasValue && item.EstimatedHours.Value > 0
                     ? item.EstimatedHours.Value
                     : null,
-                Priority = item.Priority is >= 1 and <= 10 ? item.Priority.Value : 5,
+                Priority = priority,
                 CreatedAt = now,
                 UpdatedAt = now
             };
             output.Add(node);
+            globalOrder++;
 
-            FlattenNodes(item.Children, roadmapId, node.Id, level + 1, 0, now, output);
-            index++;
+            FlattenNodes(item.Children, roadmapId, node.Id, level + 1, ref globalOrder, now, output);
         }
-
-        return orderOffset + index;
     }
 
     private Guid GetCurrentUserId()

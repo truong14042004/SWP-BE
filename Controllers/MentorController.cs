@@ -266,7 +266,7 @@ public sealed class MentorController(
                   "description": "string",
                   "nodeType": "Group | Module | Resource",
                   "estimatedHours": number,
-                  "priority": 1-10,
+                  "priority": 1-5,
                   "orderIndex": number,
                   "children": [ ...same shape... ]
                 }
