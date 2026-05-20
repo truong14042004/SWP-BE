@@ -35,9 +35,49 @@ public sealed class GeminiTextGenerationService(
             throw new InvalidOperationException("Gemini API key is not configured. Set AI:ApiKey or AI__ApiKey.");
         }
 
-        var model = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-1.5-flash" : _options.Model.Trim();
+        var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-1.5-flash" : _options.Model.Trim();
 
-        // For 2.5 models, disable thinking to avoid empty responses caused by thinking-budget eating tokens.
+        // Try primary model with retries; if still failing with retryable error, fall back to a lighter model.
+        var modelsToTry = new List<string> { primaryModel };
+        if (!primaryModel.Equals("gemini-1.5-flash", StringComparison.OrdinalIgnoreCase))
+        {
+            modelsToTry.Add("gemini-1.5-flash"); // resilient fallback
+        }
+
+        Exception? lastError = null;
+        foreach (var model in modelsToTry)
+        {
+            for (var attempt = 0; attempt < 3; attempt++)
+            {
+                try
+                {
+                    return await CallGeminiAsync(model, systemInstruction, userPrompt, asJson, cancellationToken);
+                }
+                catch (TransientGeminiException ex) when (attempt < 2)
+                {
+                    lastError = ex;
+                    var delay = TimeSpan.FromSeconds(Math.Pow(2, attempt)); // 1s, 2s
+                    await Task.Delay(delay, cancellationToken);
+                }
+                catch (TransientGeminiException ex)
+                {
+                    lastError = ex;
+                    break; // exhausted retries for this model, try next model
+                }
+            }
+        }
+
+        throw lastError ?? new InvalidOperationException("Gemini request failed after retries.");
+    }
+
+    private async Task<AiTextResult> CallGeminiAsync(
+        string model,
+        string systemInstruction,
+        string userPrompt,
+        bool asJson,
+        CancellationToken cancellationToken)
+    {
+        // For 2.5 / 2.0 models, disable thinking to avoid empty responses caused by thinking-budget eating tokens.
         var disableThinking = model.Contains("2.5", StringComparison.OrdinalIgnoreCase)
             || model.Contains("2.0", StringComparison.OrdinalIgnoreCase);
 
@@ -62,7 +102,16 @@ public sealed class GeminiTextGenerationService(
         if (!response.IsSuccessStatusCode)
         {
             var detail = await response.Content.ReadAsStringAsync(cancellationToken);
-            throw new InvalidOperationException($"Gemini request failed: {(int)response.StatusCode} {detail}");
+            var statusCode = (int)response.StatusCode;
+
+            // 429, 500, 502, 503, 504 are retryable
+            if (statusCode is 429 or 500 or 502 or 503 or 504)
+            {
+                throw new TransientGeminiException(
+                    $"Gemini transient error: {statusCode} {detail}");
+            }
+
+            throw new InvalidOperationException($"Gemini request failed: {statusCode} {detail}");
         }
 
         var result = await response.Content.ReadFromJsonAsync<GeminiGenerateResponse>(cancellationToken);
@@ -73,7 +122,6 @@ public sealed class GeminiTextGenerationService(
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            // Surface finishReason for easier debugging (MAX_TOKENS, SAFETY, etc.)
             var finishReason = result?.Candidates?.FirstOrDefault()?.FinishReason ?? "Unknown";
             throw new InvalidOperationException(
                 $"Gemini returned an empty response (finishReason={finishReason}). " +
@@ -82,6 +130,9 @@ public sealed class GeminiTextGenerationService(
 
         return new AiTextResult(text.Trim(), model, result?.UsageMetadata?.TotalTokenCount);
     }
+
+    private sealed class TransientGeminiException(string message) : Exception(message);
+
 
     private sealed record GeminiGenerateRequest(
         [property: JsonPropertyName("systemInstruction")] GeminiContent SystemInstruction,
