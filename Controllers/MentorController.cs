@@ -105,8 +105,22 @@ public sealed class MentorController(
             CreatedAt = now
         };
 
-        dbContext.MentorSessions.Add(session);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        try
+        {
+            dbContext.MentorSessions.Add(session);
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException dbEx)
+        {
+            var inner = dbEx.InnerException?.Message ?? dbEx.Message;
+            logger.LogError(dbEx, "Failed to save MentorSession for user {UserId}. Inner: {Inner}", userId, inner);
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Không lưu được phiên chat AI Mentor.",
+                detail = inner,
+                type = "DbUpdateException"
+            });
+        }
 
         return Ok(ToResponse(session, parsed, quota with { Used = quota.Used + 1, Remaining = Math.Max(quota.Remaining - 1, 0) }));
     }
