@@ -13,7 +13,9 @@ namespace SWP_BE.Controllers;
 [Authorize]
 public sealed class RoadmapReviewController(
     AppDbContext dbContext,
-    IFileStorageService storageService) : ControllerBase
+    IFileStorageService storageService,
+    IEmailSender emailSender,
+    ILogger<RoadmapReviewController> logger) : ControllerBase
 {
     private const long MaxEvidenceFileSize = 25 * 1024 * 1024; // 25 MB
     private static readonly string[] AllowedEvidenceContentTypes =
@@ -252,6 +254,18 @@ public sealed class RoadmapReviewController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // Send email (fire-and-forget; do not break the flow if SMTP fails)
+        _ = SendReviewEmailSafelyAsync(
+            reviewer.Email,
+            $"[CareerMap] Yêu cầu review mới từ {student?.FullName ?? "sinh viên"}",
+            BuildReviewRequestEmail(
+                reviewer.FullName,
+                student?.FullName ?? "Sinh viên",
+                node.Title,
+                request.StudentNote,
+                request.EvidenceUrl,
+                request.EvidenceType));
+
         return Ok(await ToResponseAsync(reviewRequest, cancellationToken));
     }
 
@@ -462,6 +476,25 @@ public sealed class RoadmapReviewController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // Email student about approval
+        var studentEmail = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == reviewRequest.StudentId)
+            .Select(user => new { user.Email, user.FullName })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (studentEmail is not null)
+        {
+            _ = SendReviewEmailSafelyAsync(
+                studentEmail.Email,
+                $"[CareerMap] Yêu cầu review đã được duyệt: {node.Title}",
+                BuildReviewApprovedEmail(
+                    studentEmail.FullName,
+                    reviewerName ?? "Reviewer",
+                    node.Title,
+                    request.ReviewerNote));
+        }
+
         return Ok(await ToResponseAsync(reviewRequest, cancellationToken));
     }
 
@@ -531,7 +564,80 @@ public sealed class RoadmapReviewController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        // Email student about rejection
+        var studentEmail = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == reviewRequest.StudentId)
+            .Select(user => new { user.Email, user.FullName })
+            .SingleOrDefaultAsync(cancellationToken);
+
+        if (studentEmail is not null)
+        {
+            _ = SendReviewEmailSafelyAsync(
+                studentEmail.Email,
+                $"[CareerMap] Yêu cầu review bị từ chối: {node.Title}",
+                BuildReviewRejectedEmail(
+                    studentEmail.FullName,
+                    reviewerName ?? "Reviewer",
+                    node.Title,
+                    reviewRequest.ReviewerNote!));
+        }
+
         return Ok(await ToResponseAsync(reviewRequest, cancellationToken));
+    }
+
+    // ============================================================
+    //  EVIDENCE — Signed URL for reviewers to download
+    // ============================================================
+
+    [Authorize(Roles = $"{UserRoles.IndustryMentor},{UserRoles.AcademicCounselor},{UserRoles.Admin}")]
+    [HttpGet("api/roadmap-node/review-requests/{requestId:guid}/evidence-url")]
+    public async Task<ActionResult<EvidenceDownloadUrlResponse>> GetEvidenceDownloadUrl(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var reviewerId = GetCurrentUserId();
+        var reviewRequest = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken);
+
+        if (reviewRequest is null)
+        {
+            return NotFound(new { message = "Review request not found." });
+        }
+
+        if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
+        {
+            return Forbid();
+        }
+
+        if (string.IsNullOrWhiteSpace(reviewRequest.EvidenceUrl))
+        {
+            return BadRequest(new { message = "This request has no file evidence." });
+        }
+
+        // External git URL or absolute URL is already public
+        if (reviewRequest.EvidenceType == "GitRepository"
+            || reviewRequest.EvidenceUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            || reviewRequest.EvidenceUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return Ok(new EvidenceDownloadUrlResponse(
+                reviewRequest.EvidenceUrl,
+                reviewRequest.EvidenceFileName,
+                ExpiresAt: null));
+        }
+
+        // Storage object: generate signed read URL valid for 15 minutes
+        var expiresIn = TimeSpan.FromMinutes(15);
+        var url = await storageService.CreateSignedReadUrlAsync(
+            reviewRequest.EvidenceUrl,
+            expiresIn,
+            cancellationToken);
+
+        return Ok(new EvidenceDownloadUrlResponse(
+            url,
+            reviewRequest.EvidenceFileName,
+            ExpiresAt: DateTimeOffset.UtcNow.Add(expiresIn)));
     }
 
     // ============================================================
@@ -669,6 +775,91 @@ public sealed class RoadmapReviewController(
         return Guid.Parse(value!);
     }
 
+    private async Task SendReviewEmailSafelyAsync(string toEmail, string subject, string body)
+    {
+        if (string.IsNullOrWhiteSpace(toEmail))
+        {
+            return;
+        }
+
+        try
+        {
+            using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+            await emailSender.SendAsync(toEmail, subject, body, cts.Token);
+        }
+        catch (Exception ex)
+        {
+            // Email is best-effort. Log and continue.
+            logger.LogWarning(ex, "Failed to send review notification email to {Email}", toEmail);
+        }
+    }
+
+    private static string BuildReviewRequestEmail(
+        string reviewerName,
+        string studentName,
+        string nodeTitle,
+        string? studentNote,
+        string? evidenceUrl,
+        string? evidenceType) =>
+        $"""
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:0 auto;color:#1d1d1f">
+          <h2 style="color:#0066cc;margin:0 0 12px">Yêu cầu review mới</h2>
+          <p>Chào {WebEncode(reviewerName)},</p>
+          <p><strong>{WebEncode(studentName)}</strong> vừa gửi yêu cầu review cho module:</p>
+          <blockquote style="margin:8px 0;padding:12px 16px;background:#fafafc;border-left:3px solid #0066cc;border-radius:6px">
+            {WebEncode(nodeTitle)}
+          </blockquote>
+          {(string.IsNullOrWhiteSpace(studentNote) ? "" : $"<p><strong>Ghi chú:</strong> {WebEncode(studentNote)}</p>")}
+          {(string.IsNullOrWhiteSpace(evidenceUrl) ? "" : $"<p><strong>Evidence:</strong> {WebEncode(evidenceType ?? "File")}</p>")}
+          <p style="margin-top:24px">Mở CareerMap để xem chi tiết và duyệt yêu cầu.</p>
+          <hr style="border:0;border-top:1px solid #eee;margin:24px 0">
+          <small style="color:#8a8a8e">Email tự động từ CareerMap. Vui lòng không trả lời trực tiếp.</small>
+        </div>
+        """;
+
+    private static string BuildReviewApprovedEmail(
+        string studentName,
+        string reviewerName,
+        string nodeTitle,
+        string? reviewerNote) =>
+        $"""
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:0 auto;color:#1d1d1f">
+          <h2 style="color:#1f5e2c;margin:0 0 12px">✓ Yêu cầu review đã được duyệt</h2>
+          <p>Chào {WebEncode(studentName)},</p>
+          <p><strong>{WebEncode(reviewerName)}</strong> đã verify module:</p>
+          <blockquote style="margin:8px 0;padding:12px 16px;background:rgba(52,199,89,0.08);border-left:3px solid #34c759;border-radius:6px">
+            {WebEncode(nodeTitle)}
+          </blockquote>
+          {(string.IsNullOrWhiteSpace(reviewerNote) ? "" : $"<p><strong>Nhận xét từ reviewer:</strong> {WebEncode(reviewerNote)}</p>")}
+          <p style="margin-top:24px">Module này đã được đánh dấu Verified trong roadmap của bạn.</p>
+          <hr style="border:0;border-top:1px solid #eee;margin:24px 0">
+          <small style="color:#8a8a8e">Email tự động từ CareerMap.</small>
+        </div>
+        """;
+
+    private static string BuildReviewRejectedEmail(
+        string studentName,
+        string reviewerName,
+        string nodeTitle,
+        string reviewerNote) =>
+        $"""
+        <div style="font-family:system-ui,-apple-system,sans-serif;max-width:560px;margin:0 auto;color:#1d1d1f">
+          <h2 style="color:#a30005;margin:0 0 12px">Yêu cầu review bị từ chối</h2>
+          <p>Chào {WebEncode(studentName)},</p>
+          <p><strong>{WebEncode(reviewerName)}</strong> đã từ chối yêu cầu review cho module:</p>
+          <blockquote style="margin:8px 0;padding:12px 16px;background:rgba(255,59,48,0.06);border-left:3px solid #ff3b30;border-radius:6px">
+            {WebEncode(nodeTitle)}
+          </blockquote>
+          <p><strong>Lý do:</strong> {WebEncode(reviewerNote)}</p>
+          <p style="margin-top:24px">Module được đưa về trạng thái Completed. Bạn có thể cập nhật evidence và gửi lại yêu cầu mới.</p>
+          <hr style="border:0;border-top:1px solid #eee;margin:24px 0">
+          <small style="color:#8a8a8e">Email tự động từ CareerMap.</small>
+        </div>
+        """;
+
+    private static string WebEncode(string? value) =>
+        System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
+
     private record MentorQuotaInfo(int Limit, int Used, int Remaining);
 }
 
@@ -706,6 +897,11 @@ public sealed record EvidenceUploadResponse(
     long FileSize,
     string ContentType,
     string EvidenceType);
+
+public sealed record EvidenceDownloadUrlResponse(
+    string DownloadUrl,
+    string? FileName,
+    DateTimeOffset? ExpiresAt);
 
 public sealed record ReviewerSummary(
     Guid UserId,

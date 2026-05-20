@@ -9,10 +9,40 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
 {
     private readonly SmtpOptions _options = options.Value;
 
-    public async Task SendOtpAsync(
+    public Task SendOtpAsync(
         string toEmail,
         string fullName,
         string otp,
+        CancellationToken cancellationToken)
+    {
+        return SendInternalAsync(
+            toEmail,
+            "CareerMap email verification OTP",
+            BuildOtpBody(fullName, otp),
+            isHtml: false,
+            cancellationToken);
+    }
+
+    public Task SendAsync(
+        string toEmail,
+        string subject,
+        string body,
+        CancellationToken cancellationToken)
+    {
+        // Auto-detect HTML body via simple heuristic.
+        var isHtml = body.Contains("<html", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("<body", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("<p>", StringComparison.OrdinalIgnoreCase)
+            || body.Contains("<div", StringComparison.OrdinalIgnoreCase);
+
+        return SendInternalAsync(toEmail, subject, body, isHtml, cancellationToken);
+    }
+
+    private async Task SendInternalAsync(
+        string toEmail,
+        string subject,
+        string body,
+        bool isHtml,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(_options.SmtpHost)
@@ -26,9 +56,9 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
         using var message = new MailMessage
         {
             From = new MailAddress(_options.FromEmail, _options.FromName),
-            Subject = "CareerMap email verification OTP",
-            Body = BuildBody(fullName, otp),
-            IsBodyHtml = false
+            Subject = subject,
+            Body = body,
+            IsBodyHtml = isHtml
         };
         message.To.Add(toEmail);
 
@@ -41,7 +71,7 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
         await client.SendMailAsync(message, cancellationToken);
     }
 
-    private static string BuildBody(string fullName, string otp) =>
+    private static string BuildOtpBody(string fullName, string otp) =>
         $"""
         Hello {fullName},
 
