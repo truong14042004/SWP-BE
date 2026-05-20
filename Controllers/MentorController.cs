@@ -1,4 +1,6 @@
 using System.Security.Claims;
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -13,8 +15,17 @@ namespace SWP_BE.Controllers;
 [Route("api/mentor")]
 public sealed class MentorController(
     AppDbContext dbContext,
-    IAiTextGenerationService aiTextGenerationService) : ControllerBase
+    IAiTextGenerationService aiTextGenerationService,
+    ILogger<MentorController> logger) : ControllerBase
 {
+    private const int FreePlanAiChatLimit = 20;
+
+    private static readonly JsonSerializerOptions LooseJson = new()
+    {
+        PropertyNameCaseInsensitive = true,
+        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+    };
+
     [HttpPost("chat")]
     public async Task<ActionResult<MentorSessionResponse>> Chat(
         MentorChatRequest request,
@@ -26,12 +37,25 @@ public sealed class MentorController(
         }
 
         var userId = GetCurrentUserId();
+
+        // Quota check (Free plan: 20 messages/period)
+        var quota = await GetAiChatQuotaAsync(userId, cancellationToken);
+        if (quota.Remaining <= 0)
+        {
+            return StatusCode(StatusCodes.Status402PaymentRequired, new
+            {
+                message = $"Bạn đã dùng hết {quota.Used}/{quota.Limit} lượt AI Mentor. Hãy nâng cấp gói để tiếp tục.",
+                quota
+            });
+        }
+
         var context = await BuildMentorContext(userId, request.ContextJson, cancellationToken);
+
         AiTextResult aiResult;
         try
         {
             aiResult = await aiTextGenerationService.GenerateAsync(
-                "You are an AI career mentor for software engineering students. Give practical, concise, structured guidance in Vietnamese. Base the answer on the provided student profile, skills, target role, skill gap, roadmap, GitHub and portfolio context. Do not invent facts not present in context.",
+                BuildSystemInstruction(),
                 $"""
                 Student context:
                 {context}
@@ -46,13 +70,24 @@ public sealed class MentorController(
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
         }
 
+        // Parse AI JSON output. Fallback: if not valid JSON, treat whole text as Q&A answer.
+        var parsed = ParseAiResponse(aiResult.Text);
+
         var now = DateTimeOffset.UtcNow;
+        var sessionPayload = new
+        {
+            answer = parsed.Answer,
+            intent = parsed.Intent,
+            suggestions = parsed.Suggestions
+        };
+        var payloadJson = JsonSerializer.Serialize(sessionPayload, LooseJson);
+
         var session = new MentorSession
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             Question = request.Question.Trim(),
-            Answer = aiResult.Text,
+            Answer = payloadJson,
             ContextJson = context,
             Model = aiResult.Model,
             TokensUsed = aiResult.TokensUsed,
@@ -62,7 +97,7 @@ public sealed class MentorController(
         dbContext.MentorSessions.Add(session);
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(ToResponse(session));
+        return Ok(ToResponse(session, parsed, quota with { Used = quota.Used + 1, Remaining = Math.Max(quota.Remaining - 1, 0) }));
     }
 
     [HttpGet("sessions")]
@@ -73,10 +108,13 @@ public sealed class MentorController(
             .AsNoTracking()
             .Where(session => session.UserId == userId)
             .OrderByDescending(session => session.CreatedAt)
-            .Select(session => ToResponse(session))
             .ToListAsync(cancellationToken);
 
-        return Ok(sessions);
+        var responses = sessions
+            .Select(session => ToResponse(session, ParseAiResponse(session.Answer), null))
+            .ToList();
+
+        return Ok(responses);
     }
 
     [HttpGet("sessions/{id:guid}")]
@@ -92,8 +130,20 @@ public sealed class MentorController(
             return NotFound(new { message = "Mentor session was not found." });
         }
 
-        return Ok(ToResponse(session));
+        return Ok(ToResponse(session, ParseAiResponse(session.Answer), null));
     }
+
+    [HttpGet("quota")]
+    public async Task<ActionResult<AiChatQuotaResponse>> GetQuota(CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var quota = await GetAiChatQuotaAsync(userId, cancellationToken);
+        return Ok(quota);
+    }
+
+    // ============================================================
+    //  HELPERS
+    // ============================================================
 
     private Guid GetCurrentUserId()
     {
@@ -102,6 +152,120 @@ public sealed class MentorController(
             ? userId
             : throw new UnauthorizedAccessException("Invalid user token.");
     }
+
+    private async Task<AiChatQuotaResponse> GetAiChatQuotaAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var subscription = await dbContext.Subscriptions
+            .AsNoTracking()
+            .Include(item => item.Plan)
+            .Where(item => item.UserId == userId && item.Status == "Active")
+            .OrderByDescending(item => item.StartedAt ?? item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var limit = FreePlanAiChatLimit;
+        var planName = "Free";
+        var since = DateTimeOffset.UtcNow.AddMonths(-1); // sliding 30-day window for free users
+
+        if (subscription is not null)
+        {
+            planName = subscription.Plan.Name;
+            since = subscription.StartedAt ?? since;
+
+            var parsedLimit = ParseAiChatLimit(subscription.Plan.FeaturesJson);
+            if (parsedLimit.HasValue)
+            {
+                limit = parsedLimit.Value;
+            }
+        }
+
+        // Limit = -1 means unlimited
+        if (limit < 0)
+        {
+            return new AiChatQuotaResponse(planName, -1, 0, int.MaxValue, since);
+        }
+
+        var used = await dbContext.MentorSessions
+            .AsNoTracking()
+            .CountAsync(item => item.UserId == userId && item.CreatedAt >= since, cancellationToken);
+
+        return new AiChatQuotaResponse(planName, limit, used, Math.Max(limit - used, 0), since);
+    }
+
+    private static int? ParseAiChatLimit(string? featuresJson)
+    {
+        if (string.IsNullOrWhiteSpace(featuresJson)) return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(featuresJson);
+            foreach (var key in new[] { "aiChatLimit", "AiChatLimit", "ai_chat_messages_per_period" })
+            {
+                if (doc.RootElement.TryGetProperty(key, out var value))
+                {
+                    if (value.ValueKind == JsonValueKind.Number)
+                    {
+                        return value.GetInt32();
+                    }
+                    if (value.ValueKind == JsonValueKind.String && int.TryParse(value.GetString(), out var parsed))
+                    {
+                        return parsed;
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // ignore malformed json
+        }
+
+        return null;
+    }
+
+    private static string BuildSystemInstruction() => """
+        You are an AI Career Mentor for software engineering students on the CareerMap platform.
+        You give practical, concise, structured guidance in Vietnamese.
+
+        You MUST respond in valid JSON with this exact shape (no Markdown fences, no extra prose outside JSON):
+        {
+          "answer": "Markdown text trả lời câu hỏi (bullet, code block, bold đều OK).",
+          "intent": "GenerateRoadmap | RecommendSkill | Feedback | QnA",
+          "suggestions": {
+            "roadmap": null | {
+              "title": "string",
+              "description": "string",
+              "careerRoleHint": "tên role mục tiêu nếu có",
+              "totalEstimatedHours": number,
+              "nodes": [
+                {
+                  "title": "string",
+                  "description": "string",
+                  "nodeType": "Group | Module | Resource",
+                  "estimatedHours": number,
+                  "priority": 1-10,
+                  "orderIndex": number,
+                  "children": [ ...same shape... ]
+                }
+              ]
+            },
+            "actions": [
+              { "type": "ApplyRoadmap" | "RequestReview" | "OpenSection", "label": "string", "payload": object }
+            ],
+            "resources": [
+              { "title": "string", "url": "string", "type": "Article|Course|Video|Book" }
+            ]
+          }
+        }
+
+        Rules:
+        - Only include "suggestions.roadmap" when the student asks for a learning plan / roadmap, OR when the skill gap clearly demands one.
+        - Otherwise set "suggestions.roadmap" to null.
+        - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
+        - Keep "answer" focused and ≤ 800 words.
+        - Use Vietnamese for all human-readable strings.
+        - Roadmaps: 3-7 top-level groups, each with 2-6 child modules. Estimated hours realistic.
+        - "actions" should be at most 3 items.
+        - "resources" should be at most 5 items, real public URLs only.
+        """;
 
     private async Task<string> BuildMentorContext(
         Guid userId,
@@ -175,6 +339,57 @@ public sealed class MentorController(
             .Select(item => $"{item.RepoName}: language={item.MainLanguage}, score={item.QualityScore}, summary={item.AiSummary}")
             .ToListAsync(cancellationToken);
 
+        // NEW: mentor + counselor feedbacks (5 most recent each)
+        var mentorFeedbacks = await dbContext.MentorFeedbacks
+            .AsNoTracking()
+            .Where(item => item.StudentId == userId)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(5)
+            .Select(item => $"[Mentor {item.CreatedAt:yyyy-MM-dd}] rating={item.Rating}, readiness={item.JobReadinessLevel}, comment={item.Comment}, recommendations={item.Recommendations}")
+            .ToListAsync(cancellationToken);
+
+        var counselorFeedbacks = await dbContext.CounselorFeedbacks
+            .AsNoTracking()
+            .Where(item => item.StudentId == userId)
+            .OrderByDescending(item => item.CreatedAt)
+            .Take(5)
+            .Select(item => $"[Counselor {item.CreatedAt:yyyy-MM-dd}] rating={item.Rating}, feedback={item.FeedbackText}, recommendations={item.Recommendations}")
+            .ToListAsync(cancellationToken);
+
+        // NEW: portfolio + projects
+        var portfolio = await dbContext.Portfolios
+            .AsNoTracking()
+            .Where(item => item.UserId == userId)
+            .OrderByDescending(item => item.UpdatedAt)
+            .Select(item => new
+            {
+                item.Id,
+                item.Title,
+                item.IsPublished,
+                item.Slug
+            })
+            .FirstOrDefaultAsync(cancellationToken);
+
+        var portfolioProjects = portfolio is null
+            ? []
+            : await dbContext.PortfolioProjects
+                .AsNoTracking()
+                .Where(item => item.PortfolioId == portfolio.Id)
+                .OrderBy(item => item.OrderIndex)
+                .Select(item => $"{item.Title}: {item.Description}, tech={item.TechStackJson}")
+                .ToListAsync(cancellationToken);
+
+        // NEW: roadmap review history (last 10)
+        var reviewHistory = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .Include(item => item.RoadmapNode)
+            .Include(item => item.Reviewer)
+            .Where(item => item.StudentId == userId)
+            .OrderByDescending(item => item.RequestedAt)
+            .Take(10)
+            .Select(item => $"[{item.Status} {item.RequestedAt:yyyy-MM-dd}] node={item.RoadmapNode.Title}, reviewer={item.Reviewer.FullName} ({item.ReviewerRole}), reviewerNote={item.ReviewerNote}")
+            .ToListAsync(cancellationToken);
+
         return $$"""
         Profile:
         school={{profile?.School ?? "unknown"}}
@@ -201,20 +416,100 @@ public sealed class MentorController(
         GitHub repositories:
         {{string.Join("\n", repos.DefaultIfEmpty("No repositories analyzed."))}}
 
+        Recent mentor feedbacks:
+        {{string.Join("\n", mentorFeedbacks.DefaultIfEmpty("No mentor feedbacks."))}}
+
+        Recent counselor feedbacks:
+        {{string.Join("\n", counselorFeedbacks.DefaultIfEmpty("No counselor feedbacks."))}}
+
+        Portfolio:
+        {{(portfolio is null ? "No portfolio." : $"{portfolio.Title} (published={portfolio.IsPublished}, slug={portfolio.Slug})")}}
+        {{string.Join("\n", portfolioProjects.DefaultIfEmpty("No portfolio projects."))}}
+
+        Roadmap review history:
+        {{string.Join("\n", reviewHistory.DefaultIfEmpty("No review requests yet."))}}
+
         Extra context:
         {{(string.IsNullOrWhiteSpace(extraContext) ? "none" : extraContext.Trim())}}
         """;
     }
 
-    private static MentorSessionResponse ToResponse(MentorSession session) =>
+    private ParsedAiResponse ParseAiResponse(string raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return new ParsedAiResponse(string.Empty, "QnA", null);
+        }
+
+        // 1) Try parse the entire string as our envelope JSON
+        try
+        {
+            var trimmed = raw.Trim();
+            // Strip optional ```json fence
+            if (trimmed.StartsWith("```"))
+            {
+                var firstNewline = trimmed.IndexOf('\n');
+                if (firstNewline > 0)
+                {
+                    trimmed = trimmed[(firstNewline + 1)..];
+                }
+                if (trimmed.EndsWith("```"))
+                {
+                    trimmed = trimmed[..^3].TrimEnd();
+                }
+            }
+
+            // Detect envelope shape
+            if (trimmed.StartsWith("{"))
+            {
+                using var doc = JsonDocument.Parse(trimmed);
+                if (doc.RootElement.TryGetProperty("answer", out var answerElement))
+                {
+                    var answer = answerElement.GetString() ?? string.Empty;
+                    var intent = doc.RootElement.TryGetProperty("intent", out var intentElement)
+                        ? intentElement.GetString() ?? "QnA"
+                        : "QnA";
+                    JsonElement? suggestions = doc.RootElement.TryGetProperty("suggestions", out var sugEl)
+                        ? sugEl
+                        : null;
+
+                    object? suggestionsValue = null;
+                    if (suggestions.HasValue && suggestions.Value.ValueKind == JsonValueKind.Object)
+                    {
+                        suggestionsValue = JsonSerializer.Deserialize<JsonElement>(
+                            suggestions.Value.GetRawText());
+                    }
+
+                    return new ParsedAiResponse(answer, intent, suggestionsValue);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogDebug(ex, "AI response was not valid envelope JSON; falling back to plain text.");
+        }
+
+        // 2) Fallback: treat entire raw output as the answer text
+        return new ParsedAiResponse(raw, "QnA", null);
+    }
+
+    private static MentorSessionResponse ToResponse(
+        MentorSession session,
+        ParsedAiResponse parsed,
+        AiChatQuotaResponse? quota) =>
         new(
             session.Id,
             session.Question,
-            session.Answer,
+            parsed.Answer,
+            parsed.Intent,
+            parsed.Suggestions,
             session.ContextJson,
             session.Model,
             session.TokensUsed,
-            session.CreatedAt);
+            session.CreatedAt,
+            quota);
+
+    private sealed record ParsedAiResponse(string Answer, string Intent, object? Suggestions);
 }
 
 public sealed record MentorChatRequest(string Question, string? ContextJson);
@@ -223,7 +518,17 @@ public sealed record MentorSessionResponse(
     Guid Id,
     string Question,
     string Answer,
+    string Intent,
+    object? Suggestions,
     string? ContextJson,
     string? Model,
     int? TokensUsed,
-    DateTimeOffset CreatedAt);
+    DateTimeOffset CreatedAt,
+    AiChatQuotaResponse? Quota);
+
+public sealed record AiChatQuotaResponse(
+    string PlanName,
+    int Limit,
+    int Used,
+    int Remaining,
+    DateTimeOffset Since);
