@@ -688,7 +688,8 @@ public sealed class RoadmapReviewController(
             var url = await storageService.CreateSignedReadUrlAsync(
                 reviewRequest.EvidenceUrl,
                 expiresIn,
-                cancellationToken);
+                cancellationToken,
+                downloadFileName: reviewRequest.EvidenceFileName);
 
             return Ok(new EvidenceDownloadUrlResponse(
                 url,

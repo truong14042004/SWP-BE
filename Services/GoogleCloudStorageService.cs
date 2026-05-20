@@ -96,35 +96,60 @@ public sealed class GoogleCloudStorageService(
     public async Task<string> CreateSignedReadUrlAsync(
         string objectName,
         TimeSpan? duration,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? downloadFileName = null)
     {
         EnsureConfigured();
 
         var expiresIn = duration ?? TimeSpan.FromMinutes(storageOptions.SignedUrlMinutes);
+
+        // Build request template — same for both signing paths.
+        // When a download file name is supplied, ask GCS to set Content-Disposition: attachment;
+        // filename="..." so the browser saves the file with the original human name instead of
+        // the storage object path (e.g. "roadmap-evidence/<userId>/<timestamp>-foo.zip").
+        var requestTemplate = UrlSigner.RequestTemplate
+            .FromBucket(storageOptions.BucketName)
+            .WithObjectName(objectName)
+            .WithHttpMethod(HttpMethod.Get);
+
+        if (!string.IsNullOrWhiteSpace(downloadFileName))
+        {
+            var safeName = SanitizeContentDispositionFileName(downloadFileName);
+            requestTemplate = requestTemplate.WithRequestHeaders(new Dictionary<string, IEnumerable<string>>
+            {
+                ["response-content-disposition"] = new[] { $"attachment; filename=\"{safeName}\"" }
+            });
+        }
+
+        var optionsTemplate = UrlSigner.Options.FromDuration(expiresIn);
+
         var credential = await GoogleCredential.GetApplicationDefaultAsync(cancellationToken);
 
         // ServiceAccountCredential has a private key embedded → sign locally.
         if (credential.UnderlyingCredential is ServiceAccountCredential)
         {
             var localSigner = UrlSigner.FromCredential(credential);
-            return await localSigner.SignAsync(
-                storageOptions.BucketName,
-                objectName,
-                expiresIn,
-                HttpMethod.Get,
-                cancellationToken: cancellationToken);
+            return await localSigner.SignAsync(requestTemplate, optionsTemplate, cancellationToken);
         }
 
         // Cloud Run / GCE / GKE: ComputeCredential has no private key locally.
         // Sign through the IAM Credentials API (requires roles/iam.serviceAccountTokenCreator on itself).
         var blobSigner = await BuildIamBlobSignerAsync(credential, cancellationToken);
         var signer = UrlSigner.FromBlobSigner(blobSigner);
-        return await signer.SignAsync(
-            storageOptions.BucketName,
-            objectName,
-            expiresIn,
-            HttpMethod.Get,
-            cancellationToken: cancellationToken);
+        return await signer.SignAsync(requestTemplate, optionsTemplate, cancellationToken);
+    }
+
+    private static string SanitizeContentDispositionFileName(string name)
+    {
+        // Strip path separators and quote characters that would break the header.
+        // Non-ASCII characters survive — Cloud Storage forwards them as-is and modern browsers
+        // accept the unencoded form for Content-Disposition.
+        return name
+            .Replace('\\', '_')
+            .Replace('/', '_')
+            .Replace('"', '\'')
+            .Replace("\r", string.Empty)
+            .Replace("\n", string.Empty);
     }
 
     private async Task<UrlSigner.IBlobSigner> BuildIamBlobSignerAsync(

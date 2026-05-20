@@ -22,7 +22,8 @@ public interface IFileStorageService
     Task<string> CreateSignedReadUrlAsync(
         string objectName,
         TimeSpan? duration,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? downloadFileName = null);
 
     Task DeleteAsync(string objectName, CancellationToken cancellationToken);
 }
