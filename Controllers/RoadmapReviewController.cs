@@ -140,14 +140,51 @@ public sealed class RoadmapReviewController(
             return NotFound(new { message = "Roadmap node not found." });
         }
 
-        if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+        // Group nodes: allow review only when all non-group descendants
+        // are Completed or Verified (Design A — direct children only).
+        var isGroup = node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase);
+        if (isGroup)
         {
-            return BadRequest(new { message = "Cannot request review for group nodes." });
-        }
+            var children = await dbContext.RoadmapNodes
+                .AsNoTracking()
+                .Where(item => item.ParentNodeId == id)
+                .ToListAsync(cancellationToken);
 
-        if (node.Status is not ("Completed" or "NeedReview"))
+            if (children.Count == 0)
+            {
+                return BadRequest(new { message = "Group node has no children to review." });
+            }
+
+            var nonGroupChildren = children
+                .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+
+            if (nonGroupChildren.Count == 0)
+            {
+                return BadRequest(new
+                {
+                    message = "This group only contains sub-groups. Review the inner modules first."
+                });
+            }
+
+            var pending = nonGroupChildren
+                .Where(item => item.Status is not ("Completed" or "Verified"))
+                .ToList();
+
+            if (pending.Count > 0)
+            {
+                return BadRequest(new
+                {
+                    message = $"{pending.Count}/{nonGroupChildren.Count} module chưa hoàn thành. Hoàn thành tất cả module trong nhóm trước khi yêu cầu review nhóm."
+                });
+            }
+        }
+        else
         {
-            return BadRequest(new { message = "Node must be Completed before requesting review." });
+            if (node.Status is not ("Completed" or "NeedReview"))
+            {
+                return BadRequest(new { message = "Node must be Completed before requesting review." });
+            }
         }
 
         // Validate reviewer
@@ -452,6 +489,23 @@ public sealed class RoadmapReviewController(
         var node = reviewRequest.RoadmapNode;
         node.Status = "Verified";
         node.UpdatedAt = now;
+
+        // Group review: cascade verify all non-group descendants that are
+        // Completed (so progress reflects the group sign-off).
+        if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+        {
+            var children = await dbContext.RoadmapNodes
+                .Where(item => item.ParentNodeId == node.Id
+                    && !item.NodeType.ToLower().Equals("group")
+                    && item.Status != "Verified")
+                .ToListAsync(cancellationToken);
+
+            foreach (var child in children)
+            {
+                child.Status = "Verified";
+                child.UpdatedAt = now;
+            }
+        }
 
         await RecalculateRoadmapProgressAsync(node, cancellationToken);
 
