@@ -86,7 +86,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         return Ok(responses);
     }
 
-    [HttpPost("feedback")]
+    [HttpPost("feedback")] //mentor tao feedback cho hoc sinh
     public async Task<ActionResult<MentorFeedbackResponse>> CreateFeedback(
         CreateMentorFeedbackRequest request,
         CancellationToken cancellationToken)
@@ -101,7 +101,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
             return BadRequest(new { message = "Rating must be between 1 and 5." });
         }
 
-        var mentorId = GetCurrentUserId();
+        var mentorId = GetCurrentUserId(); //lay mentor id
         var student = await dbContext.Users
             .AsNoTracking()
             .SingleOrDefaultAsync(
@@ -112,18 +112,18 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
             return NotFound(new { message = "Student was not found." });
         }
 
-        if (request.PortfolioId is not null)
+        if (request.PortfolioId is not null) //neu co portfolio
         {
             var hasPortfolio = await dbContext.Portfolios.AnyAsync(
                 item => item.Id == request.PortfolioId && item.UserId == request.StudentId,
-                cancellationToken);
+                cancellationToken); //kiem tra portfolio co thuoc ve hoc sinh khong
             if (!hasPortfolio)
             {
-                return BadRequest(new { message = "Portfolio does not belong to the student." });
+                return BadRequest(new { message = "Portfolio does not belong to the student." }); //tra ve loi neu portfolio khong thuoc ve hoc sinh
             }
         }
 
-        if (request.GithubRepositoryId is not null)
+        if (request.GithubRepositoryId is not null) //kiem tra repo co thuoc ve hoc sinh khong
         {
             var hasRepository = await dbContext.GithubRepositories.AnyAsync(
                 item => item.Id == request.GithubRepositoryId && item.UserId == request.StudentId,
@@ -135,7 +135,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         }
 
         var now = DateTimeOffset.UtcNow;
-        var feedback = new MentorFeedback
+        var feedback = new MentorFeedback //tao feedback 
         {
             Id = Guid.NewGuid(),
             MentorId = mentorId,
@@ -151,7 +151,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         dbContext.MentorFeedbacks.Add(feedback);
         await dbContext.SaveChangesAsync();
 
-        var mentor = await dbContext.Users
+        var mentor = await dbContext.Users //lay mentor name de luu vo db
             .AsNoTracking()
             .SingleAsync(item => item.Id == mentorId, cancellationToken);
 
@@ -160,7 +160,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
             ToMentorFeedbackResponse(feedback, mentor.FullName, student.FullName));
     }
 
-    [HttpGet("feedback")]
+    [HttpGet("feedback")] //lay danh sach feedback cua mentor
     public async Task<ActionResult<IReadOnlyList<MentorFeedbackResponse>>> GetMyFeedback(
         CancellationToken cancellationToken)
     {
@@ -188,7 +188,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         return Ok(responses);
     }
 
-    [HttpGet("students/{studentId:guid}/feedback")]
+    [HttpGet("students/{studentId:guid}/feedback")] //lay danh sach feedback cua mentor theo tung hoc sinh
     public async Task<ActionResult<IReadOnlyList<MentorFeedbackResponse>>> GetStudentFeedbackByMentor(
         Guid studentId,
         CancellationToken cancellationToken)

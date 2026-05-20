@@ -180,10 +180,10 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
             return NotFound(new { message = "Portfolio was not found." });
         }
 
-        portfolio.IsPublished = false;
+        portfolio.IsPublished = false; //go port khoi trang thai public
         portfolio.UpdatedAt = DateTimeOffset.UtcNow;
 
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(await ToResponse(portfolio, cancellationToken));
     }

@@ -84,6 +84,47 @@ public sealed class PasswordAuthService(
             pendingRegistration.Email);
     }
 
+    public async Task<AuthMessageResponse> ResendOtpAsync(
+        ResendOtpRequest request,
+        CancellationToken cancellationToken)
+    {
+        var email = Normalize(request.Email);
+
+        var verifiedUserExists = await dbContext.Users
+            .AnyAsync(user => user.Email == email && user.IsEmailVerified, cancellationToken);
+        if (verifiedUserExists)
+        {
+            throw new InvalidOperationException("Email is already registered and verified.");
+        }
+
+        var pendingRegistration = await dbContext.PendingRegistrations
+            .SingleOrDefaultAsync(registration => registration.Email == email, cancellationToken);
+        if (pendingRegistration is null)
+        {
+            throw new InvalidOperationException("Registration details not found. Please register first.");
+        }
+
+        var otp = CreateOtp();
+        var hashUser = new User
+        {
+            Username = pendingRegistration.Username,
+            Email = pendingRegistration.Email,
+            FullName = pendingRegistration.FullName
+        };
+        var now = DateTimeOffset.UtcNow;
+
+        pendingRegistration.EmailVerificationOtpHash = passwordHasher.HashPassword(hashUser, otp);
+        pendingRegistration.EmailVerificationOtpExpiresAt = now.Add(TimeSpan.FromMinutes(15));
+        pendingRegistration.UpdatedAt = now;
+
+        await emailSender.SendOtpAsync(pendingRegistration.Email, pendingRegistration.FullName, otp, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return new AuthMessageResponse(
+            "Verification OTP has been resent to your email.",
+            email);
+    }
+
     public async Task<AuthResponse> VerifyEmailOtpAsync(
         VerifyEmailOtpRequest request,
         CancellationToken cancellationToken)
