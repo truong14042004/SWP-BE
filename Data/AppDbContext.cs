@@ -37,6 +37,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<MentorFeedback> MentorFeedbacks => Set<MentorFeedback>();
     public DbSet<CounselorFeedback> CounselorFeedbacks => Set<CounselorFeedback>();
     public DbSet<CounselorAssignment> CounselorAssignments => Set<CounselorAssignment>();
+    public DbSet<RoadmapNodeReviewRequest> RoadmapNodeReviewRequests => Set<RoadmapNodeReviewRequest>();
+    public DbSet<Notification> Notifications => Set<Notification>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -913,6 +915,54 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(assignment => assignment.AssignedByAdminId)
                 .OnDelete(DeleteBehavior.Restrict);
+        });
+        modelBuilder.Entity<RoadmapNodeReviewRequest>(entity =>
+        {
+            entity.ToTable("roadmap_node_review_requests");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.RoadmapNodeId, item.Status });
+            entity.HasIndex(item => new { item.ReviewerId, item.Status });
+            entity.HasIndex(item => new { item.StudentId, item.Status });
+            entity.Property(item => item.ReviewerRole).HasMaxLength(50).IsRequired();
+            entity.Property(item => item.Status).HasMaxLength(30).IsRequired().HasDefaultValue("Pending");
+            entity.Property(item => item.StudentNote).HasMaxLength(2000);
+            entity.Property(item => item.ReviewerNote).HasMaxLength(2000);
+            entity.Property(item => item.EvidenceUrl).HasMaxLength(2048);
+            entity.Property(item => item.EvidenceType).HasMaxLength(50);
+            entity.Property(item => item.EvidenceFileName).HasMaxLength(255);
+            entity.HasCheckConstraint("CK_roadmap_node_review_requests_Status",
+                "\"Status\" IN ('Pending','Approved','Rejected','Cancelled')");
+            entity.HasCheckConstraint("CK_roadmap_node_review_requests_ReviewerRole",
+                "\"ReviewerRole\" IN ('AcademicCounselor','IndustryMentor')");
+            entity.HasOne(item => item.RoadmapNode)
+                .WithMany()
+                .HasForeignKey(item => item.RoadmapNodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Student)
+                .WithMany()
+                .HasForeignKey(item => item.StudentId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.Reviewer)
+                .WithMany()
+                .HasForeignKey(item => item.ReviewerId)
+                .OnDelete(DeleteBehavior.Restrict);
+        });
+
+        modelBuilder.Entity<Notification>(entity =>
+        {
+            entity.ToTable("notifications");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.UserId, item.IsRead, item.CreatedAt }).IsDescending(false, false, true);
+            entity.Property(item => item.Type).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.Title).HasMaxLength(200).IsRequired();
+            entity.Property(item => item.Message).HasMaxLength(2000).IsRequired();
+            entity.Property(item => item.LinkUrl).HasMaxLength(500);
+            entity.Property(item => item.PayloadJson).HasColumnType("jsonb");
+            entity.Property(item => item.IsRead).HasDefaultValue(false);
+            entity.HasOne(item => item.User)
+                .WithMany()
+                .HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
