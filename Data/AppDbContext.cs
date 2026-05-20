@@ -574,7 +574,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(session => new { session.UserId, session.CreatedAt }).IsDescending(false, true);
             entity.Property(session => session.Question).HasColumnType("text").IsRequired();
             entity.Property(session => session.Answer).HasColumnType("text").IsRequired();
-            entity.Property(session => session.ContextJson).HasColumnType("jsonb");
+            entity.Property(session => session.ContextJson).HasColumnType("text");
             entity.Property(session => session.Model).HasMaxLength(100);
             entity.HasCheckConstraint("CK_mentor_sessions_TokensUsed",
                 "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0");
