@@ -100,16 +100,101 @@ public sealed class GoogleCloudStorageService(
     {
         EnsureConfigured();
 
-        var credential = await GoogleCredential.GetApplicationDefaultAsync(cancellationToken);
-        var signer = UrlSigner.FromCredential(credential);
         var expiresIn = duration ?? TimeSpan.FromMinutes(storageOptions.SignedUrlMinutes);
+        var credential = await GoogleCredential.GetApplicationDefaultAsync(cancellationToken);
 
+        // ServiceAccountCredential has a private key embedded → sign locally.
+        if (credential.UnderlyingCredential is ServiceAccountCredential)
+        {
+            var localSigner = UrlSigner.FromCredential(credential);
+            return await localSigner.SignAsync(
+                storageOptions.BucketName,
+                objectName,
+                expiresIn,
+                HttpMethod.Get,
+                cancellationToken: cancellationToken);
+        }
+
+        // Cloud Run / GCE / GKE: ComputeCredential has no private key locally.
+        // Sign through the IAM Credentials API (requires roles/iam.serviceAccountTokenCreator on itself).
+        var blobSigner = await BuildIamBlobSignerAsync(credential, cancellationToken);
+        var signer = UrlSigner.FromBlobSigner(blobSigner);
         return await signer.SignAsync(
             storageOptions.BucketName,
             objectName,
             expiresIn,
             HttpMethod.Get,
             cancellationToken: cancellationToken);
+    }
+
+    private async Task<UrlSigner.IBlobSigner> BuildIamBlobSignerAsync(
+        GoogleCredential credential,
+        CancellationToken cancellationToken)
+    {
+        // Resolve the service account email from metadata server (works on Cloud Run/GCE/GKE).
+        var http = httpClientFactory.CreateClient();
+        http.DefaultRequestHeaders.TryAddWithoutValidation("Metadata-Flavor", "Google");
+
+        var saEmail = await http.GetStringAsync(
+            "http://metadata.google.internal/computeMetadata/v1/instance/service-accounts/default/email",
+            cancellationToken);
+        saEmail = saEmail.Trim();
+
+        if (string.IsNullOrWhiteSpace(saEmail))
+        {
+            throw new InvalidOperationException(
+                "Could not resolve runtime service account email from metadata server.");
+        }
+
+        var scoped = credential.CreateScoped("https://www.googleapis.com/auth/iam");
+        return new IamBlobSigner(scoped, saEmail, httpClientFactory);
+    }
+
+    private sealed class IamBlobSigner(
+        GoogleCredential credential,
+        string serviceAccountEmail,
+        IHttpClientFactory httpClientFactory) : UrlSigner.IBlobSigner
+    {
+        public string Id => serviceAccountEmail;
+
+        public string Algorithm => "GOOG4-RSA-SHA256";
+
+        public async Task<string> CreateSignatureAsync(
+            byte[] data,
+            UrlSigner.BlobSignerParameters parameters,
+            CancellationToken cancellationToken)
+        {
+            var token = await credential.UnderlyingCredential.GetAccessTokenForRequestAsync(
+                cancellationToken: cancellationToken);
+
+            var http = httpClientFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization =
+                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            var requestBody = new
+            {
+                payload = Convert.ToBase64String(data)
+            };
+
+            var response = await http.PostAsync(
+                $"https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/{Uri.EscapeDataString(serviceAccountEmail)}:signBlob",
+                System.Net.Http.Json.JsonContent.Create(requestBody),
+                cancellationToken);
+
+            var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            if (!response.IsSuccessStatusCode)
+            {
+                throw new InvalidOperationException(
+                    $"IAM signBlob failed with {(int)response.StatusCode}: {responseBody}");
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
+            return doc.RootElement.GetProperty("signedBlob").GetString()
+                ?? throw new InvalidOperationException("IAM signBlob response missing signedBlob.");
+        }
+
+        public string CreateSignature(byte[] data, UrlSigner.BlobSignerParameters parameters) =>
+            CreateSignatureAsync(data, parameters, CancellationToken.None).GetAwaiter().GetResult();
     }
 
     public async Task DeleteAsync(string objectName, CancellationToken cancellationToken)

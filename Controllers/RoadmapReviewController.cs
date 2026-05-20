@@ -683,15 +683,26 @@ public sealed class RoadmapReviewController(
 
         // Storage object: generate signed read URL valid for 15 minutes
         var expiresIn = TimeSpan.FromMinutes(15);
-        var url = await storageService.CreateSignedReadUrlAsync(
-            reviewRequest.EvidenceUrl,
-            expiresIn,
-            cancellationToken);
+        try
+        {
+            var url = await storageService.CreateSignedReadUrlAsync(
+                reviewRequest.EvidenceUrl,
+                expiresIn,
+                cancellationToken);
 
-        return Ok(new EvidenceDownloadUrlResponse(
-            url,
-            reviewRequest.EvidenceFileName,
-            ExpiresAt: DateTimeOffset.UtcNow.Add(expiresIn)));
+            return Ok(new EvidenceDownloadUrlResponse(
+                url,
+                reviewRequest.EvidenceFileName,
+                ExpiresAt: DateTimeOffset.UtcNow.Add(expiresIn)));
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new
+            {
+                message = "Không tạo được link tải evidence.",
+                detail = ex.Message
+            });
+        }
     }
 
     // ============================================================
