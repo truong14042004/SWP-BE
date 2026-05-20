@@ -271,6 +271,27 @@ public sealed class GithubController(
         return Ok(await GetRepositoryResponses(GetCurrentUserId(), cancellationToken));
     }
 
+    [HttpGet("connection")]
+    public async Task<ActionResult<GithubConnectionResponse>> GetConnection(
+        CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var connection = await dbContext.GithubConnections
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+
+        if (connection is null)
+        {
+            return Ok(new GithubConnectionResponse(false, null, null, null));
+        }
+
+        return Ok(new GithubConnectionResponse(
+            true,
+            connection.GithubUsername,
+            connection.ConnectedAt,
+            connection.UpdatedAt));
+    }
+
     [HttpPost("analyze-readme")]
     public async Task<ActionResult<GithubRepositoryResponse>> AnalyzeReadme(
         AnalyzeReadmeRequest request,
@@ -1108,3 +1129,9 @@ public sealed record GithubRepositoryResponse(
     DateTimeOffset? LastSyncedAt,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record GithubConnectionResponse(
+    bool Connected,
+    string? GithubUsername,
+    DateTimeOffset? ConnectedAt,
+    DateTimeOffset? UpdatedAt);
