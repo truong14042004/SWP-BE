@@ -185,10 +185,13 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         UpdateRoadmapNodeStatusRequest request,
         CancellationToken cancellationToken)
     {
-        var allowedStatuses = new[] { "NotStarted", "InProgress", "Completed", "Verified", "NeedReview" };
+        var allowedStatuses = new[] { "NotStarted", "InProgress", "Completed", "NeedReview" };
         if (!allowedStatuses.Contains(request.Status, StringComparer.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "Invalid roadmap node status." });
+            return BadRequest(new
+            {
+                message = "Invalid status. Use the verify endpoint to set Verified."
+            });
         }
 
         var userId = GetCurrentUserId();
@@ -209,6 +212,14 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(new { message = "Group nodes are roadmap containers. Update the child technical nodes instead." });
+        }
+
+        if (node.Status.Equals("Verified", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new
+            {
+                message = "Verified nodes can only be changed by a mentor or counselor."
+            });
         }
 
         var normalizedStatus = allowedStatuses.Single(status => status.Equals(request.Status, StringComparison.OrdinalIgnoreCase));
@@ -232,6 +243,58 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         node.Status = normalizedStatus;
         node.UpdatedAt = DateTimeOffset.UtcNow;
 
+        await RecalculateRoadmapProgressAsync(node, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToNodeResponse(node));
+    }
+
+    [Authorize(Roles = $"{UserRoles.AcademicCounselor},{UserRoles.IndustryMentor},{UserRoles.Admin}")]
+    [HttpPut("api/roadmap-node/{id:guid}/verify")]
+    public async Task<ActionResult<RoadmapNodeResponse>> VerifyNode(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var node = await dbContext.RoadmapNodes
+            .Include(item => item.Roadmap)
+            .Include(item => item.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
+            .Include(item => item.Resources)
+            .ThenInclude(item => item.LearningResource)
+            .ThenInclude(resource => resource.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (node is null)
+        {
+            return NotFound(new { message = "Roadmap node was not found." });
+        }
+
+        if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+        {
+            return BadRequest(new { message = "Group nodes cannot be verified directly." });
+        }
+
+        if (!(node.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
+              node.Status.Equals("NeedReview", StringComparison.OrdinalIgnoreCase) ||
+              node.Status.Equals("Verified", StringComparison.OrdinalIgnoreCase)))
+        {
+            return BadRequest(new
+            {
+                message = "Only nodes marked Completed or NeedReview can be verified."
+            });
+        }
+
+        node.Status = "Verified";
+        node.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await RecalculateRoadmapProgressAsync(node, cancellationToken);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToNodeResponse(node));
+    }
+
+    private async Task RecalculateRoadmapProgressAsync(RoadmapNode node, CancellationToken cancellationToken)
+    {
         var roadmapNodes = await dbContext.RoadmapNodes
             .Where(item => item.RoadmapId == node.RoadmapId)
             .ToListAsync(cancellationToken);
@@ -246,11 +309,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             ? 0
             : Math.Round(completedCount * 100m / progressNodes.Count, 2);
         node.Roadmap.UpdatedAt = DateTimeOffset.UtcNow;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(ToNodeResponse(node));
     }
+
 
     private static RoadmapHierarchy BuildHierarchyNodes(
         Guid roadmapId,
