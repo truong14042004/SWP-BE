@@ -184,6 +184,34 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         }
     }
 
+    [HttpPost("{id:guid}/verify")]
+    [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
+    [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(Guid id, CancellationToken cancellationToken)
+    {
+        var verifierId = GetCurrentUserId(); //lay id cua nguoi xac nhan
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken); //tim ky nang co id khop voi id trong request
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "User skill was not found." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = true;
+        userSkill.VerifiedByUserId = verifierId; //gan id cua nguoi xac nhan vao
+        userSkill.VerifiedAt = now;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync();
+
+        return Ok(ToResponse(userSkill));
+    }
+
     private static string? ValidateCreateRequest(CreateUserSkillRequest request)
     {
         if (request.SkillId == Guid.Empty)

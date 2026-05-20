@@ -6,6 +6,8 @@ public interface IPasswordAuthService
 {
     Task<AuthMessageResponse> RegisterAsync(RegisterRequest request, CancellationToken cancellationToken);
 
+    Task<AuthMessageResponse> ResendOtpAsync(ResendOtpRequest request, CancellationToken cancellationToken);
+
     Task<AuthResponse> VerifyEmailOtpAsync(VerifyEmailOtpRequest request, CancellationToken cancellationToken);
 
     Task<AuthResponse> LoginAsync(PasswordLoginRequest request, CancellationToken cancellationToken);

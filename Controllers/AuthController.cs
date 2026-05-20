@@ -35,6 +35,24 @@ public sealed class AuthController(
         }
     }
 
+    [AllowAnonymous]
+    [HttpPost("resend-otp")]
+    [ProducesResponseType<AuthMessageResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<AuthMessageResponse>> ResendOtp(
+        ResendOtpRequest request,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            return Ok(await passwordAuthService.ResendOtpAsync(request, cancellationToken));
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+    }
+
     [HttpPost("verify-email")]
     [ProducesResponseType<AuthResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]

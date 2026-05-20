@@ -165,6 +165,29 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
         return Ok(await ToResponse(portfolio, cancellationToken));
     }
 
+    [Authorize(Roles = UserRoles.Student)]
+    [HttpPost("unpublish")]
+    public async Task<ActionResult<PortfolioResponse>> Unpublish(CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var portfolio = await dbContext.Portfolios
+            .Where(item => item.UserId == userId)
+            .OrderByDescending(item => item.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (portfolio is null)
+        {
+            return NotFound(new { message = "Portfolio was not found." });
+        }
+
+        portfolio.IsPublished = false; //go port khoi trang thai public
+        portfolio.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(await ToResponse(portfolio, cancellationToken));
+    }
+
     private async Task<PortfolioResponse> ToResponse(Portfolio portfolio, CancellationToken cancellationToken)
     {
         var projects = await dbContext.PortfolioProjects
