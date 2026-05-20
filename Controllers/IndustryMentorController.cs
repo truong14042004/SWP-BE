@@ -27,7 +27,7 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
                     .OrderByDescending(portfolio => portfolio.CreatedAt)
                     .FirstOrDefault()
             })
-            .Where(item => item.Portfolio is not null)
+            .Where(item => item.Portfolio != null)
             .OrderByDescending(item => item.Portfolio!.PublishedAt ?? item.Portfolio.CreatedAt)
             .Select(item => new MentorStudentSummaryResponse(
                 item.User.Id,
