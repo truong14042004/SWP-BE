@@ -35,11 +35,11 @@ public sealed class GeminiTextGenerationService(
             throw new InvalidOperationException("Gemini API key is not configured. Set AI:ApiKey or AI__ApiKey.");
         }
 
-        var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-2.5-flash-lite" : _options.Model.Trim();
+        var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-3.1-flash-lite" : _options.Model.Trim();
 
-        // 3-tier fallback chain: primary → 2.5-flash-lite (cheap, less congested) → 1.5-flash (most available).
+        // 3-tier fallback chain — try newer/cheaper first, settle on most-available 1.5-flash if all else fails.
         var modelsToTry = new List<string> { primaryModel };
-        foreach (var fallback in new[] { "gemini-2.5-flash-lite", "gemini-1.5-flash" })
+        foreach (var fallback in new[] { "gemini-3.1-flash-lite", "gemini-2.5-flash-lite", "gemini-1.5-flash" })
         {
             if (!modelsToTry.Any(item => item.Equals(fallback, StringComparison.OrdinalIgnoreCase)))
             {
@@ -80,8 +80,9 @@ public sealed class GeminiTextGenerationService(
         bool asJson,
         CancellationToken cancellationToken)
     {
-        // For 2.5 / 2.0 models, disable thinking to avoid empty responses caused by thinking-budget eating tokens.
-        var disableThinking = model.Contains("2.5", StringComparison.OrdinalIgnoreCase)
+        // For 2.x / 3.x models, disable thinking to avoid empty responses caused by thinking-budget eating tokens.
+        var disableThinking = model.Contains("3.", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("2.5", StringComparison.OrdinalIgnoreCase)
             || model.Contains("2.0", StringComparison.OrdinalIgnoreCase);
 
         var generationConfig = new GeminiGenerationConfig(
