@@ -35,13 +35,16 @@ public sealed class GeminiTextGenerationService(
             throw new InvalidOperationException("Gemini API key is not configured. Set AI:ApiKey or AI__ApiKey.");
         }
 
-        var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-1.5-flash" : _options.Model.Trim();
+        var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-2.5-flash-lite" : _options.Model.Trim();
 
-        // Try primary model with retries; if still failing with retryable error, fall back to a lighter model.
+        // 3-tier fallback chain: primary → 2.5-flash-lite (cheap, less congested) → 1.5-flash (most available).
         var modelsToTry = new List<string> { primaryModel };
-        if (!primaryModel.Equals("gemini-1.5-flash", StringComparison.OrdinalIgnoreCase))
+        foreach (var fallback in new[] { "gemini-2.5-flash-lite", "gemini-1.5-flash" })
         {
-            modelsToTry.Add("gemini-1.5-flash"); // resilient fallback
+            if (!modelsToTry.Any(item => item.Equals(fallback, StringComparison.OrdinalIgnoreCase)))
+            {
+                modelsToTry.Add(fallback);
+            }
         }
 
         Exception? lastError = null;
