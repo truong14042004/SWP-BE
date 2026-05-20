@@ -11,9 +11,18 @@ public sealed class GeminiTextGenerationService(
 {
     private readonly AiOptions _options = options.Value;
 
+    public Task<AiTextResult> GenerateAsync(
+        string systemInstruction,
+        string userPrompt,
+        CancellationToken cancellationToken)
+    {
+        return GenerateAsync(systemInstruction, userPrompt, asJson: false, cancellationToken);
+    }
+
     public async Task<AiTextResult> GenerateAsync(
         string systemInstruction,
         string userPrompt,
+        bool asJson,
         CancellationToken cancellationToken)
     {
         if (!_options.Provider.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
@@ -27,12 +36,23 @@ public sealed class GeminiTextGenerationService(
         }
 
         var model = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-1.5-flash" : _options.Model.Trim();
+
+        // For 2.5 models, disable thinking to avoid empty responses caused by thinking-budget eating tokens.
+        var disableThinking = model.Contains("2.5", StringComparison.OrdinalIgnoreCase)
+            || model.Contains("2.0", StringComparison.OrdinalIgnoreCase);
+
+        var generationConfig = new GeminiGenerationConfig(
+            Temperature: 0.25m,
+            MaxOutputTokens: 32768,
+            ResponseMimeType: asJson ? "application/json" : null,
+            ThinkingConfig: disableThinking ? new GeminiThinkingConfig(0) : null);
+
         var request = new GeminiGenerateRequest(
             new GeminiContent([new GeminiPart(systemInstruction)]),
             [
                 new GeminiContent([new GeminiPart(userPrompt)])
             ],
-            new GeminiGenerationConfig(0.25m, 16384));
+            generationConfig);
 
         var response = await httpClient.PostAsJsonAsync(
             $"https://generativelanguage.googleapis.com/v1beta/models/{Uri.EscapeDataString(model)}:generateContent?key={Uri.EscapeDataString(_options.ApiKey)}",
@@ -53,7 +73,11 @@ public sealed class GeminiTextGenerationService(
 
         if (string.IsNullOrWhiteSpace(text))
         {
-            throw new InvalidOperationException("Gemini returned an empty response.");
+            // Surface finishReason for easier debugging (MAX_TOKENS, SAFETY, etc.)
+            var finishReason = result?.Candidates?.FirstOrDefault()?.FinishReason ?? "Unknown";
+            throw new InvalidOperationException(
+                $"Gemini returned an empty response (finishReason={finishReason}). " +
+                $"If using a 2.5 model, this is usually caused by thinking budget exhausting the output tokens.");
         }
 
         return new AiTextResult(text.Trim(), model, result?.UsageMetadata?.TotalTokenCount);
@@ -66,7 +90,12 @@ public sealed class GeminiTextGenerationService(
 
     private sealed record GeminiGenerationConfig(
         [property: JsonPropertyName("temperature")] decimal Temperature,
-        [property: JsonPropertyName("maxOutputTokens")] int MaxOutputTokens);
+        [property: JsonPropertyName("maxOutputTokens")] int MaxOutputTokens,
+        [property: JsonPropertyName("responseMimeType"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ResponseMimeType,
+        [property: JsonPropertyName("thinkingConfig"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] GeminiThinkingConfig? ThinkingConfig);
+
+    private sealed record GeminiThinkingConfig(
+        [property: JsonPropertyName("thinkingBudget")] int ThinkingBudget);
 
     private sealed record GeminiContent(
         [property: JsonPropertyName("parts")] IReadOnlyList<GeminiPart> Parts);
@@ -79,7 +108,8 @@ public sealed class GeminiTextGenerationService(
         [property: JsonPropertyName("usageMetadata")] GeminiUsageMetadata? UsageMetadata);
 
     private sealed record GeminiCandidate(
-        [property: JsonPropertyName("content")] GeminiContent? Content);
+        [property: JsonPropertyName("content")] GeminiContent? Content,
+        [property: JsonPropertyName("finishReason")] string? FinishReason);
 
     private sealed record GeminiUsageMetadata(
         [property: JsonPropertyName("totalTokenCount")] int? TotalTokenCount);

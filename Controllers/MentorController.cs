@@ -63,11 +63,22 @@ public sealed class MentorController(
                 Student question:
                 {request.Question.Trim()}
                 """,
+                asJson: true,
                 cancellationToken);
         }
         catch (InvalidOperationException exception)
         {
+            logger.LogWarning(exception, "Gemini call failed for user {UserId}", userId);
             return StatusCode(StatusCodes.Status503ServiceUnavailable, new { message = exception.Message });
+        }
+        catch (Exception exception)
+        {
+            logger.LogError(exception, "Unexpected AI mentor failure for user {UserId}", userId);
+            return StatusCode(StatusCodes.Status502BadGateway, new
+            {
+                message = "AI Mentor tạm thời không phản hồi. Hãy thử lại sau ít phút.",
+                detail = exception.Message
+            });
         }
 
         // Parse AI JSON output. Fallback: if not valid JSON, treat whole text as Q&A answer.
