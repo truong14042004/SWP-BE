@@ -1,19 +1,20 @@
 using System.Security.Claims;
-using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Route("api/industry-mentor")] //Industry Mentor review portfolio sinh vien da publish
 [Authorize(Roles = UserRoles.IndustryMentor)]
-public sealed class IndustryMentorController(AppDbContext dbContext) : ControllerBase
+public sealed class IndustryMentorController(
+    AppDbContext dbContext,
+    IStudentReviewQuotaService quotaService) : ControllerBase
 {
-    private const int FreePlanReviewLimit = 2; //quota mac dinh khi sinh vien khong co subscription
 
     private static readonly string[] AllowedJobReadinessLevels =
     [
@@ -102,8 +103,178 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         Guid studentId,
         CancellationToken cancellationToken)
     {
-        var quota = await GetReviewQuotaAsync(studentId, cancellationToken);
-        return Ok(quota);
+        var quota = await quotaService.GetQuotaAsync(studentId, cancellationToken);
+        return Ok(ToResponse(quota));
+    }
+
+    // ========== Skill verification (C5) ==========
+
+    [HttpGet("students/{studentId:guid}/skills")] //mentor xem ky nang cua sinh vien de xac minh
+    public async Task<ActionResult<IReadOnlyList<MentorViewableUserSkillResponse>>> GetStudentSkills(
+        Guid studentId,
+        CancellationToken cancellationToken)
+    {
+        var skills = await dbContext.UserSkills
+            .AsNoTracking()
+            .Include(item => item.Skill)
+            .Where(item => item.UserId == studentId)
+            .OrderBy(item => item.Skill.Category)
+            .ThenBy(item => item.Skill.Name)
+            .ToListAsync(cancellationToken);
+
+        if (skills.Count == 0)
+        {
+            return Ok(Array.Empty<MentorViewableUserSkillResponse>());
+        }
+
+        // Resolve verifier names
+        var verifierIds = skills
+            .Where(item => item.VerifiedByUserId.HasValue)
+            .Select(item => item.VerifiedByUserId!.Value)
+            .Distinct()
+            .ToList();
+
+        var verifiers = verifierIds.Count == 0
+            ? new Dictionary<Guid, (string FullName, string Role)>()
+            : await dbContext.Users
+                .AsNoTracking()
+                .Where(item => verifierIds.Contains(item.Id))
+                .Select(item => new { item.Id, item.FullName, item.Role })
+                .ToDictionaryAsync(item => item.Id, item => (item.FullName, item.Role), cancellationToken);
+
+        var responses = skills
+            .Select(item =>
+            {
+                string? verifierName = null;
+                string? verifierRole = null;
+                if (item.VerifiedByUserId.HasValue
+                    && verifiers.TryGetValue(item.VerifiedByUserId.Value, out var verifier))
+                {
+                    verifierName = verifier.FullName;
+                    verifierRole = verifier.Role;
+                }
+
+                return new MentorViewableUserSkillResponse(
+                    item.Id,
+                    item.SkillId,
+                    item.Skill.Name,
+                    item.Skill.Category,
+                    item.Level,
+                    item.EvidenceUrl,
+                    item.EvidenceType,
+                    item.IsVerified,
+                    item.VerifiedAt,
+                    item.VerifiedByUserId,
+                    verifierName,
+                    verifierRole,
+                    item.CreatedAt,
+                    item.UpdatedAt);
+            })
+            .ToList();
+
+        return Ok(responses);
+    }
+
+    [HttpPost("user-skills/{userSkillId:guid}/verify")] //mentor xac minh ky nang cua sinh vien
+    public async Task<ActionResult<MentorViewableUserSkillResponse>> VerifyStudentSkill(
+        Guid userSkillId,
+        CancellationToken cancellationToken)
+    {
+        var mentorId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "User skill was not found." });
+        }
+
+        if (userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Skill is already verified." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = true;
+        userSkill.VerifiedByUserId = mentorId;
+        userSkill.VerifiedAt = now;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var mentor = await dbContext.Users
+            .AsNoTracking()
+            .Where(item => item.Id == mentorId)
+            .Select(item => new { item.FullName, item.Role })
+            .SingleAsync(cancellationToken);
+
+        return Ok(new MentorViewableUserSkillResponse(
+            userSkill.Id,
+            userSkill.SkillId,
+            userSkill.Skill.Name,
+            userSkill.Skill.Category,
+            userSkill.Level,
+            userSkill.EvidenceUrl,
+            userSkill.EvidenceType,
+            userSkill.IsVerified,
+            userSkill.VerifiedAt,
+            userSkill.VerifiedByUserId,
+            mentor.FullName,
+            mentor.Role,
+            userSkill.CreatedAt,
+            userSkill.UpdatedAt));
+    }
+
+    [HttpPost("user-skills/{userSkillId:guid}/unverify")] //mentor rut lai xac minh (chi nguoi verify ban dau)
+    public async Task<ActionResult<MentorViewableUserSkillResponse>> UnverifyStudentSkill(
+        Guid userSkillId,
+        CancellationToken cancellationToken)
+    {
+        var mentorId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "User skill was not found." });
+        }
+
+        if (!userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Skill is not currently verified." });
+        }
+
+        // Chi nguoi verify ban dau moi rut lai duoc
+        if (userSkill.VerifiedByUserId != mentorId)
+        {
+            return Forbid();
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = false;
+        userSkill.VerifiedByUserId = null;
+        userSkill.VerifiedAt = null;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new MentorViewableUserSkillResponse(
+            userSkill.Id,
+            userSkill.SkillId,
+            userSkill.Skill.Name,
+            userSkill.Skill.Category,
+            userSkill.Level,
+            userSkill.EvidenceUrl,
+            userSkill.EvidenceType,
+            userSkill.IsVerified,
+            userSkill.VerifiedAt,
+            userSkill.VerifiedByUserId,
+            null,
+            null,
+            userSkill.CreatedAt,
+            userSkill.UpdatedAt));
     }
 
     [HttpPost("feedback")] //mentor tao feedback cho sinh vien
@@ -164,13 +335,13 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         }
 
         //task 3: tru mentor review usage theo subscription plan cua sinh vien
-        var quota = await GetReviewQuotaAsync(request.StudentId, cancellationToken);
+        var quota = await quotaService.GetQuotaAsync(request.StudentId, cancellationToken);
         if (quota.Remaining <= 0)
         {
             return StatusCode(StatusCodes.Status402PaymentRequired, new
             {
                 message = $"Sinh vien da het luot mentor review ({quota.Used}/{quota.Limit}). Vui long nang cap goi de tiep tuc.",
-                quota
+                quota = ToResponse(quota)
             });
         }
 
@@ -272,89 +443,14 @@ public sealed class IndustryMentorController(AppDbContext dbContext) : Controlle
         return Ok(responses);
     }
 
-    private async Task<MentorReviewQuotaResponse> GetReviewQuotaAsync(
-        Guid studentId,
-        CancellationToken cancellationToken)
-    {
-        //lay subscription active moi nhat cua sinh vien
-        var activeSubscription = await dbContext.Subscriptions
-            .AsNoTracking()
-            .Include(item => item.Plan)
-            .Where(item => item.UserId == studentId && item.Status == "Active")
-            .OrderByDescending(item => item.StartedAt ?? item.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        var limit = FreePlanReviewLimit;
-        string planName = "Free";
-        DateTimeOffset since = DateTimeOffset.MinValue;
-
-        if (activeSubscription is not null)
-        {
-            planName = activeSubscription.Plan.Name;
-            limit = ParseMentorReviewLimit(activeSubscription.Plan.FeaturesJson) ?? FreePlanReviewLimit;
-            since = activeSubscription.StartedAt ?? activeSubscription.CreatedAt;
-        }
-
-        //dem so feedback da nhan trong period subscription hien tai
-        var used = await dbContext.MentorFeedbacks
-            .AsNoTracking()
-            .CountAsync(item => item.StudentId == studentId && item.CreatedAt >= since, cancellationToken);
-
-        return new MentorReviewQuotaResponse(
-            planName,
-            limit,
-            used,
-            Math.Max(limit - used, 0),
-            activeSubscription?.StartedAt,
-            activeSubscription?.ExpiredAt);
-    }
-
-    private static int? ParseMentorReviewLimit(string? featuresJson)
-    {
-        if (string.IsNullOrWhiteSpace(featuresJson))
-        {
-            return null;
-        }
-
-        try
-        {
-            using var document = JsonDocument.Parse(featuresJson);
-            var root = document.RootElement;
-
-            //thu lan luot cac key co the dung trong FeaturesJson
-            string[] keys =
-            [
-                "mentorReviewLimit",
-                "mentorReviews",
-                "mentorReviewsPerMonth",
-                "mentor_review_limit"
-            ];
-
-            foreach (var key in keys)
-            {
-                if (root.ValueKind == JsonValueKind.Object
-                    && root.TryGetProperty(key, out var element))
-                {
-                    if (element.ValueKind == JsonValueKind.Number && element.TryGetInt32(out var number))
-                    {
-                        return number;
-                    }
-
-                    if (element.ValueKind == JsonValueKind.String
-                        && int.TryParse(element.GetString(), out var parsed))
-                    {
-                        return parsed;
-                    }
-                }
-            }
-        }
-        catch (JsonException)
-        {
-            return null;
-        }
-
-        return null;
-    }
+    private static MentorReviewQuotaResponse ToResponse(StudentReviewQuota quota) =>
+        new(
+            quota.PlanName,
+            quota.Limit,
+            quota.Used,
+            quota.Remaining,
+            quota.PeriodStart,
+            quota.PeriodEnd);
 
     private static string? NormalizeOptional(string? value) =>
         string.IsNullOrWhiteSpace(value) ? null : value.Trim();
@@ -490,3 +586,19 @@ public sealed record MentorReviewQuotaResponse(
     int Remaining,
     DateTimeOffset? PeriodStart,
     DateTimeOffset? PeriodEnd);
+
+public sealed record MentorViewableUserSkillResponse(
+    Guid Id,
+    Guid SkillId,
+    string SkillName,
+    string SkillCategory,
+    string Level,
+    string? EvidenceUrl,
+    string? EvidenceType,
+    bool IsVerified,
+    DateTimeOffset? VerifiedAt,
+    Guid? VerifiedByUserId,
+    string? VerifiedByName,
+    string? VerifiedByRole,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);

@@ -15,6 +15,7 @@ public sealed class RoadmapReviewController(
     AppDbContext dbContext,
     IFileStorageService storageService,
     IEmailSender emailSender,
+    IStudentReviewQuotaService quotaService,
     ILogger<RoadmapReviewController> logger) : ControllerBase
 {
     private const long MaxEvidenceFileSize = 25 * 1024 * 1024; // 25 MB
@@ -33,7 +34,7 @@ public sealed class RoadmapReviewController(
         ".zip", ".pdf", ".png", ".jpg", ".jpeg"
     ];
 
-    private const int FreePlanReviewLimit = 2;
+    // FreePlanReviewLimit removed — quota now computed by IStudentReviewQuotaService.
 
     // ============================================================
     //  STUDENT ENDPOINTS
@@ -85,40 +86,38 @@ public sealed class RoadmapReviewController(
                 Available: !counselorHasPending);
         }
 
-        // Industry Mentors: tất cả mentor active, có quota > 0 cho student này
+        // Industry Mentors: tất cả mentor active, hiển thị quota chung (theo student)
+        // Quota áp dụng cho student chứ không theo mentor — tính 1 lần.
+        var sharedQuota = await quotaService.GetQuotaAsync(studentId, cancellationToken);
+        var studentRanOutOfQuota = sharedQuota.Remaining <= 0;
+
         var mentors = await dbContext.Users
             .AsNoTracking()
             .Where(user => user.Role == UserRoles.IndustryMentor && user.IsActive)
             .ToListAsync(cancellationToken);
 
-        var mentorInfos = new List<AvailableReviewerInfo>();
-        foreach (var mentor in mentors)
-        {
-            var quota = await CalculateMentorQuotaAsync(studentId, cancellationToken);
+        // Pull pending requests for this node một lần duy nhất (bỏ N+1).
+        var pendingMentorIdsForNode = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .Where(item => item.RoadmapNodeId == id && item.Status == "Pending")
+            .Select(item => item.ReviewerId)
+            .ToListAsync(cancellationToken);
+        var pendingMentorIdSet = pendingMentorIdsForNode.ToHashSet();
 
-            // Q2 = A: hide mentor hết quota
-            if (quota.Remaining <= 0)
-            {
-                continue;
-            }
-
-            var hasPendingForNode = await dbContext.RoadmapNodeReviewRequests
-                .AsNoTracking()
-                .AnyAsync(item => item.RoadmapNodeId == id
-                    && item.ReviewerId == mentor.Id
-                    && item.Status == "Pending", cancellationToken);
-
-            mentorInfos.Add(new AvailableReviewerInfo(
+        var mentorInfos = mentors
+            .Select(mentor => new AvailableReviewerInfo(
                 mentor.Id,
                 mentor.FullName,
                 mentor.Email,
                 mentor.AvatarUrl,
                 UserRoles.IndustryMentor,
-                Quota: quota.Limit,
-                Used: quota.Used,
-                Remaining: quota.Remaining,
-                Available: !hasPendingForNode));
-        }
+                Quota: sharedQuota.Limit,
+                Used: sharedQuota.Used,
+                Remaining: sharedQuota.Remaining,
+                // Mentor khả dụng khi: student còn quota VÀ mentor này không đang có pending
+                // request cho cùng node này.
+                Available: !studentRanOutOfQuota && !pendingMentorIdSet.Contains(mentor.Id)))
+            .ToList();
 
         return Ok(new AvailableReviewersResponse(counselorInfo, mentorInfos));
     }
@@ -220,7 +219,7 @@ public sealed class RoadmapReviewController(
         // If mentor: check quota
         if (reviewer.Role == UserRoles.IndustryMentor)
         {
-            var quota = await CalculateMentorQuotaAsync(studentId, cancellationToken);
+            var quota = await quotaService.GetQuotaAsync(studentId, cancellationToken);
             if (quota.Remaining <= 0)
             {
                 return StatusCode(StatusCodes.Status402PaymentRequired, new
@@ -769,31 +768,7 @@ public sealed class RoadmapReviewController(
         node.Roadmap.UpdatedAt = DateTimeOffset.UtcNow;
     }
 
-    private async Task<MentorQuotaInfo> CalculateMentorQuotaAsync(Guid studentId, CancellationToken cancellationToken)
-    {
-        var activeSubscription = await dbContext.Subscriptions
-            .AsNoTracking()
-            .Include(item => item.Plan)
-            .Where(item => item.UserId == studentId && item.Status == "Active")
-            .OrderByDescending(item => item.StartedAt ?? item.CreatedAt)
-            .FirstOrDefaultAsync(cancellationToken);
-
-        var limit = FreePlanReviewLimit;
-        var since = DateTimeOffset.MinValue;
-
-        if (activeSubscription is not null)
-        {
-            since = activeSubscription.StartedAt ?? since;
-            // try parse limit from plan features json
-            // (mentor controller already handles this; we keep simple fallback)
-        }
-
-        var used = await dbContext.MentorFeedbacks
-            .AsNoTracking()
-            .CountAsync(item => item.StudentId == studentId && item.CreatedAt >= since, cancellationToken);
-
-        return new MentorQuotaInfo(limit, used, Math.Max(limit - used, 0));
-    }
+    // CalculateMentorQuotaAsync was removed; use IStudentReviewQuotaService instead.
 
     private async Task<RoadmapReviewRequestResponse> ToResponseAsync(
         RoadmapNodeReviewRequest item,
@@ -926,7 +901,7 @@ public sealed class RoadmapReviewController(
     private static string WebEncode(string? value) =>
         System.Net.WebUtility.HtmlEncode(value ?? string.Empty);
 
-    private record MentorQuotaInfo(int Limit, int Used, int Remaining);
+    // MentorQuotaInfo removed; superseded by SWP_BE.Services.StudentReviewQuota.
 }
 
 // ===== DTOs =====
