@@ -27,16 +27,21 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
     {
         var counselorId = GetCurrentUserId();
 
-        var assignedStudentIds = await dbContext.CounselorAssignments
+        var assignments = await dbContext.CounselorAssignments
             .AsNoTracking()
             .Where(a => a.CounselorId == counselorId && a.Status == "Active")
-            .Select(a => a.StudentId)
+            .Select(a => new { a.StudentId, AssignedAt = a.CreatedAt })
             .ToListAsync(cancellationToken);
 
-        if (assignedStudentIds.Count == 0)
+        if (assignments.Count == 0)
         {
             return Ok(Array.Empty<CounselorStudentSummaryResponse>());
         }
+
+        var assignedStudentIds = assignments.Select(a => a.StudentId).ToList();
+        var assignmentDateByStudent = assignments
+            .GroupBy(a => a.StudentId)
+            .ToDictionary(g => g.Key, g => g.Max(a => a.AssignedAt));
 
         // Lấy thông tin user cơ bản
         var students = await dbContext.Users
@@ -89,6 +94,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         {
             profiles.TryGetValue(student.Id, out var profile);
             latestGaps.TryGetValue(student.Id, out var gap);
+            assignmentDateByStudent.TryGetValue(student.Id, out var assignedAt);
 
             return new CounselorStudentSummaryResponse(
                 student.Id,
@@ -97,6 +103,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 student.Username,
                 student.AvatarUrl,
                 student.CreatedAt,
+                assignedAt == default ? (DateTimeOffset?)null : assignedAt,
                 profile?.TargetRoleId,
                 profile?.TargetRoleName,
                 gap?.MatchScore,
@@ -692,6 +699,7 @@ public sealed record CounselorStudentSummaryResponse(
     string? Username,
     string? AvatarUrl,
     DateTimeOffset CreatedAt,
+    DateTimeOffset? AssignedAt,
     Guid? TargetRoleId,
     string? TargetRoleName,
     decimal? LatestMatchScore,

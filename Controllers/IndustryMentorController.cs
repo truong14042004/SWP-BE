@@ -1,4 +1,5 @@
 using System.Security.Claims;
+using System.Text.Json;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -365,11 +366,33 @@ public sealed class IndustryMentorController(
         };
 
         dbContext.MentorFeedbacks.Add(feedback);
-        await dbContext.SaveChangesAsync(cancellationToken);
 
         var mentor = await dbContext.Users //lay mentor name de luu vo response
             .AsNoTracking()
             .SingleAsync(item => item.Id == mentorId, cancellationToken);
+
+        // H2: thong bao cho sinh vien khi nhan feedback portfolio tu mentor
+        dbContext.Notifications.Add(new Notification
+        {
+            Id = Guid.NewGuid(),
+            UserId = request.StudentId,
+            Type = "PortfolioFeedbackReceived",
+            Title = "Bạn nhận được feedback mới",
+            Message = $"{mentor.FullName} đã gửi feedback portfolio cho bạn.",
+            LinkUrl = "#portfolio",
+            IsRead = false,
+            CreatedAt = now,
+            PayloadJson = JsonSerializer.Serialize(new
+            {
+                feedbackId = feedback.Id,
+                mentorId,
+                mentorName = mentor.FullName,
+                rating = feedback.Rating,
+                jobReadinessLevel = feedback.JobReadinessLevel,
+            })
+        });
+
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return StatusCode(
             StatusCodes.Status201Created,
