@@ -276,7 +276,10 @@ public sealed partial class StorageController(
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
-        if (!IsUserObject(userId, objectName))
+        if (!IsUserObject(userId, objectName)
+            && !User.IsInRole(UserRoles.Admin)
+            && !User.IsInRole(UserRoles.AcademicCounselor)
+            && !User.IsInRole(UserRoles.IndustryMentor))
         {
             return Forbid();
         }
@@ -291,7 +294,10 @@ public sealed partial class StorageController(
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
-        if (!IsUserObject(userId, objectName))
+        if (!IsUserObject(userId, objectName)
+            && !User.IsInRole(UserRoles.Admin)
+            && !User.IsInRole(UserRoles.AcademicCounselor)
+            && !User.IsInRole(UserRoles.IndustryMentor))
         {
             return Forbid();
         }
