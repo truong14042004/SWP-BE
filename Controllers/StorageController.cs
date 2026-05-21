@@ -31,7 +31,10 @@ public sealed partial class StorageController(
         "image/jpeg",
         "image/png",
         "image/webp",
-        "application/pdf"
+        "application/pdf",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/x-compressed"
     };
 
     private static readonly HashSet<string> GeneralContentTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -41,6 +44,9 @@ public sealed partial class StorageController(
         "image/webp",
         "image/gif",
         "application/pdf",
+        "application/zip",
+        "application/x-zip-compressed",
+        "application/x-compressed",
         "text/plain",
         "text/markdown"
     };
@@ -530,6 +536,9 @@ public sealed partial class StorageController(
             "image/webp" => ".webp",
             "image/gif" => ".gif",
             "application/pdf" => ".pdf",
+            "application/zip" => ".zip",
+            "application/x-zip-compressed" => ".zip",
+            "application/x-compressed" => ".zip",
             "text/plain" => ".txt",
             "text/markdown" => ".md",
             _ => string.Empty
