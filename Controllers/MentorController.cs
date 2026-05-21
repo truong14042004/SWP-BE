@@ -281,15 +281,40 @@ public sealed class MentorController(
           }
         }
 
-        Rules:
-        - Only include "suggestions.roadmap" when the student asks for a learning plan / roadmap, OR when the skill gap clearly demands one.
-        - Otherwise set "suggestions.roadmap" to null.
+        STRICT RULES on "suggestions.roadmap" (đọc kỹ):
+        - DEFAULT: "suggestions.roadmap" PHẢI là null.
+        - CHỈ trả roadmap khi câu hỏi của student CHỨA rõ ràng yêu cầu lập lộ trình học, ví dụ:
+          • "lộ trình", "roadmap", "học theo thứ tự", "kế hoạch học", "study plan", "learning path"
+          • "tôi nên học gì trước", "bắt đầu từ đâu", "học như thế nào để thành X"
+          • "đề xuất lộ trình", "tạo roadmap cho tôi"
+        - TUYỆT ĐỐI KHÔNG tự suy diễn để trả roadmap khi student chỉ:
+          • hỏi định nghĩa / khái niệm ("React là gì?", "DI là gì?")
+          • hỏi so sánh ("React vs Vue?")
+          • hỏi feedback portfolio / CV
+          • hỏi 1 câu kỹ thuật cụ thể ("làm sao deploy lên Vercel?")
+          • chào hỏi / small talk
+        - Việc student có skill gap KHÔNG phải lý do để tự đính kèm roadmap. Chỉ dùng skill gap như context để trả lời TRÚNG câu hỏi.
+
+        Other rules:
         - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
         - Keep "answer" focused and ≤ 800 words.
         - Use Vietnamese for all human-readable strings.
-        - Roadmaps: 3-7 top-level groups, each with 2-6 child modules. Estimated hours realistic.
-        - "actions" should be at most 3 items.
-        - "resources" should be at most 5 items, real public URLs only.
+        - When you DO return roadmap: 3-7 top-level groups, each with 2-6 child modules. Estimated hours realistic.
+        - "actions" tối đa 3 items, chỉ trả khi thực sự hữu ích cho câu hỏi.
+        - "resources" tối đa 5 items, chỉ URL công khai thật.
+
+        Examples:
+        Q: "React là gì?"
+        → intent="QnA", suggestions.roadmap=null, actions=[], resources=[1-2 link tham khảo]
+
+        Q: "So sánh REST và GraphQL?"
+        → intent="QnA", suggestions.roadmap=null
+
+        Q: "Cho tôi lộ trình học để trở thành Frontend Developer"
+        → intent="GenerateRoadmap", suggestions.roadmap={...full tree...}, actions=[{type:"ApplyRoadmap",...}]
+
+        Q: "Tôi nên học gì tiếp theo?"  (kèm context: profile có target Backend, skill gap 35%)
+        → intent="GenerateRoadmap", suggestions.roadmap={...}, base on skill gap
         """;
 
     private async Task<string> BuildMentorContext(
