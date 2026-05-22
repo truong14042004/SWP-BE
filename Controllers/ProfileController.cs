@@ -186,6 +186,20 @@ public sealed class ProfileController(
         return Ok(ToResponse(profile));
     }
 
+    [HttpPost("cv")]
+    [Consumes("multipart/form-data")]
+    [Authorize(Roles = UserRoles.Student)]
+    [ProducesResponseType<ProfileResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<ProfileResponse>> UploadCv(
+        [FromForm] UploadCvRequest request,
+        CancellationToken cancellationToken)
+    {
+        throw new NotImplementedException();
+    }
+
     private static void ApplyProfileValues(StudentProfile profile, SaveProfileRequest request)
     {
         profile.School = request.School?.Trim();
