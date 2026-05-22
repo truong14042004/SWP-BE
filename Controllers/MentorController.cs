@@ -449,6 +449,8 @@ public sealed class MentorController(
         targetRole={{profile?.TargetRole?.Name ?? "unknown"}}
         careerGoal={{profile?.CareerGoal ?? "unknown"}}
         preferredHoursPerWeek={{profile?.PreferredLearningHoursPerWeek?.ToString() ?? "unknown"}}
+        cvName={{profile?.CvName ?? "none"}}
+        cvUrl={{(profile?.CvUrl != null ? $"/api/storage/download?objectName={Uri.EscapeDataString(profile.CvUrl)}" : "none")}}
 
         Skills:
         {{string.Join("\n", skills.DefaultIfEmpty("No skills entered."))}}
