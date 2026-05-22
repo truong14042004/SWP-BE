@@ -153,6 +153,12 @@ using (var scope = app.Services.CreateScope())
 {
     var dbContext = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     dbContext.Database.Migrate();
+    
+    // Clean up incorrect user FullNames in test database seed
+    dbContext.Database.ExecuteSqlRaw(@"
+        UPDATE users SET ""FullName"" = 'Industry Mentor 01' WHERE ""Username"" = 'mentor1';
+        UPDATE users SET ""FullName"" = 'Academic Counselor 01' WHERE ""Username"" = 'counselor1';
+    ");
 }
 
 app.Use(async (context, next) =>

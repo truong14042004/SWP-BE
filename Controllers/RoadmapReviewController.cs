@@ -755,9 +755,9 @@ public sealed class RoadmapReviewController(
                     item.RoadmapNode.Description,
                     item.RoadmapNode.NodeType,
                     item.RoadmapNode.Status,
-                    item.RoadmapNode.Roadmap.Id,
-                    item.RoadmapNode.Roadmap.Title,
-                    item.RoadmapNode.Roadmap.CareerRole.Name));
+                    item.RoadmapNode.Roadmap?.Id ?? Guid.Empty,
+                    item.RoadmapNode.Roadmap?.Title ?? "Unknown Roadmap",
+                    item.RoadmapNode.Roadmap?.CareerRole?.Name ?? "Unknown Role"));
         }).ToList();
     }
 
