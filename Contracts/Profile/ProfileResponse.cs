@@ -12,5 +12,7 @@ public sealed record ProfileResponse(
     string? GithubUsername,
     string? CareerGoal,
     int? PreferredLearningHoursPerWeek,
+    string? CvUrl,
+    string? CvName,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
