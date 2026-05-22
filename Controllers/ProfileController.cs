@@ -226,10 +226,34 @@ public sealed class ProfileController(
 
         var objectName = $"users/{userId}/cv/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}";
         await using var stream = file.OpenReadStream();
-        var result = await storageService.UploadAsync(stream, objectName, file.ContentType, cancellationToken);
+        
+        string? cvParsedText = null;
+        using var memoryStream = new MemoryStream();
+        await stream.CopyToAsync(memoryStream, cancellationToken);
+        memoryStream.Position = 0;
+
+        try
+        {
+            using var pdfDocument = UglyToad.PdfPig.PdfDocument.Open(memoryStream);
+            var textBuilder = new System.Text.StringBuilder();
+            foreach (var page in pdfDocument.GetPages())
+            {
+                textBuilder.AppendLine(page.Text);
+            }
+            var fullText = textBuilder.ToString().Trim();
+            cvParsedText = fullText.Length > 5000 ? fullText[..5000] : fullText;
+        }
+        catch (Exception)
+        {
+            // Ignore parse errors (e.g., encrypted or scanned PDF)
+        }
+
+        memoryStream.Position = 0;
+        var result = await storageService.UploadAsync(memoryStream, objectName, file.ContentType, cancellationToken);
 
         profile.CvUrl = result.ObjectName;
         profile.CvName = file.FileName;
+        profile.CvParsedText = cvParsedText;
         profile.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 

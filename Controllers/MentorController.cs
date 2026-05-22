@@ -296,6 +296,7 @@ public sealed class MentorController(
         - Việc student có skill gap KHÔNG phải lý do để tự đính kèm roadmap. Chỉ dùng skill gap như context để trả lời TRÚNG câu hỏi.
 
         Other rules:
+        - If the student asks you to review or analyze their CV, use the `cvParsedText` (which contains the raw text extracted from their PDF CV) to provide specific, detailed feedback on their content, spelling, and professional impact. If `cvParsedText` is 'none', advise them to upload a CV first.
         - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
         - Keep "answer" focused and ≤ 800 words.
         - Use Vietnamese for all human-readable strings.
@@ -451,6 +452,7 @@ public sealed class MentorController(
         preferredHoursPerWeek={{profile?.PreferredLearningHoursPerWeek?.ToString() ?? "unknown"}}
         cvName={{profile?.CvName ?? "none"}}
         cvUrl={{(profile?.CvUrl != null ? $"/api/storage/download?objectName={Uri.EscapeDataString(profile.CvUrl)}" : "none")}}
+        cvParsedText={{(string.IsNullOrWhiteSpace(profile?.CvParsedText) ? "none" : profile.CvParsedText)}}
 
         Skills:
         {{string.Join("\n", skills.DefaultIfEmpty("No skills entered."))}}

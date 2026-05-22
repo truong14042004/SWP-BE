@@ -14,6 +14,7 @@ public sealed class StudentProfile
     public int? PreferredLearningHoursPerWeek { get; set; }
     public string? CvUrl { get; set; }
     public string? CvName { get; set; }
+    public string? CvParsedText { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
