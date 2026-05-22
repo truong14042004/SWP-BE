@@ -161,6 +161,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 profile.GithubUsername,
                 profile.CareerGoal,
                 profile.PreferredLearningHoursPerWeek,
+                profile.CvUrl,
+                profile.CvName,
                 profile.CreatedAt,
                 profile.UpdatedAt)));
     }
@@ -725,6 +727,8 @@ public sealed record CounselorProfileDetailsResponse(
     string? GithubUsername,
     string? CareerGoal,
     int? PreferredLearningHoursPerWeek,
+    string? CvUrl,
+    string? CvName,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

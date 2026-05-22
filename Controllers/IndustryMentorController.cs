@@ -38,6 +38,9 @@ public sealed class IndustryMentorController(
                 Portfolio = dbContext.Portfolios
                     .Where(portfolio => portfolio.UserId == user.Id && portfolio.IsPublished)
                     .OrderByDescending(portfolio => portfolio.CreatedAt)
+                    .FirstOrDefault(),
+                Profile = dbContext.StudentProfiles
+                    .Where(profile => profile.UserId == user.Id)
                     .FirstOrDefault()
             })
             .Where(item => item.Portfolio != null)
@@ -51,7 +54,9 @@ public sealed class IndustryMentorController(
                 item.User.CreatedAt,
                 item.Portfolio!.Slug,
                 item.Portfolio.Title,
-                item.Portfolio.PublishedAt))
+                item.Portfolio.PublishedAt,
+                item.Profile != null ? item.Profile.CvUrl : null,
+                item.Profile != null ? item.Profile.CvName : null))
             .ToListAsync(cancellationToken);
 
         return Ok(responses);
@@ -560,7 +565,9 @@ public sealed record MentorStudentSummaryResponse(
     DateTimeOffset CreatedAt,
     string? PortfolioSlug,
     string? PortfolioTitle,
-    DateTimeOffset? PortfolioPublishedAt);
+    DateTimeOffset? PortfolioPublishedAt,
+    string? CvUrl = null,
+    string? CvName = null);
 
 public sealed record MentorGithubRepoResponse(
     Guid Id,

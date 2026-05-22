@@ -724,30 +724,41 @@ public sealed class RoadmapReviewController(
             .ThenInclude(roadmap => roadmap.CareerRole)
             .ToListAsync(cancellationToken);
 
-        return items.Select(item => new ReviewerQueueItemResponse(
-            item.Id,
-            item.Status,
-            item.RequestedAt,
-            item.RespondedAt,
-            item.StudentNote,
-            item.ReviewerNote,
-            item.EvidenceUrl,
-            item.EvidenceType,
-            item.EvidenceFileName,
-            new ReviewerQueueStudentInfo(
-                item.Student.Id,
-                item.Student.FullName,
-                item.Student.Email,
-                item.Student.AvatarUrl),
-            new ReviewerQueueNodeInfo(
-                item.RoadmapNode.Id,
-                item.RoadmapNode.Title,
-                item.RoadmapNode.Description,
-                item.RoadmapNode.NodeType,
-                item.RoadmapNode.Status,
-                item.RoadmapNode.Roadmap.Id,
-                item.RoadmapNode.Roadmap.Title,
-                item.RoadmapNode.Roadmap.CareerRole.Name))).ToList();
+        var studentIds = items.Select(item => item.StudentId).Distinct().ToList();
+        var profiles = await dbContext.StudentProfiles
+            .AsNoTracking()
+            .Where(p => studentIds.Contains(p.UserId))
+            .ToDictionaryAsync(p => p.UserId, cancellationToken);
+
+        return items.Select(item => {
+            profiles.TryGetValue(item.StudentId, out var profile);
+            return new ReviewerQueueItemResponse(
+                item.Id,
+                item.Status,
+                item.RequestedAt,
+                item.RespondedAt,
+                item.StudentNote,
+                item.ReviewerNote,
+                item.EvidenceUrl,
+                item.EvidenceType,
+                item.EvidenceFileName,
+                new ReviewerQueueStudentInfo(
+                    item.Student.Id,
+                    item.Student.FullName,
+                    item.Student.Email,
+                    item.Student.AvatarUrl,
+                    profile?.CvUrl,
+                    profile?.CvName),
+                new ReviewerQueueNodeInfo(
+                    item.RoadmapNode.Id,
+                    item.RoadmapNode.Title,
+                    item.RoadmapNode.Description,
+                    item.RoadmapNode.NodeType,
+                    item.RoadmapNode.Status,
+                    item.RoadmapNode.Roadmap.Id,
+                    item.RoadmapNode.Roadmap.Title,
+                    item.RoadmapNode.Roadmap.CareerRole.Name));
+        }).ToList();
     }
 
     private async Task RecalculateRoadmapProgressAsync(RoadmapNode node, CancellationToken cancellationToken)
@@ -968,7 +979,9 @@ public sealed record ReviewerQueueStudentInfo(
     Guid UserId,
     string FullName,
     string Email,
-    string? AvatarUrl);
+    string? AvatarUrl,
+    string? CvUrl = null,
+    string? CvName = null);
 
 public sealed record ReviewerQueueNodeInfo(
     Guid NodeId,
