@@ -197,7 +197,43 @@ public sealed class ProfileController(
         [FromForm] UploadCvRequest request,
         CancellationToken cancellationToken)
     {
-        throw new NotImplementedException();
+        var file = request.File;
+        var userId = GetCurrentUserId();
+
+        if (file is null || file.Length == 0)
+        {
+            return BadRequest(new { message = "File is required." });
+        }
+
+        if (file.Length > storageOpts.MaxUploadBytes)
+        {
+            return BadRequest(new { message = $"File is too large. Max size is {storageOpts.MaxUploadBytes} bytes." });
+        }
+
+        if (file.ContentType != "application/pdf")
+        {
+            return BadRequest(new { message = "Only PDF files are supported for CVs." });
+        }
+
+        var profile = await dbContext.StudentProfiles
+            .Include(item => item.TargetRole)
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+
+        if (profile is null)
+        {
+            return NotFound(new { message = "Profile was not found. Please create your profile first." });
+        }
+
+        var objectName = $"users/{userId}/cv/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}";
+        await using var stream = file.OpenReadStream();
+        var result = await storageService.UploadAsync(stream, objectName, file.ContentType, cancellationToken);
+
+        profile.CvUrl = result.ObjectName;
+        profile.CvName = file.FileName;
+        profile.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToResponse(profile));
     }
 
     private static void ApplyProfileValues(StudentProfile profile, SaveProfileRequest request)
@@ -321,6 +357,8 @@ public sealed class ProfileController(
             profile.GithubUsername,
             profile.CareerGoal,
             profile.PreferredLearningHoursPerWeek,
+            null,
+            null,
             profile.CreatedAt,
             profile.UpdatedAt);
 
