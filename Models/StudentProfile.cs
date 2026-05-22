@@ -12,6 +12,8 @@ public sealed class StudentProfile
     public string? GithubUsername { get; set; }
     public string? CareerGoal { get; set; }
     public int? PreferredLearningHoursPerWeek { get; set; }
+    public string? CvUrl { get; set; }
+    public string? CvName { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
 
