@@ -357,8 +357,8 @@ public sealed class ProfileController(
             profile.GithubUsername,
             profile.CareerGoal,
             profile.PreferredLearningHoursPerWeek,
-            null,
-            null,
+            profile.CvUrl,
+            profile.CvName,
             profile.CreatedAt,
             profile.UpdatedAt);
 
