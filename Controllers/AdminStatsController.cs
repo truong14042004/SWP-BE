@@ -78,12 +78,12 @@ public sealed class AdminStatsController(AppDbContext dbContext) : ControllerBas
 
         if (resolvedMonth is < 1 or > 12)
         {
-            return BadRequest(new { message = "month must be between 1 and 12." });
+            return BadRequest(new { message = "Tháng phải từ 1 đến 12." });
         }
 
         if (resolvedYear is < 2000 or > 2100)
         {
-            return BadRequest(new { message = "year must be between 2000 and 2100." });
+            return BadRequest(new { message = "Năm phải từ 2000 đến 2100." });
         }
 
         var monthStart = new DateTime(resolvedYear, resolvedMonth, 1);

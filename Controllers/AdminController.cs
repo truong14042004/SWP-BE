@@ -56,7 +56,7 @@ public sealed class AdminController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return skill is null
-            ? NotFound(new { message = "Skill was not found." })
+            ? NotFound(new { message = "Không tìm thấy kỹ năng." })
             : Ok(ToResponse(skill));
     }
 
@@ -78,7 +78,7 @@ public sealed class AdminController(
             cancellationToken);
         if (exists)
         {
-            return Conflict(new { message = "A skill with the same name and category already exists." });
+            return Conflict(new { message = "Kỹ năng với tên và danh mục tương tự đã tồn tại." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -114,7 +114,7 @@ public sealed class AdminController(
         var skill = await dbContext.Skills.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (skill is null)
         {
-            return NotFound(new { message = "Skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng." });
         }
 
         var name = request.Name!.Trim();
@@ -124,7 +124,7 @@ public sealed class AdminController(
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "A skill with the same name and category already exists." });
+            return Conflict(new { message = "Kỹ năng với tên và danh mục tương tự đã tồn tại." });
         }
 
         skill.Name = name;
@@ -144,7 +144,7 @@ public sealed class AdminController(
         var skill = await dbContext.Skills.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (skill is null)
         {
-            return NotFound(new { message = "Skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng." });
         }
 
         var isUsed = await dbContext.UserSkills.AnyAsync(item => item.SkillId == id, cancellationToken)
@@ -194,7 +194,7 @@ public sealed class AdminController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return resource is null
-            ? NotFound(new { message = "Learning resource was not found." })
+            ? NotFound(new { message = "Không tìm thấy tài nguyên học tập." })
             : Ok(ToResponse(resource));
     }
 
@@ -293,7 +293,7 @@ public sealed class AdminController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (resource is null)
         {
-            return NotFound(new { message = "Learning resource was not found." });
+            return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
         if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
@@ -325,7 +325,7 @@ public sealed class AdminController(
         var resource = await dbContext.LearningResources.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (resource is null)
         {
-            return NotFound(new { message = "Learning resource was not found." });
+            return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
         if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
@@ -345,32 +345,32 @@ public sealed class AdminController(
     {
         if (string.IsNullOrWhiteSpace(request.Title))
         {
-            return "Learning resource title is required.";
+            return "Tiêu đề tài nguyên học tập là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.ResourceType))
         {
-            return "Learning resource type is required.";
+            return "Loại tài nguyên học tập là bắt buộc.";
         }
 
         if (request.EstimatedHours is < 0)
         {
-            return "Estimated hours must be greater than or equal to 0.";
+            return "Thời gian ước tính phải lớn hơn hoặc bằng 0.";
         }
 
         if (request.File is null || request.File.Length == 0)
         {
-            return "Learning resource file is required.";
+            return "Tệp tài nguyên học tập là bắt buộc.";
         }
 
         if (request.File.Length > options.MaxUploadBytes)
         {
-            return $"File is too large. Max size is {options.MaxUploadBytes} bytes.";
+            return $"Tệp quá lớn. Kích thước tối đa là {options.MaxUploadBytes} bytes.";
         }
 
         if (!LearningResourceContentTypes.Contains(request.File.ContentType))
         {
-            return $"Unsupported content type: {request.File.ContentType}.";
+            return $"Định dạng tệp không được hỗ trợ: {request.File.ContentType}.";
         }
 
         if (request.SkillId is not null)
@@ -380,7 +380,7 @@ public sealed class AdminController(
                 cancellationToken);
             if (!skillExists)
             {
-                return "Active skill was not found.";
+                return "Không tìm thấy kỹ năng đang hoạt động.";
             }
         }
 
@@ -425,7 +425,7 @@ public sealed class AdminController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return requirement is null
-            ? NotFound(new { message = "Role skill requirement was not found." })
+            ? NotFound(new { message = "Không tìm thấy yêu cầu kỹ năng của định hướng." })
             : Ok(ToResponse(requirement));
     }
 
@@ -445,7 +445,7 @@ public sealed class AdminController(
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "This career role already has a requirement for the selected skill." });
+            return Conflict(new { message = "Định hướng nghề nghiệp này đã có yêu cầu cho kỹ năng được chọn." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -485,7 +485,7 @@ public sealed class AdminController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (requirement is null)
         {
-            return NotFound(new { message = "Role skill requirement was not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu kỹ năng của định hướng." });
         }
 
         var duplicate = await dbContext.RoleSkillRequirements.AnyAsync(
@@ -495,7 +495,7 @@ public sealed class AdminController(
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "This career role already has a requirement for the selected skill." });
+            return Conflict(new { message = "Định hướng nghề nghiệp này đã có yêu cầu cho kỹ năng được chọn." });
         }
 
         requirement.CareerRoleId = request.CareerRoleId;
@@ -518,7 +518,7 @@ public sealed class AdminController(
         var requirement = await dbContext.RoleSkillRequirements.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (requirement is null)
         {
-            return NotFound(new { message = "Role skill requirement was not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu kỹ năng của định hướng." });
         }
 
         dbContext.RoleSkillRequirements.Remove(requirement);
@@ -531,12 +531,12 @@ public sealed class AdminController(
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return "Skill name is required.";
+            return "Tên kỹ năng là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Category))
         {
-            return "Skill category is required.";
+            return "Danh mục kỹ năng là bắt buộc.";
         }
 
         return null;
@@ -548,27 +548,27 @@ public sealed class AdminController(
     {
         if (string.IsNullOrWhiteSpace(request.Title))
         {
-            return "Learning resource title is required.";
+            return "Tiêu đề tài nguyên học tập là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Url))
         {
-            return "Learning resource URL is required.";
+            return "Đường dẫn (URL) tài nguyên học tập là bắt buộc.";
         }
 
         if (!Uri.TryCreate(request.Url.Trim(), UriKind.Absolute, out _))
         {
-            return "Learning resource URL must be absolute.";
+            return "Đường dẫn (URL) tài nguyên học tập phải là đường dẫn tuyệt đối.";
         }
 
         if (string.IsNullOrWhiteSpace(request.ResourceType))
         {
-            return "Learning resource type is required.";
+            return "Loại tài nguyên học tập là bắt buộc.";
         }
 
         if (request.EstimatedHours is < 0)
         {
-            return "Estimated hours must be greater than or equal to 0.";
+            return "Thời gian ước tính phải lớn hơn hoặc bằng 0.";
         }
 
         if (request.SkillId is not null)
@@ -578,7 +578,7 @@ public sealed class AdminController(
                 cancellationToken);
             if (!skillExists)
             {
-                return "Active skill was not found.";
+                return "Không tìm thấy kỹ năng đang hoạt động.";
             }
         }
 
@@ -591,27 +591,27 @@ public sealed class AdminController(
     {
         if (request.CareerRoleId == Guid.Empty)
         {
-            return "Career role is required.";
+            return "Định hướng nghề nghiệp là bắt buộc.";
         }
 
         if (request.SkillId == Guid.Empty)
         {
-            return "Skill is required.";
+            return "Kỹ năng là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.RequiredLevel))
         {
-            return "Required level is required.";
+            return "Yêu cầu cấp độ là bắt buộc.";
         }
 
         if (request.Priority is < 1 or > 5)
         {
-            return "Priority must be from 1 to 5.";
+            return "Độ ưu tiên phải từ 1 đến 5.";
         }
 
         if (request.Weight is <= 0)
         {
-            return "Weight must be greater than 0.";
+            return "Trọng số phải lớn hơn 0.";
         }
 
         var careerRoleExists = await dbContext.CareerRoles.AnyAsync(
@@ -619,7 +619,7 @@ public sealed class AdminController(
             cancellationToken);
         if (!careerRoleExists)
         {
-            return "Active career role was not found.";
+            return "Không tìm thấy định hướng nghề nghiệp đang hoạt động.";
         }
 
         var skillExists = await dbContext.Skills.AnyAsync(
@@ -627,7 +627,7 @@ public sealed class AdminController(
             cancellationToken);
         if (!skillExists)
         {
-            return "Active skill was not found.";
+            return "Không tìm thấy kỹ năng đang hoạt động.";
         }
 
         return null;

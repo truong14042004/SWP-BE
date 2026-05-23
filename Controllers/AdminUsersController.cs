@@ -70,7 +70,7 @@ public sealed class AdminUsersController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return user is null
-            ? NotFound(new { message = "User was not found." })
+            ? NotFound(new { message = "Không tìm thấy người dùng." })
             : Ok(ToResponse(user));
     }
 
@@ -94,7 +94,7 @@ public sealed class AdminUsersController(
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "Username or email already exists." });
+            return Conflict(new { message = "Tên đăng nhập hoặc email đã tồn tại." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -135,14 +135,14 @@ public sealed class AdminUsersController(
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (user is null)
         {
-            return NotFound(new { message = "User was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         var currentUserId = GetCurrentUserId();
         var role = request.Role!.Trim();
         if (id == currentUserId && (role != UserRoles.Admin || request.IsActive is false))
         {
-            return BadRequest(new { message = "Admin cannot remove admin access or deactivate the current account." });
+            return BadRequest(new { message = "Quản trị viên không thể gỡ quyền admin hoặc vô hiệu hóa tài khoản hiện tại." });
         }
 
         var username = NormalizeRequired(request.Username!);
@@ -152,7 +152,7 @@ public sealed class AdminUsersController(
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "Username or email already exists." });
+            return Conflict(new { message = "Tên đăng nhập hoặc email đã tồn tại." });
         }
 
         var shouldRevokeSessions = user.Role != role
@@ -195,12 +195,12 @@ public sealed class AdminUsersController(
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (user is null)
         {
-            return NotFound(new { message = "User was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         if (id == GetCurrentUserId() && !request.IsActive)
         {
-            return BadRequest(new { message = "Admin cannot deactivate the current account." });
+            return BadRequest(new { message = "Quản trị viên không thể vô hiệu hóa tài khoản hiện tại." });
         }
 
         user.IsActive = request.IsActive;
@@ -223,19 +223,19 @@ public sealed class AdminUsersController(
     {
         if (string.IsNullOrWhiteSpace(request.Role) || !AllowedRoles.Contains(request.Role.Trim()))
         {
-            return BadRequest(new { message = "User role is invalid." });
+            return BadRequest(new { message = "Vai trò người dùng không hợp lệ." });
         }
 
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (user is null)
         {
-            return NotFound(new { message = "User was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         var role = request.Role.Trim();
         if (id == GetCurrentUserId() && role != UserRoles.Admin)
         {
-            return BadRequest(new { message = "Admin cannot remove admin access from the current account." });
+            return BadRequest(new { message = "Quản trị viên không thể gỡ quyền admin của tài khoản hiện tại." });
         }
 
         if (user.Role != role)
@@ -259,7 +259,7 @@ public sealed class AdminUsersController(
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (user is null)
         {
-            return NotFound(new { message = "User was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         var validationError = ValidateAvatarFile(request.File);
@@ -291,13 +291,13 @@ public sealed class AdminUsersController(
         var currentUserId = GetCurrentUserId();
         if (id == currentUserId)
         {
-            return BadRequest(new { message = "Admin cannot delete the current account." });
+            return BadRequest(new { message = "Quản trị viên không thể xóa tài khoản hiện tại." });
         }
 
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (user is null)
         {
-            return NotFound(new { message = "User was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         user.IsActive = false;
@@ -313,7 +313,7 @@ public sealed class AdminUsersController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 
     private async Task RevokeUserRefreshTokensAsync(Guid userId, CancellationToken cancellationToken)
@@ -333,27 +333,27 @@ public sealed class AdminUsersController(
     {
         if (string.IsNullOrWhiteSpace(request.Username))
         {
-            return "Username is required.";
+            return "Tên đăng nhập là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Email))
         {
-            return "Email is required.";
+            return "Email là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            return "Full name is required.";
+            return "Họ và tên là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Password))
         {
-            return "Password is required.";
+            return "Mật khẩu là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Role) || !AllowedRoles.Contains(request.Role.Trim()))
         {
-            return "User role is invalid.";
+            return "Vai trò người dùng không hợp lệ.";
         }
 
         return null;
@@ -363,22 +363,22 @@ public sealed class AdminUsersController(
     {
         if (string.IsNullOrWhiteSpace(request.Username))
         {
-            return "Username is required.";
+            return "Tên đăng nhập là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Email))
         {
-            return "Email is required.";
+            return "Email là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.FullName))
         {
-            return "Full name is required.";
+            return "Họ và tên là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Role) || !AllowedRoles.Contains(request.Role.Trim()))
         {
-            return "User role is invalid.";
+            return "Vai trò người dùng không hợp lệ.";
         }
 
         return null;
@@ -388,17 +388,17 @@ public sealed class AdminUsersController(
     {
         if (file is null || file.Length == 0)
         {
-            return "Avatar image is required.";
+            return "Ảnh đại diện là bắt buộc.";
         }
 
         if (file.Length > 5 * 1024 * 1024)
         {
-            return "Avatar image must be 5 MB or smaller.";
+            return "Ảnh đại diện phải nhỏ hơn hoặc bằng 5 MB.";
         }
 
         if (!ImageContentTypes.Contains(file.ContentType))
         {
-            return $"Unsupported avatar content type: {file.ContentType}.";
+            return $"Định dạng ảnh đại diện không được hỗ trợ: {file.ContentType}.";
         }
 
         return null;

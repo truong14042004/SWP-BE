@@ -46,12 +46,12 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
     {
         if (request.CounselorId == Guid.Empty)
         {
-            return BadRequest(new { message = "Counselor ID is required." });
+            return BadRequest(new { message = "Mã cố vấn là bắt buộc." });
         }
 
         if (request.StudentId == Guid.Empty)
         {
-            return BadRequest(new { message = "Student ID is required." });
+            return BadRequest(new { message = "Mã sinh viên là bắt buộc." });
         }
 
         // 1. Kiểm tra Counselor tồn tại và đúng role
@@ -61,12 +61,12 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
 
         if (counselor is null)
         {
-            return NotFound(new { message = "Active counselor was not found." });
+            return NotFound(new { message = "Không tìm thấy cố vấn đang hoạt động." });
         }
 
         if (counselor.Role != UserRoles.AcademicCounselor)
         {
-            return BadRequest(new { message = $"User with ID {request.CounselorId} is not an Academic Counselor." });
+            return BadRequest(new { message = $"Người dùng với ID {request.CounselorId} không phải là Cố vấn học tập." });
         }
 
         // 2. Kiểm tra Student tồn tại và đúng role
@@ -76,12 +76,12 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
 
         if (student is null)
         {
-            return NotFound(new { message = "Active student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên đang hoạt động." });
         }
 
         if (student.Role != UserRoles.Student)
         {
-            return BadRequest(new { message = $"User with ID {request.StudentId} is not a Student." });
+            return BadRequest(new { message = $"Người dùng với ID {request.StudentId} không phải là Sinh viên." });
         }
 
         // 3. Kiểm tra trùng lặp
@@ -92,7 +92,7 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
         {
             if (existingAssignment.Status == "Active")
             {
-                return Conflict(new { message = "This assignment is already active." });
+                return Conflict(new { message = "Phân công này đã hoạt động." });
             }
             else
             {
@@ -148,7 +148,7 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
 
         if (assignment is null)
         {
-            return NotFound(new { message = "Counselor assignment was not found." });
+            return NotFound(new { message = "Không tìm thấy phân công cố vấn." });
         }
 
         assignment.Status = "Inactive";
@@ -163,7 +163,7 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
         var nameIdentifier = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(nameIdentifier) || !Guid.TryParse(nameIdentifier, out var userId))
         {
-            throw new InvalidOperationException("User ID is missing or invalid in JWT token.");
+            throw new InvalidOperationException("Mã người dùng bị thiếu hoặc không hợp lệ trong JWT token.");
         }
         return userId;
     }

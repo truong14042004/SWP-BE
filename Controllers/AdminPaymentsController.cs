@@ -79,7 +79,7 @@ public sealed class AdminPaymentsController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return payment is null
-            ? NotFound(new { message = "Payment transaction was not found." })
+            ? NotFound(new { message = "Không tìm thấy giao dịch thanh toán." })
             : Ok(ToPaymentResponse(payment));
     }
 
@@ -91,7 +91,7 @@ public sealed class AdminPaymentsController(
     {
         if (string.IsNullOrWhiteSpace(request.Status))
         {
-            return BadRequest(new { message = "Payment status is required." });
+            return BadRequest(new { message = "Trạng thái thanh toán là bắt buộc." });
         }
 
         var payment = await dbContext.PaymentTransactions
@@ -102,7 +102,7 @@ public sealed class AdminPaymentsController(
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (payment is null)
         {
-            return NotFound(new { message = "Payment transaction was not found." });
+            return NotFound(new { message = "Không tìm thấy giao dịch thanh toán." });
         }
 
         var now = DateTimeOffset.UtcNow;

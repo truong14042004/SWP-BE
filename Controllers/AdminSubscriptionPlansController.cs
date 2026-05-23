@@ -36,7 +36,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         return plan is null
-            ? NotFound(new { message = "Subscription plan was not found." })
+            ? NotFound(new { message = "Không tìm thấy gói đăng ký." })
             : Ok(ToResponse(plan));
     }
 
@@ -82,7 +82,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (plan is null)
         {
-            return NotFound(new { message = "Subscription plan was not found." });
+            return NotFound(new { message = "Không tìm thấy gói đăng ký." });
         }
 
         ApplyRequest(plan, request, DateTimeOffset.UtcNow);
@@ -98,7 +98,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (plan is null)
         {
-            return NotFound(new { message = "Subscription plan was not found." });
+            return NotFound(new { message = "Không tìm thấy gói đăng ký." });
         }
 
         var isUsed = await dbContext.Subscriptions.AnyAsync(item => item.PlanId == id, cancellationToken)
@@ -123,34 +123,34 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return "Plan name is required.";
+            return "Tên gói đăng ký là bắt buộc.";
         }
 
         if (request.Price < 0)
         {
-            return "Plan price cannot be negative.";
+            return "Giá gói đăng ký không được âm.";
         }
 
         if (request.MentorReviewLimit < 0)
         {
-            return "Mentor review limit cannot be negative.";
+            return "Giới hạn lượt review của mentor không được âm.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Currency))
         {
-            return "Currency is required.";
+            return "Đơn vị tiền tệ là bắt buộc.";
         }
 
         if (string.IsNullOrWhiteSpace(request.BillingCycle))
         {
-            return "Billing cycle is required.";
+            return "Chu kỳ thanh toán là bắt buộc.";
         }
 
         var normalizedName = request.Name.Trim();
         var exists = await dbContext.SubscriptionPlans.AnyAsync(
             plan => plan.Name == normalizedName && plan.Id != currentId,
             cancellationToken);
-        return exists ? "Subscription plan name already exists." : null;
+        return exists ? "Tên gói đăng ký đã tồn tại." : null;
     }
 
     private static void ApplyRequest(
