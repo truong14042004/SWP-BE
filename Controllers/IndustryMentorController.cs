@@ -75,7 +75,7 @@ public sealed class IndustryMentorController(
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy Portfolio." });
         }
 
         return Ok(await ToPortfolioResponse(portfolio, cancellationToken));
@@ -193,12 +193,12 @@ public sealed class IndustryMentorController(
 
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         if (userSkill.IsVerified)
         {
-            return Conflict(new { message = "Skill is already verified." });
+            return Conflict(new { message = "Kỹ năng đã được xác minh." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -244,12 +244,12 @@ public sealed class IndustryMentorController(
 
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         if (!userSkill.IsVerified)
         {
-            return Conflict(new { message = "Skill is not currently verified." });
+            return Conflict(new { message = "Kỹ năng hiện chưa được xác minh." });
         }
 
         // Chi nguoi verify ban dau moi rut lai duoc
@@ -290,12 +290,12 @@ public sealed class IndustryMentorController(
     {
         if (string.IsNullOrWhiteSpace(request.Comment))
         {
-            return BadRequest(new { message = "Comment is required." });
+            return BadRequest(new { message = "Nhận xét là bắt buộc." });
         }
 
         if (request.Rating is < 1 or > 5)
         {
-            return BadRequest(new { message = "Rating must be between 1 and 5." });
+            return BadRequest(new { message = "Đánh giá phải từ 1 đến 5 sao." });
         }
 
         if (!string.IsNullOrWhiteSpace(request.JobReadinessLevel)
@@ -303,7 +303,7 @@ public sealed class IndustryMentorController(
         {
             return BadRequest(new
             {
-                message = $"JobReadinessLevel must be one of: {string.Join(", ", AllowedJobReadinessLevels)}."
+                message = $"Mức độ sẵn sàng làm việc phải thuộc một trong các giá trị: {string.Join(", ", AllowedJobReadinessLevels)}."
             });
         }
 
@@ -315,7 +315,7 @@ public sealed class IndustryMentorController(
                 cancellationToken);
         if (student is null)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         if (request.PortfolioId is not null) //kiem tra portfolio thuoc ve sinh vien
@@ -325,7 +325,7 @@ public sealed class IndustryMentorController(
                 cancellationToken);
             if (!hasPortfolio)
             {
-                return BadRequest(new { message = "Portfolio does not belong to the student." });
+                return BadRequest(new { message = "Portfolio không thuộc về sinh viên." });
             }
         }
 
@@ -336,7 +336,7 @@ public sealed class IndustryMentorController(
                 cancellationToken);
             if (!hasRepository)
             {
-                return BadRequest(new { message = "GitHub repository does not belong to the student." });
+                return BadRequest(new { message = "Kho lưu trữ GitHub không thuộc về sinh viên." });
             }
         }
 
@@ -346,7 +346,7 @@ public sealed class IndustryMentorController(
         {
             return StatusCode(StatusCodes.Status402PaymentRequired, new
             {
-                message = $"Sinh vien da het luot mentor review ({quota.Used}/{quota.Limit}). Vui long nang cap goi de tiep tuc.",
+                message = $"Sinh viên đã hết lượt mentor review ({quota.Used}/{quota.Limit}). Vui lòng nâng cấp gói để tiếp tục.",
                 quota = ToResponse(quota)
             });
         }
@@ -552,7 +552,7 @@ public sealed class IndustryMentorController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 }
 

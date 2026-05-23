@@ -17,7 +17,7 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
     {
         return SendInternalAsync(
             toEmail,
-            "CareerMap email verification OTP",
+            "Mã OTP xác thực email CareerMap",
             BuildOtpBody(fullName, otp),
             isHtml: false,
             cancellationToken);
@@ -50,7 +50,7 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
             || string.IsNullOrWhiteSpace(_options.Password)
             || string.IsNullOrWhiteSpace(_options.FromEmail))
         {
-            throw new InvalidOperationException("SMTP configuration is missing.");
+            throw new InvalidOperationException("Thiếu cấu hình SMTP.");
         }
 
         using var message = new MailMessage
@@ -73,11 +73,11 @@ public sealed class SmtpEmailSender(IOptions<SmtpOptions> options) : IEmailSende
 
     private static string BuildOtpBody(string fullName, string otp) =>
         $"""
-        Hello {fullName},
+        Xin chào {fullName},
 
-        Your CareerMap verification OTP is: {otp}
+        Mã OTP xác thực CareerMap của bạn là: {otp}
 
-        This code expires in 10 minutes. If you did not request this, ignore this email.
+        Mã này sẽ hết hạn trong 10 phút. Nếu bạn không yêu cầu mã này, vui lòng bỏ qua email.
 
         CareerMap
         """;

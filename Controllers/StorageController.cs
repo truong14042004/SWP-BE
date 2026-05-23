@@ -106,7 +106,7 @@ public sealed partial class StorageController(
         var user = await dbContext.Users.FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
         if (user is null)
         {
-            return Unauthorized(new { message = "Invalid user token." });
+            return Unauthorized(new { message = "Mã xác thực người dùng không hợp lệ." });
         }
 
         var objectName = BuildUserObjectName(userId, "avatar", request.File.FileName, request.File.ContentType);
@@ -131,7 +131,7 @@ public sealed partial class StorageController(
         var user = await dbContext.Users.FirstOrDefaultAsync(item => item.Id == userId, cancellationToken);
         if (user is null)
         {
-            return Unauthorized(new { message = "Invalid user token." });
+            return Unauthorized(new { message = "Mã xác thực người dùng không hợp lệ." });
         }
 
         var objectName = BuildUserObjectName(userId, "avatar", request.FileName ?? sourceUrl.Segments.LastOrDefault(), null);
@@ -164,7 +164,7 @@ public sealed partial class StorageController(
             .FirstOrDefaultAsync(item => item.Id == userSkillId && item.UserId == userId, cancellationToken);
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         var objectName = BuildUserObjectName(userId, "evidence", request.File.FileName, request.File.ContentType);
@@ -192,7 +192,7 @@ public sealed partial class StorageController(
             .FirstOrDefaultAsync(item => item.Id == userSkillId && item.UserId == userId, cancellationToken);
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         var objectName = BuildUserObjectName(userId, "evidence", request.FileName ?? sourceUrl.Segments.LastOrDefault(), null);
@@ -225,7 +225,7 @@ public sealed partial class StorageController(
         var project = await GetOwnedPortfolioProject(projectId, userId, cancellationToken);
         if (project is null)
         {
-            return NotFound(new { message = "Portfolio project was not found." });
+            return NotFound(new { message = "Không tìm thấy dự án trong hồ sơ cá nhân." });
         }
 
         var objectName = BuildUserObjectName(userId, "portfolio", request.File.FileName, request.File.ContentType);
@@ -251,7 +251,7 @@ public sealed partial class StorageController(
         var project = await GetOwnedPortfolioProject(projectId, userId, cancellationToken);
         if (project is null)
         {
-            return NotFound(new { message = "Portfolio project was not found." });
+            return NotFound(new { message = "Không tìm thấy dự án trong hồ sơ cá nhân." });
         }
 
         var objectName = BuildUserObjectName(userId, "portfolio", request.FileName ?? sourceUrl.Segments.LastOrDefault(), null);
@@ -316,7 +316,7 @@ public sealed partial class StorageController(
         var resource = await GetReadableLearningResource(resourceId, cancellationToken);
         if (resource?.StorageObjectName is null)
         {
-            return NotFound(new { message = "Learning resource file was not found." });
+            return NotFound(new { message = "Không tìm thấy tệp tài nguyên học tập." });
         }
 
         return await DownloadObject(resource.StorageObjectName, cancellationToken);
@@ -331,7 +331,7 @@ public sealed partial class StorageController(
         var resource = await GetReadableLearningResource(resourceId, cancellationToken);
         if (resource?.StorageObjectName is null)
         {
-            return NotFound(new { message = "Learning resource file was not found." });
+            return NotFound(new { message = "Không tìm thấy tệp tài nguyên học tập." });
         }
 
         var duration = TimeSpan.FromMinutes(Math.Clamp(options.SignedUrlMinutes, 1, 60));
@@ -347,7 +347,7 @@ public sealed partial class StorageController(
         var project = await GetPublishedPortfolioProject(projectId, cancellationToken);
         if (project?.ImageUrl is null)
         {
-            return NotFound(new { message = "Portfolio project image was not found." });
+            return NotFound(new { message = "Không tìm thấy ảnh của dự án hồ sơ cá nhân." });
         }
 
         var duration = TimeSpan.FromMinutes(Math.Clamp(options.SignedUrlMinutes, 1, 60));
@@ -363,7 +363,7 @@ public sealed partial class StorageController(
         var project = await GetPublishedPortfolioProject(projectId, cancellationToken);
         if (project?.ImageUrl is null)
         {
-            return NotFound(new { message = "Portfolio project image was not found." });
+            return NotFound(new { message = "Không tìm thấy ảnh của dự án hồ sơ cá nhân." });
         }
 
         return await DownloadObject(project.ImageUrl, cancellationToken);
@@ -380,7 +380,7 @@ public sealed partial class StorageController(
 
         if (user?.AvatarUrl is null)
         {
-            return NotFound(new { message = "User avatar was not found." });
+            return NotFound(new { message = "Không tìm thấy ảnh đại diện của người dùng." });
         }
 
         if (Uri.TryCreate(user.AvatarUrl, UriKind.Absolute, out var avatarUri))
@@ -390,7 +390,7 @@ public sealed partial class StorageController(
 
         if (!IsUserObject(userId, user.AvatarUrl))
         {
-            return NotFound(new { message = "User avatar was not found." });
+            return NotFound(new { message = "Không tìm thấy ảnh đại diện của người dùng." });
         }
 
         return await DownloadObject(user.AvatarUrl, cancellationToken);
@@ -470,17 +470,17 @@ public sealed partial class StorageController(
     {
         if (file is null || file.Length == 0)
         {
-            throw new InvalidOperationException("File is required.");
+            throw new InvalidOperationException("Tệp tin là bắt buộc.");
         }
 
         if (file.Length > options.MaxUploadBytes)
         {
-            throw new InvalidOperationException($"File is too large. Max size is {options.MaxUploadBytes} bytes.");
+            throw new InvalidOperationException($"Tệp tin quá lớn. Kích thước tối đa là {options.MaxUploadBytes} bytes.");
         }
 
         if (!allowedContentTypes.Contains(file.ContentType))
         {
-            throw new InvalidOperationException($"Unsupported content type: {file.ContentType}.");
+            throw new InvalidOperationException($"Định dạng tệp không được hỗ trợ: {file.ContentType}.");
         }
     }
 
@@ -563,7 +563,7 @@ public sealed partial class StorageController(
         if (string.IsNullOrWhiteSpace(value)
             || !Uri.TryCreate(value.Trim(), UriKind.Absolute, out var uri))
         {
-            throw new InvalidOperationException("A valid URL is required.");
+            throw new InvalidOperationException("Yêu cầu một đường dẫn URL hợp lệ.");
         }
 
         return uri;
@@ -574,7 +574,7 @@ public sealed partial class StorageController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 
     [GeneratedRegex("[^a-z0-9]+")]

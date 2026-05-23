@@ -30,13 +30,13 @@ public class SkillGapsController : ControllerBase
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
         {
-            return Unauthorized(new { message = "Invalid token." });
+            return Unauthorized(new { message = "Mã xác thực không hợp lệ." });
         }
 
         var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
         {
-            return NotFound(new { message = "User not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         Guid targetRoleId;
@@ -49,7 +49,7 @@ public class SkillGapsController : ControllerBase
             var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
             if (profile == null || !profile.TargetRoleId.HasValue)
             {
-                return BadRequest(new { message = "Career role not provided and no target role found in student profile." });
+                return BadRequest(new { message = "Vai trò nghề nghiệp không được cung cấp và không tìm thấy vai trò mục tiêu trong hồ sơ sinh viên." });
             }
             targetRoleId = profile.TargetRoleId.Value;
         }
@@ -57,7 +57,7 @@ public class SkillGapsController : ControllerBase
         var roleExists = await _context.CareerRoles.AnyAsync(r => r.Id == targetRoleId);
         if (!roleExists)
         {
-            return NotFound(new { message = "Career role not found." });
+            return NotFound(new { message = "Không tìm thấy vai trò nghề nghiệp." });
         }
 
         // Get required skills for the role
@@ -68,7 +68,7 @@ public class SkillGapsController : ControllerBase
 
         if (!requiredSkills.Any())
         {
-            return BadRequest(new { message = "This career role has no skill requirements." });
+            return BadRequest(new { message = "Vai trò nghề nghiệp này không có yêu cầu kỹ năng nào." });
         }
 
         // Get user's current skills
@@ -113,26 +113,26 @@ public class SkillGapsController : ControllerBase
                 if (userSkill!.IsVerified)
                 {
                     item.Status = "Matched";
-                    item.Recommendation = "Great job! You have mastered and verified this skill.";
+                    item.Recommendation = "Làm tốt lắm! Bạn đã thành thạo và xác thực kỹ năng này.";
                     totalScore += req.Weight; // Full points
                 }
                 else
                 {
                     item.Status = "NotVerified";
-                    item.Recommendation = "You have the required skill level, but it needs to be verified (provide evidence).";
+                    item.Recommendation = "Bạn đã đạt cấp độ kỹ năng yêu cầu, nhưng cần phải được xác thực (cung cấp minh chứng).";
                     totalScore += req.Weight * 0.5m; // Partial points for unverified
                 }
             }
             else if (userLevelValue > 0)
             {
                 item.Status = "Weak";
-                item.Recommendation = $"You need to improve from {userSkill!.Level} to {req.RequiredLevel}.";
+                item.Recommendation = $"Bạn cần cải thiện từ cấp độ {userSkill!.Level} lên {req.RequiredLevel}.";
                 totalScore += req.Weight * (decimal)userLevelValue / reqLevelValue; // Partial points
             }
             else
             {
                 item.Status = "Missing";
-                item.Recommendation = $"You need to learn this skill up to {req.RequiredLevel} level.";
+                item.Recommendation = $"Bạn cần học kỹ năng này đến cấp độ {req.RequiredLevel}.";
                 // 0 points
             }
 
@@ -149,7 +149,7 @@ public class SkillGapsController : ControllerBase
             report.MatchScore = 0;
         }
 
-        report.Summary = $"You have a {report.MatchScore}% match for this career role.";
+        report.Summary = $"Mức độ phù hợp của bạn với vai trò nghề nghiệp này là {report.MatchScore}%.";
 
         // Delete previous reports for the same user and role
         var previousReports = await _context.SkillGapReports
@@ -214,7 +214,7 @@ public class SkillGapsController : ControllerBase
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
         {
-            return Unauthorized(new { message = "Invalid token." });
+            return Unauthorized(new { message = "Mã xác thực không hợp lệ." });
         }
 
         var report = await _context.SkillGapReports
@@ -225,7 +225,7 @@ public class SkillGapsController : ControllerBase
 
         if (report == null)
         {
-            return NotFound(new { message = "No skill gap report found for this user." });
+            return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng nào cho người dùng này." });
         }
 
         var items = await _context.SkillGapReportItems
@@ -261,7 +261,7 @@ public class SkillGapsController : ControllerBase
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var currentUserId))
         {
-            return Unauthorized(new { message = "Invalid token." });
+            return Unauthorized(new { message = "Mã xác thực không hợp lệ." });
         }
 
         var report = await _context.SkillGapReports
@@ -270,7 +270,7 @@ public class SkillGapsController : ControllerBase
 
         if (report == null)
         {
-            return NotFound(new { message = "Skill gap report not found." });
+            return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng." });
         }
 
         if (report.UserId != currentUserId && !User.IsInRole("Admin") && !User.IsInRole("Counselor"))

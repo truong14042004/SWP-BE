@@ -33,7 +33,7 @@ public sealed class MentorController(
     {
         if (string.IsNullOrWhiteSpace(request.Question))
         {
-            return BadRequest(new { message = "Question is required." });
+            return BadRequest(new { message = "Câu hỏi là bắt buộc." });
         }
 
         var userId = GetCurrentUserId();
@@ -152,7 +152,7 @@ public sealed class MentorController(
 
         if (session is null)
         {
-            return NotFound(new { message = "Mentor session was not found." });
+            return NotFound(new { message = "Không tìm thấy phiên cố vấn." });
         }
 
         return Ok(ToResponse(session, ParseAiResponse(session.Answer), null));
@@ -175,7 +175,7 @@ public sealed class MentorController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 
     private async Task<AiChatQuotaResponse> GetAiChatQuotaAsync(Guid userId, CancellationToken cancellationToken)

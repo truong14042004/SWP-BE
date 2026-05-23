@@ -27,12 +27,12 @@ public sealed class GeminiTextGenerationService(
     {
         if (!_options.Provider.Equals("Gemini", StringComparison.OrdinalIgnoreCase))
         {
-            throw new InvalidOperationException("Only Gemini AI provider is configured for this backend.");
+            throw new InvalidOperationException("Chỉ có nhà cung cấp Gemini AI được cấu hình cho backend này.");
         }
 
         if (string.IsNullOrWhiteSpace(_options.ApiKey))
         {
-            throw new InvalidOperationException("Gemini API key is not configured. Set AI:ApiKey or AI__ApiKey.");
+            throw new InvalidOperationException("Chưa cấu hình API key cho Gemini. Vui lòng đặt AI:ApiKey hoặc AI__ApiKey.");
         }
 
         var primaryModel = string.IsNullOrWhiteSpace(_options.Model) ? "gemini-3.1-flash-lite" : _options.Model.Trim();
@@ -70,7 +70,7 @@ public sealed class GeminiTextGenerationService(
             }
         }
 
-        throw lastError ?? new InvalidOperationException("Gemini request failed after retries.");
+        throw lastError ?? new InvalidOperationException("Yêu cầu gửi tới Gemini thất bại sau khi thử lại nhiều lần.");
     }
 
     private async Task<AiTextResult> CallGeminiAsync(
@@ -112,10 +112,10 @@ public sealed class GeminiTextGenerationService(
             if (statusCode is 429 or 500 or 502 or 503 or 504)
             {
                 throw new TransientGeminiException(
-                    $"Gemini transient error: {statusCode} {detail}");
+                    $"Lỗi tạm thời từ Gemini: {statusCode} {detail}");
             }
 
-            throw new InvalidOperationException($"Gemini request failed: {statusCode} {detail}");
+            throw new InvalidOperationException($"Yêu cầu gửi tới Gemini thất bại: {statusCode} {detail}");
         }
 
         var result = await response.Content.ReadFromJsonAsync<GeminiGenerateResponse>(cancellationToken);
@@ -128,8 +128,8 @@ public sealed class GeminiTextGenerationService(
         {
             var finishReason = result?.Candidates?.FirstOrDefault()?.FinishReason ?? "Unknown";
             throw new InvalidOperationException(
-                $"Gemini returned an empty response (finishReason={finishReason}). " +
-                $"If using a 2.5 model, this is usually caused by thinking budget exhausting the output tokens.");
+                $"Gemini trả về phản hồi rỗng (finishReason={finishReason}). " +
+                $"Nếu sử dụng mô hình 2.5, nguyên nhân thường do ngân sách suy nghĩ (thinking budget) làm cạn kiệt token đầu ra.");
         }
 
         return new AiTextResult(text.Trim(), model, result?.UsageMetadata?.TotalTokenCount);

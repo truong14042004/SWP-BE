@@ -33,7 +33,7 @@ public sealed class PayOsController(
         catch (PayOSException exception)
         {
             logger.LogWarning(exception, "Invalid PayOS webhook signature.");
-            return Unauthorized(new { message = "Invalid PayOS webhook signature." });
+            return Unauthorized(new { message = "Chữ ký webhook PayOS không hợp lệ." });
         }
 
         try
@@ -47,7 +47,7 @@ public sealed class PayOsController(
                 "PayOS webhook was verified but processing failed. OrderCode={OrderCode} Reference={Reference}",
                 webhookData.OrderCode,
                 webhookData.Reference);
-            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "PayOS webhook processing failed." });
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Xử lý webhook PayOS thất bại." });
         }
 
         return Ok(new { success = true });
@@ -104,7 +104,7 @@ public sealed class PayOsController(
                 return;
             }
 
-            throw new InvalidOperationException($"Payment transaction was not found for PayOS order code {webhookData.OrderCode}.");
+            throw new InvalidOperationException($"Không tìm thấy giao dịch thanh toán cho mã đơn hàng PayOS {webhookData.OrderCode}.");
         }
 
         if (webhookData.Code == "00")

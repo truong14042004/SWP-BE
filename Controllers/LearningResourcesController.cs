@@ -47,7 +47,7 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
             .SingleOrDefaultAsync(item => item.Id == id && item.IsActive, cancellationToken);
 
         return resource is null
-            ? NotFound(new { message = "Learning resource was not found." })
+            ? NotFound(new { message = "Không tìm thấy tài nguyên học tập." })
             : Ok(ToResponse(resource));
     }
 

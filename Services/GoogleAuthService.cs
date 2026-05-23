@@ -19,14 +19,14 @@ public sealed class GoogleAuthService(
     {
         if (string.IsNullOrWhiteSpace(_googleOptions.ClientId))
         {
-            throw new InvalidOperationException("Google client id is not configured.");
+            throw new InvalidOperationException("Chưa cấu hình Google Client ID.");
         }
 
         var payload = await VerifyGoogleTokenAsync(idToken);
 
         if (!payload.EmailVerified)
         {
-            throw new UnauthorizedAccessException("Google email is not verified.");
+            throw new UnauthorizedAccessException("Email Google chưa được xác thực.");
         }
 
         var normalizedEmail = payload.Email.Trim().ToLowerInvariant();
@@ -83,7 +83,7 @@ public sealed class GoogleAuthService(
         }
         catch (InvalidJwtException)
         {
-            throw new UnauthorizedAccessException("Invalid Google token.");
+            throw new UnauthorizedAccessException("Mã xác thực Google không hợp lệ.");
         }
     }
 }

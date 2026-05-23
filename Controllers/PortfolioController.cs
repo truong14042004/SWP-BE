@@ -24,7 +24,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         return Ok(await ToResponse(portfolio, cancellationToken));
@@ -38,7 +38,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
     {
         if (string.IsNullOrWhiteSpace(request.Title))
         {
-            return BadRequest(new { message = "Title is required." });
+            return BadRequest(new { message = "Tiêu đề không được để trống." });
         }
 
         var userId = GetCurrentUserId();
@@ -88,7 +88,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         if (!string.IsNullOrWhiteSpace(request.Title))
@@ -134,7 +134,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Published portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân đã xuất bản." });
         }
 
         return Ok(await ToResponse(portfolio, cancellationToken));
@@ -152,7 +152,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -177,7 +177,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
 
         if (portfolio is null)
         {
-            return NotFound(new { message = "Portfolio was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         portfolio.IsPublished = false; //go port khoi trang thai public
@@ -258,7 +258,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
             if (request.GithubRepositoryId is not null
                 && !repositories.TryGetValue(request.GithubRepositoryId.Value, out repository))
             {
-                throw new InvalidOperationException("One or more GitHub repositories do not belong to the current user.");
+                throw new InvalidOperationException("Một hoặc nhiều kho lưu trữ GitHub không thuộc về người dùng hiện tại.");
             }
 
             var title = !string.IsNullOrWhiteSpace(request.Title)
@@ -266,7 +266,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
                 : repository?.RepoName;
             if (string.IsNullOrWhiteSpace(title))
             {
-                throw new InvalidOperationException("Portfolio project title is required.");
+                throw new InvalidOperationException("Tiêu đề dự án hồ sơ cá nhân không được để trống.");
             }
 
             projects.Add(new PortfolioProject
@@ -324,7 +324,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 
     [GeneratedRegex("[^a-z0-9]+")]

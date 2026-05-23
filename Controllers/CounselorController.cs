@@ -126,7 +126,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var user = await dbContext.Users
@@ -135,7 +135,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (user is null)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var profile = await dbContext.StudentProfiles
@@ -180,7 +180,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -188,7 +188,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var skills = await dbContext.UserSkills
@@ -231,7 +231,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -239,7 +239,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var report = await dbContext.SkillGapReports
@@ -251,7 +251,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (report is null)
         {
-            return NotFound(new { message = "No skill gap report found for this student." });
+            return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng cho sinh viên này." });
         }
 
         return await GetSkillGapReportInternalAsync(report, cancellationToken);
@@ -270,7 +270,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -278,7 +278,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var reports = await dbContext.SkillGapReports
@@ -313,7 +313,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -321,7 +321,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var report = await dbContext.SkillGapReports
@@ -331,7 +331,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (report is null)
         {
-            return NotFound(new { message = "Skill gap report was not found for this student." });
+            return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng cho sinh viên này." });
         }
 
         return await GetSkillGapReportInternalAsync(report, cancellationToken);
@@ -350,7 +350,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -358,7 +358,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var roadmap = await dbContext.Roadmaps
@@ -370,7 +370,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (roadmap is null)
         {
-            return NotFound(new { message = "No roadmap found for this student." });
+            return NotFound(new { message = "Không tìm thấy lộ trình cho sinh viên này." });
         }
 
         var nodes = await dbContext.RoadmapNodes
@@ -400,12 +400,12 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.FeedbackText))
         {
-            return BadRequest(new { message = "FeedbackText is required." });
+            return BadRequest(new { message = "Nội dung phản hồi là bắt buộc." });
         }
 
         if (request.Rating is < 1 or > 5)
         {
-            return BadRequest(new { message = "Rating must be between 1 and 5." });
+            return BadRequest(new { message = "Đánh giá phải từ 1 đến 5 sao." });
         }
 
         var counselorId = GetCurrentUserId();
@@ -413,7 +413,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         // 1. Xác thực phân công cố vấn - sinh viên
         if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         // 2. Xác nhận sinh viên tồn tại
@@ -422,7 +422,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         // 3. Xác nhận roadmapId nếu được cung cấp
@@ -432,7 +432,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 .AnyAsync(r => r.Id == request.RoadmapId && r.UserId == request.StudentId, cancellationToken);
             if (!roadmapExists)
             {
-                return BadRequest(new { message = "Roadmap does not belong to this student." });
+                return BadRequest(new { message = "Lộ trình không thuộc về sinh viên này." });
             }
         }
 
@@ -443,7 +443,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 .AnyAsync(r => r.Id == request.SkillGapReportId && r.UserId == request.StudentId, cancellationToken);
             if (!reportExists)
             {
-                return BadRequest(new { message = "Skill gap report does not belong to this student." });
+                return BadRequest(new { message = "Báo cáo khoảng cách kỹ năng không thuộc về sinh viên này." });
             }
         }
 
@@ -506,7 +506,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var counselorId = GetCurrentUserId();
         if (!await IsStudentAssignedToCounselorAsync(studentId, counselorId, cancellationToken))
         {
-            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Student is not assigned to this counselor." });
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
         var studentExists = await dbContext.Users
@@ -514,7 +514,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
         if (!studentExists)
         {
-            return NotFound(new { message = "Student was not found." });
+            return NotFound(new { message = "Không tìm thấy sinh viên." });
         }
 
         var feedbacks = await dbContext.CounselorFeedbacks
@@ -540,7 +540,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var nameIdentifier = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(nameIdentifier) || !Guid.TryParse(nameIdentifier, out var userId))
         {
-            throw new InvalidOperationException("User ID is missing or invalid in JWT token.");
+            throw new InvalidOperationException("Mã người dùng bị thiếu hoặc không hợp lệ trong JWT token.");
         }
         return userId;
     }

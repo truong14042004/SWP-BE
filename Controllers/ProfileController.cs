@@ -43,7 +43,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Profile was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         return Ok(ToResponse(profile));
@@ -64,7 +64,7 @@ public sealed class ProfileController(
             cancellationToken);
         if (exists)
         {
-            return Conflict(new { message = "Profile already exists for this user." });
+            return Conflict(new { message = "Hồ sơ cá nhân đã tồn tại cho người dùng này." });
         }
 
         var validationError = await ValidateProfileRequest(request, cancellationToken);
@@ -107,7 +107,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Profile was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         var validationError = await ValidateProfileRequest(request, cancellationToken);
@@ -140,28 +140,28 @@ public sealed class ProfileController(
         var userIdValue = User.FindFirstValue(ClaimTypes.NameIdentifier); //lay chuoi id tu token dang duoc ma hoa bang JWT
         if (!Guid.TryParse(userIdValue, out var userId)) //kiem tra id dung dinh dang GUID
         {
-            return Unauthorized(new { message = "Invalid user token." });
+            return Unauthorized(new { message = "Mã xác thực người dùng không hợp lệ." });
         }
 
         if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "File is required." });
+            return BadRequest(new { message = "Tệp tin là bắt buộc." });
         }
 
         if (file.Length > storageOpts.MaxUploadBytes)
         {
-            return BadRequest(new { message = $"File is too large. Max size is {storageOpts.MaxUploadBytes} bytes." });
+            return BadRequest(new { message = $"Tệp tin quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes." });
         }
 
         if (!AvatarContentTypes.Contains(file.ContentType))
         {
-            return BadRequest(new { message = $"Unsupported content type: {file.ContentType}." });
+            return BadRequest(new { message = $"Định dạng tệp không được hỗ trợ: {file.ContentType}." });
         }
 
         var user = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == userId, cancellationToken); //lay user tu database de tim user co id khop voi token
         if (user is null || user.Role != UserRoles.Student)
         {
-            return NotFound(new { message = "Student user was not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng sinh viên." });
         }
 
         var objectName = $"users/{userId}/avatar/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}"; //tao duong dan luu tru tren cloud storage
@@ -180,7 +180,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Profile was not found." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
         }
 
         return Ok(ToResponse(profile));
@@ -202,17 +202,17 @@ public sealed class ProfileController(
 
         if (file is null || file.Length == 0)
         {
-            return BadRequest(new { message = "File is required." });
+            return BadRequest(new { message = "Tệp tin là bắt buộc." });
         }
 
         if (file.Length > storageOpts.MaxUploadBytes)
         {
-            return BadRequest(new { message = $"File is too large. Max size is {storageOpts.MaxUploadBytes} bytes." });
+            return BadRequest(new { message = $"Tệp tin quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes." });
         }
 
         if (file.ContentType != "application/pdf")
         {
-            return BadRequest(new { message = "Only PDF files are supported for CVs." });
+            return BadRequest(new { message = "Chỉ hỗ trợ tệp PDF cho CV." });
         }
 
         var profile = await dbContext.StudentProfiles
@@ -221,7 +221,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Profile was not found. Please create your profile first." });
+            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân. Vui lòng tạo hồ sơ cá nhân trước." });
         }
 
         var objectName = $"users/{userId}/cv/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}";
@@ -321,37 +321,37 @@ public sealed class ProfileController(
     {
         if (request.School is { Length: > 200 })
         {
-            return "School must be at most 200 characters.";
+            return "Trường học phải có tối đa 200 ký tự.";
         }
 
         if (request.Major is { Length: > 200 })
         {
-            return "Major must be at most 200 characters.";
+            return "Chuyên ngành phải có tối đa 200 ký tự.";
         }
 
         if (request.GithubUsername is { Length: > 100 })
         {
-            return "GitHub username must be at most 100 characters.";
+            return "Tên người dùng GitHub phải có tối đa 100 ký tự.";
         }
 
         if (request.CareerGoal is { Length: > 1000 })
         {
-            return "Career goal must be at most 1000 characters.";
+            return "Mục tiêu nghề nghiệp phải có tối đa 1000 ký tự.";
         }
 
         if (request.Year is < 1 or > 8)
         {
-            return "Year must be between 1 and 8.";
+            return "Năm học phải từ 1 đến 8.";
         }
 
         if (request.Gpa is < 0)
         {
-            return "GPA must be greater than or equal to 0.";
+            return "GPA phải lớn hơn hoặc bằng 0.";
         }
 
         if (request.PreferredLearningHoursPerWeek is < 0)
         {
-            return "Preferred learning hours per week must be greater than or equal to 0.";
+            return "Số giờ học mong muốn mỗi tuần phải lớn hơn hoặc bằng 0.";
         }
 
         if (request.TargetRoleId is not null)
@@ -361,7 +361,7 @@ public sealed class ProfileController(
                 cancellationToken);
             if (!careerRoleExists)
             {
-                return "Active career role was not found.";
+                return "Không tìm thấy vai trò nghề nghiệp đang hoạt động.";
             }
         }
 
@@ -391,6 +391,6 @@ public sealed class ProfileController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 }

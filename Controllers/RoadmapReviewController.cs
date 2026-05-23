@@ -392,7 +392,7 @@ public sealed class RoadmapReviewController(
         {
             return BadRequest(new
             {
-                message = $"File type {extension} not allowed. Use {string.Join(", ", AllowedEvidenceExtensions)}."
+                message = $"Loại tệp {extension} không được chấp nhận. Vui lòng sử dụng các định dạng: {string.Join(", ", AllowedEvidenceExtensions)}."
             });
         }
 

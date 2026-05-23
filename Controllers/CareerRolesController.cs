@@ -63,7 +63,7 @@ public class CareerRolesController : ControllerBase
 
         if (role == null)
         {
-            return NotFound(new { message = "Career role not found." });
+            return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
         }
 
         return Ok(role);
@@ -82,13 +82,13 @@ public class CareerRolesController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new { message = "Name is required." });
+            return BadRequest(new { message = "Tên định hướng là bắt buộc." });
         }
 
         var exists = await _context.CareerRoles.AnyAsync(r => r.Name == request.Name);
         if (exists)
         {
-            return Conflict(new { message = "A career role with this name already exists." });
+            return Conflict(new { message = "Định hướng nghề nghiệp với tên này đã tồn tại." });
         }
 
         var role = new CareerRole
@@ -131,19 +131,19 @@ public class CareerRolesController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Name))
         {
-            return BadRequest(new { message = "Name is required." });
+            return BadRequest(new { message = "Tên định hướng là bắt buộc." });
         }
 
         var role = await _context.CareerRoles.FindAsync(id);
         if (role == null)
         {
-            return NotFound(new { message = "Career role not found." });
+            return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
         }
 
         var exists = await _context.CareerRoles.AnyAsync(r => r.Name == request.Name && r.Id != id);
         if (exists)
         {
-            return Conflict(new { message = "Another career role with this name already exists." });
+            return Conflict(new { message = "Định hướng nghề nghiệp khác với tên này đã tồn tại." });
         }
 
         role.Name = request.Name;
@@ -178,19 +178,19 @@ public class CareerRolesController : ControllerBase
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier);
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId))
         {
-            return Unauthorized(new { message = "Invalid token." });
+            return Unauthorized(new { message = "Token không hợp lệ." });
         }
 
         var roleExists = await _context.CareerRoles.AnyAsync(r => r.Id == request.CareerRoleId);
         if (!roleExists)
         {
-            return NotFound(new { message = "Career role not found." });
+            return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
         }
 
         var userExists = await _context.Users.AnyAsync(u => u.Id == userId);
         if (!userExists)
         {
-            return NotFound(new { message = "User not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         var profile = await _context.StudentProfiles.FirstOrDefaultAsync(p => p.UserId == userId);
@@ -216,7 +216,7 @@ public class CareerRolesController : ControllerBase
 
         return Ok(new 
         { 
-            message = "Career role selected successfully.", 
+            message = "Chọn định hướng nghề nghiệp thành công.", 
             profileId = profile.Id, 
             targetRoleId = profile.TargetRoleId 
         });

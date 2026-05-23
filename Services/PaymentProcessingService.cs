@@ -26,7 +26,7 @@ public sealed class PaymentProcessingService(AppDbContext dbContext) : IPaymentP
             }
 
             var plan = payment.Subscription.Plan
-                ?? throw new InvalidOperationException("Subscription plan was not found for payment processing.");
+                ?? throw new InvalidOperationException("Không tìm thấy gói đăng ký để xử lý thanh toán.");
 
             payment.Subscription.Status = "Active";
             payment.Subscription.StartedAt ??= paidAt;

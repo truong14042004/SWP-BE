@@ -57,18 +57,18 @@ public sealed class SubscriptionsController(
 
         if (plan is null)
         {
-            return NotFound(new { message = "Subscription plan was not found." });
+            return NotFound(new { message = "Không tìm thấy gói đăng ký." });
         }
 
         if (!string.Equals(plan.Currency, "VND", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "PayOS checkout currently supports VND plans only." });
+            return BadRequest(new { message = "Thanh toán qua PayOS hiện chỉ hỗ trợ các gói bằng VND." });
         }
 
         var amount = decimal.ToInt32(decimal.Round(plan.Price, 0, MidpointRounding.AwayFromZero));
         if (amount < 0)
         {
-            return BadRequest(new { message = "Plan price cannot be negative." });
+            return BadRequest(new { message = "Giá của gói đăng ký không thể là số âm." });
         }
 
         if (amount == 0)
@@ -231,7 +231,7 @@ public sealed class SubscriptionsController(
 
         if (subscription is null)
         {
-            return NotFound(new { message = "Active subscription was not found." });
+            return NotFound(new { message = "Không tìm thấy gói đăng ký đang hoạt động." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -248,7 +248,7 @@ public sealed class SubscriptionsController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 
     private static long CreateOrderCode()

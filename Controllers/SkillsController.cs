@@ -56,14 +56,14 @@ public class SkillsController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
         {
-            return BadRequest(new { message = "Name and Category are required." });
+            return BadRequest(new { message = "Tên và danh mục là bắt buộc." });
         }
 
         // Kiểm tra xem skill đã tồn tại chưa (kết hợp Name và Category là unique trong DB)
         var exists = await _context.Skills.AnyAsync(s => s.Name == request.Name && s.Category == request.Category);
         if (exists)
         {
-            return Conflict(new { message = "A skill with this name and category already exists." });
+            return Conflict(new { message = "Kỹ năng với tên và danh mục này đã tồn tại." });
         }
 
         var skill = new Skill
@@ -106,19 +106,19 @@ public class SkillsController : ControllerBase
     {
         if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
         {
-            return BadRequest(new { message = "Name and Category are required." });
+            return BadRequest(new { message = "Tên và danh mục là bắt buộc." });
         }
 
         var skill = await _context.Skills.FindAsync(id);
         if (skill == null)
         {
-            return NotFound(new { message = "Skill not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng." });
         }
 
         var exists = await _context.Skills.AnyAsync(s => s.Name == request.Name && s.Category == request.Category && s.Id != id);
         if (exists)
         {
-            return Conflict(new { message = "Another skill with this name and category already exists." });
+            return Conflict(new { message = "Một kỹ năng khác có tên và danh mục này đã tồn tại." });
         }
 
         skill.Name = request.Name;
@@ -148,7 +148,7 @@ public class SkillsController : ControllerBase
         var skill = await _context.Skills.FindAsync(id);
         if (skill == null)
         {
-            return NotFound(new { message = "Skill not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng." });
         }
 
         try
@@ -159,7 +159,7 @@ public class SkillsController : ControllerBase
         }
         catch (DbUpdateException)
         {
-            return BadRequest(new { message = "Cannot delete this skill because it is being referenced by other records." });
+            return BadRequest(new { message = "Không thể xóa kỹ năng này vì nó đang được tham chiếu bởi các bản ghi khác." });
         }
     }
 }

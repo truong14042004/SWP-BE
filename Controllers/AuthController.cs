@@ -101,7 +101,7 @@ public sealed class AuthController(
         }
         catch (InvalidJwtException)
         {
-            return Unauthorized(new { message = "Invalid Google token." });
+            return Unauthorized(new { message = "Token Google không hợp lệ." });
         }
         catch (UnauthorizedAccessException exception)
         {
@@ -115,7 +115,7 @@ public sealed class AuthController(
                 exception.Source);
             return StatusCode(StatusCodes.Status500InternalServerError, new
             {
-                message = "Google login failed on the server.",
+                message = "Đăng nhập Google thất bại trên máy chủ.",
                 detail = exception.Message,
                 type = exception.GetType().Name,
                 source = exception.Source
@@ -147,7 +147,7 @@ public sealed class AuthController(
         CancellationToken cancellationToken)
     {
         await refreshTokenService.RevokeAsync(request.RefreshToken, cancellationToken);
-        return Ok(new AuthMessageResponse("Refresh token revoked.", string.Empty));
+        return Ok(new AuthMessageResponse("Đã thu hồi token làm mới.", string.Empty));
     }
 
     [Authorize]
@@ -160,7 +160,7 @@ public sealed class AuthController(
         var userIdStr = User.FindFirstValue(ClaimTypes.NameIdentifier); //lay chuoi id tu token
         if (string.IsNullOrEmpty(userIdStr) || !Guid.TryParse(userIdStr, out var userId)) //kiem tra id co hop le khong
         {
-            return Unauthorized(new { message = "Invalid token." });
+            return Unauthorized(new { message = "Token không hợp lệ." });
         }
 
         var user = await dbContext.Users //lay user tu database
@@ -169,12 +169,12 @@ public sealed class AuthController(
 
         if (user is null)
         {
-            return NotFound(new { message = "User not found." });
+            return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
         if (!user.IsActive)
         {
-            return Unauthorized(new { message = "Account is inactive." });
+            return Unauthorized(new { message = "Tài khoản đang bị vô hiệu hóa." });
         }
 
         return Ok(new MeResponse(
@@ -200,7 +200,7 @@ public sealed class AuthController(
         var email = User.FindFirstValue(ClaimTypes.Email) ?? string.Empty; //lay email tu token
 
         return Ok(new AuthMessageResponse(
-            "Logged out successfully. Remove the stored JWT access token on the client; the server does not revoke stateless tokens.",
+            "Đăng xuất thành công. Hãy xóa token JWT lưu ở client; máy chủ không thu hồi token phi trạng thái.",
             email));
     }
 }

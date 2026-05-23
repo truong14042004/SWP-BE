@@ -66,7 +66,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             CareerRoleId = careerRole.Id,
             SkillGapReportId = skillGapReportId,
             Title = string.IsNullOrWhiteSpace(request.Title)
-                ? $"{careerRole.Name} learning roadmap"
+                ? $"Lộ trình học tập {careerRole.Name}"
                 : request.Title.Trim(),
             Description = request.Description?.Trim(),
             Status = "Active",
@@ -234,7 +234,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             {
                 return BadRequest(new
                 {
-                    message = "Prerequisite roadmap node must be completed before this node can be started.",
+                    message = "Module lộ trình tiên quyết phải được hoàn thành trước khi bắt đầu module này.",
                     prerequisiteNodeId = node.PrerequisiteNodeId
                 });
             }
@@ -405,8 +405,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 item.SkillId,
                 resourcesBySkill.GetValueOrDefault(item.SkillId) ?? [],
                 BuildGroupName(item.Skill.Category, item.Priority),
-                $"Improve {item.Skill.Name}",
-                item.Recommendation ?? $"Reach {item.RequiredLevel} level for {item.Skill.Name}.",
+                $"Cải thiện {item.Skill.Name}",
+                item.Recommendation ?? $"Đạt cấp độ {item.RequiredLevel} cho {item.Skill.Name}.",
                 "Skill",
                 item.Priority,
                 item.Priority <= 2 ? 12 : 8))
@@ -443,14 +443,14 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 var priority = hasSkill
                     ? Math.Min(requirement.Priority + 1, 5)
                     : requirement.Priority;
-                var status = hasSkill && !userSkill!.IsVerified ? "Needs evidence/verification." : "Missing or weak skill.";
+                var status = hasSkill && !userSkill!.IsVerified ? "Cần minh chứng/xác thực." : "Thiếu hoặc kỹ năng yếu.";
 
                 return new RoadmapNodeInput(
                     requirement.SkillId,
                     resourcesBySkill.GetValueOrDefault(requirement.SkillId) ?? [],
                     BuildGroupName(requirement.Skill.Category, priority),
-                    $"Learn {requirement.Skill.Name}",
-                    $"{status} Reach {requirement.RequiredLevel} level for {requirement.Skill.Name}.",
+                    $"Học {requirement.Skill.Name}",
+                    $"{status} Đạt cấp độ {requirement.RequiredLevel} cho {requirement.Skill.Name}.",
                     "Skill",
                     priority,
                     priority <= 2 ? 12 : 8);
@@ -499,63 +499,63 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         var normalizedRole = careerRoleName.ToLowerInvariant();
         var common = new List<RoadmapNodeInput>
         {
-            new(null, [], "Foundation", "Clarify target role expectations", $"Review internship/fresher requirements for {careerRoleName} and list the top missing skills.", "Reading", 1, 4),
-            new(null, [], "Portfolio", "Build one portfolio project", $"Create a practical project aligned with {careerRoleName} and document the problem, features, tech stack, and setup steps.", "Project", 2, 24),
-            new(null, [], "Portfolio", "Improve GitHub presentation", "Add README, screenshots, setup guide, API examples, deployment link, and architecture notes.", "Practice", 3, 6)
+            new(null, [], "Foundation", "Làm rõ mong đợi của vai trò mục tiêu", $"Đánh giá các yêu cầu thực tập sinh/fresher cho {careerRoleName} và liệt kê các kỹ năng còn thiếu hàng đầu.", "Reading", 1, 4),
+            new(null, [], "Portfolio", "Xây dựng một dự án thực tế cá nhân", $"Tạo một dự án thực tế phù hợp với {careerRoleName} và tài liệu hóa vấn đề, tính năng, công nghệ sử dụng và các bước thiết lập.", "Project", 2, 24),
+            new(null, [], "Portfolio", "Cải thiện trình bày GitHub", "Thêm README, ảnh chụp màn hình, hướng dẫn thiết lập, ví dụ API, liên kết triển khai và ghi chú kiến trúc.", "Practice", 3, 6)
         };
 
         if (normalizedRole.Contains("backend"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Backend Engineering", "Master REST API fundamentals", "Design CRUD APIs with validation, authentication, pagination, and clear error responses.", "Skill", 1, 16),
-                new(null, [], "Backend Engineering", "Practice database design", "Model entities, relationships, indexes, migrations, and query patterns for a real backend feature.", "Skill", 2, 14),
-                new(null, [], "Quality", "Add backend testing", "Write unit and integration tests for service logic, controllers, and database behavior.", "Practice", 3, 10)
+                new(null, [], "Backend Engineering", "Thành thạo nền tảng REST API", "Thiết kế các API CRUD với xác thực, phân trang và phản hồi lỗi rõ ràng.", "Skill", 1, 16),
+                new(null, [], "Backend Engineering", "Luyện tập thiết kế cơ sở dữ liệu", "Thiết kế thực thể, mối quan hệ, chỉ mục, migration và các mẫu truy vấn cho một tính năng backend thực tế.", "Skill", 2, 14),
+                new(null, [], "Quality", "Viết kiểm thử cho backend", "Viết unit test và integration test cho logic dịch vụ, controller và hành vi cơ sở dữ liệu.", "Practice", 3, 10)
             ]);
         }
         else if (normalizedRole.Contains("frontend"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Frontend Engineering", "Strengthen React UI architecture", "Build reusable components, route protection, form validation, loading states, and error states.", "Skill", 1, 16),
-                new(null, [], "Frontend Engineering", "Integrate real APIs", "Connect frontend pages to authenticated backend APIs with clean API client handling.", "Practice", 2, 12),
-                new(null, [], "Quality", "Polish responsive UX", "Verify mobile and desktop layouts, accessibility, and empty/error states.", "Assessment", 3, 10)
+                new(null, [], "Frontend Engineering", "Củng cố kiến trúc giao diện React", "Xây dựng các component tái sử dụng, bảo vệ định tuyến, xác thực biểu mẫu, trạng thái tải và trạng thái lỗi.", "Skill", 1, 16),
+                new(null, [], "Frontend Engineering", "Tích hợp API thực tế", "Kết nối các trang frontend với các API backend được xác thực với xử lý API client sạch sẽ.", "Practice", 2, 12),
+                new(null, [], "Quality", "Hoàn thiện UX đáp ứng (responsive)", "Xác minh bố cục trên thiết bị di động và máy tính để bàn, tính khả dụng và các trạng thái trống/lỗi.", "Assessment", 3, 10)
             ]);
         }
         else if (normalizedRole.Contains("devops") || normalizedRole.Contains("cloud"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "DevOps Foundation", "Containerize the application", "Write Dockerfile and compose setup for backend, frontend, and database.", "Project", 1, 12),
-                new(null, [], "DevOps Foundation", "Build CI/CD pipeline", "Automate build, test, migration, and deployment steps.", "Practice", 2, 14),
-                new(null, [], "Operations", "Add monitoring basics", "Track logs, health checks, deployment status, and rollback process.", "Skill", 3, 8)
+                new(null, [], "DevOps Foundation", "Container hóa ứng dụng", "Viết Dockerfile và cấu hình docker-compose cho backend, frontend và cơ sở dữ liệu.", "Project", 1, 12),
+                new(null, [], "DevOps Foundation", "Xây dựng luồng CI/CD", "Tự động hóa các bước biên dịch, kiểm thử, migration và triển khai.", "Practice", 2, 14),
+                new(null, [], "Operations", "Thêm giám sát cơ bản", "Theo dõi nhật ký hệ thống (logs), kiểm tra trạng thái hoạt động (health checks), trạng thái triển khai và quy trình hoàn tác (rollback).", "Skill", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("data"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "Data Foundation", "Practice SQL and data modeling", "Design analytical schemas, transformations, and query optimization examples.", "Skill", 1, 16),
-                new(null, [], "Data Engineering", "Build a data pipeline", "Ingest, clean, transform, and export a dataset with reproducible scripts.", "Project", 2, 20),
-                new(null, [], "Quality", "Document data quality checks", "Add validation rules, data profiling, and pipeline failure handling.", "Practice", 3, 8)
+                new(null, [], "Data Foundation", "Luyện tập SQL và mô hình hóa dữ liệu", "Thiết kế giản đồ phân tích, biến đổi dữ liệu và các ví dụ tối ưu hóa truy vấn.", "Skill", 1, 16),
+                new(null, [], "Data Engineering", "Xây dựng luồng dữ liệu (data pipeline)", "Thu thập, làm sạch, biến đổi và xuất tập dữ liệu với các tập lệnh có thể tái tạo.", "Project", 2, 20),
+                new(null, [], "Quality", "Tài liệu hóa kiểm tra chất lượng dữ liệu", "Thêm các quy tắc xác thực, lập hồ sơ dữ liệu và xử lý lỗi luồng dữ liệu.", "Practice", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("qa"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "QA Foundation", "Write test strategy", "Define test scope, acceptance criteria, and regression risks for a sample product.", "Reading", 1, 8),
-                new(null, [], "QA Automation", "Automate API and UI tests", "Create repeatable tests for main user flows and API contracts.", "Project", 2, 18),
-                new(null, [], "Quality", "Set up test reporting", "Publish test results and document bugs with reproduction steps.", "Practice", 3, 8)
+                new(null, [], "QA Foundation", "Viết chiến lược kiểm thử", "Xác định phạm vi kiểm thử, tiêu chí chấp nhận và rủi ro hồi quy cho một sản phẩm mẫu.", "Reading", 1, 8),
+                new(null, [], "QA Automation", "Tự động hóa kiểm kiểm API và UI", "Tạo các bài kiểm thử có thể chạy lại cho luồng người dùng chính và hợp đồng API.", "Project", 2, 18),
+                new(null, [], "Quality", "Thiết lập báo cáo kiểm thử", "Công bố kết quả kiểm thử và tài liệu hóa lỗi với các bước tái dựng.", "Practice", 3, 8)
             ]);
         }
         else if (normalizedRole.Contains("ai"))
         {
             common.InsertRange(1,
             [
-                new(null, [], "AI Engineering", "Learn AI API integration", "Build prompts, structured outputs, retries, and error handling around an AI provider.", "Skill", 1, 14),
-                new(null, [], "AI Engineering", "Build an AI-assisted feature", "Create a feature that uses user context and stores generation results.", "Project", 2, 20),
-                new(null, [], "Quality", "Evaluate AI output quality", "Add validation, safety checks, and feedback capture for generated content.", "Assessment", 3, 10)
+                new(null, [], "AI Engineering", "Học tích hợp API AI", "Xây dựng prompt, đầu ra có cấu trúc, thử lại và xử lý lỗi xung quanh nhà cung cấp AI.", "Skill", 1, 14),
+                new(null, [], "AI Engineering", "Xây dựng tính năng hỗ trợ bởi AI", "Tạo một tính năng sử dụng ngữ cảnh người dùng và lưu trữ kết quả tạo ra.", "Project", 2, 20),
+                new(null, [], "Quality", "Đánh giá chất lượng đầu ra của AI", "Thêm xác thực, kiểm tra an toàn và thu thập phản hồi cho nội dung được tạo.", "Assessment", 3, 10)
             ]);
         }
 
@@ -569,7 +569,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 
     private static int LevelRank(string? level) =>
@@ -617,7 +617,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             : groupName;
 
     private static string BuildGroupDescription(string groupName) =>
-        $"Complete the {groupName.ToLowerInvariant()} nodes in priority order before moving to the next learning area.";
+        $"Hoàn thành các module {groupName.ToLowerInvariant()} theo thứ tự ưu tiên trước khi chuyển sang phần học tiếp theo.";
 
     private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes) =>
         new(

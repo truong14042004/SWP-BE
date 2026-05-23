@@ -25,12 +25,12 @@ public sealed class PasswordAuthService(
 
         if (request.Password != request.ConfirmPassword)
         {
-            throw new InvalidOperationException("Password confirmation does not match.");
+            throw new InvalidOperationException("Mật khẩu xác nhận không trùng khớp.");
         }
 
         if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(fullName))
         {
-            throw new InvalidOperationException("Username and full name are required.");
+            throw new InvalidOperationException("Tên đăng nhập và họ tên là bắt buộc.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -42,7 +42,7 @@ public sealed class PasswordAuthService(
             .AnyAsync(user => user.Username == username || user.Email == email, cancellationToken);
         if (userExists)
         {
-            throw new InvalidOperationException("Username or email already exists.");
+            throw new InvalidOperationException("Tên đăng nhập hoặc email đã tồn tại.");
         }
 
         var otp = CreateOtp();
@@ -55,7 +55,7 @@ public sealed class PasswordAuthService(
         if (pendingRegistration is not null
             && (pendingRegistration.Email != email || pendingRegistration.Username != username))
         {
-            throw new InvalidOperationException("Username or email already exists.");
+            throw new InvalidOperationException("Tên đăng nhập hoặc email đã tồn tại.");
         }
 
         if (pendingRegistration is null)
@@ -80,7 +80,7 @@ public sealed class PasswordAuthService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new AuthMessageResponse(
-            "Verification OTP has been sent to your email.",
+            "Mã OTP xác thực đã được gửi đến email của bạn.",
             pendingRegistration.Email);
     }
 
@@ -94,14 +94,14 @@ public sealed class PasswordAuthService(
             .AnyAsync(user => user.Email == email && user.IsEmailVerified, cancellationToken);
         if (verifiedUserExists)
         {
-            throw new InvalidOperationException("Email is already registered and verified.");
+            throw new InvalidOperationException("Email đã được đăng ký và xác thực.");
         }
 
         var pendingRegistration = await dbContext.PendingRegistrations
             .SingleOrDefaultAsync(registration => registration.Email == email, cancellationToken);
         if (pendingRegistration is null)
         {
-            throw new InvalidOperationException("Registration details not found. Please register first.");
+            throw new InvalidOperationException("Không tìm thấy thông tin đăng ký. Vui lòng đăng ký trước.");
         }
 
         var otp = CreateOtp();
@@ -121,7 +121,7 @@ public sealed class PasswordAuthService(
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return new AuthMessageResponse(
-            "Verification OTP has been resent to your email.",
+            "Mã OTP xác thực đã được gửi lại đến email của bạn.",
             email);
     }
 
@@ -136,7 +136,7 @@ public sealed class PasswordAuthService(
         if (pendingRegistration is null
             || pendingRegistration.EmailVerificationOtpExpiresAt < DateTimeOffset.UtcNow)
         {
-            throw new UnauthorizedAccessException("Invalid or expired OTP.");
+            throw new UnauthorizedAccessException("Mã OTP không hợp lệ hoặc đã hết hạn.");
         }
 
         var hashUser = new User
@@ -152,7 +152,7 @@ public sealed class PasswordAuthService(
 
         if (result == PasswordVerificationResult.Failed)
         {
-            throw new UnauthorizedAccessException("Invalid or expired OTP.");
+            throw new UnauthorizedAccessException("Mã OTP không hợp lệ hoặc đã hết hạn.");
         }
 
         var userExists = await dbContext.Users.AnyAsync(
@@ -160,7 +160,7 @@ public sealed class PasswordAuthService(
             cancellationToken);
         if (userExists)
         {
-            throw new UnauthorizedAccessException("Username or email already exists.");
+            throw new UnauthorizedAccessException("Tên đăng nhập hoặc email đã tồn tại.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -193,7 +193,7 @@ public sealed class PasswordAuthService(
         var username = Normalize(request.Username);
         if (string.IsNullOrWhiteSpace(username))
         {
-            throw new UnauthorizedAccessException("Invalid username or password.");
+            throw new UnauthorizedAccessException("Tên đăng nhập hoặc mật khẩu không chính xác.");
         }
 
         var user = await dbContext.Users
@@ -204,13 +204,13 @@ public sealed class PasswordAuthService(
             || !user.IsActive
             || !user.IsEmailVerified)
         {
-            throw new UnauthorizedAccessException("Invalid username or password.");
+            throw new UnauthorizedAccessException("Tên đăng nhập hoặc mật khẩu không chính xác.");
         }
 
         var result = passwordHasher.VerifyHashedPassword(user, user.PasswordHash, request.Password);
         if (result == PasswordVerificationResult.Failed)
         {
-            throw new UnauthorizedAccessException("Invalid username or password.");
+            throw new UnauthorizedAccessException("Tên đăng nhập hoặc mật khẩu không chính xác.");
         }
 
         if (result == PasswordVerificationResult.SuccessRehashNeeded)

@@ -96,12 +96,12 @@ public sealed class GithubController(
     {
         if (!string.IsNullOrWhiteSpace(error))
         {
-            return BadRequest(new { message = "GitHub OAuth was rejected.", error });
+            return BadRequest(new { message = "Xác thực GitHub bị từ chối.", error });
         }
 
         if (string.IsNullOrWhiteSpace(code) || string.IsNullOrWhiteSpace(state))
         {
-            return BadRequest(new { message = "GitHub OAuth callback is missing code or state." });
+            return BadRequest(new { message = "Callback GitHub OAuth thiếu code hoặc state." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -109,13 +109,13 @@ public sealed class GithubController(
             .SingleOrDefaultAsync(item => item.State == state, cancellationToken);
         if (oauthState is null || oauthState.ExpiresAt < now)
         {
-            return BadRequest(new { message = "GitHub OAuth state is invalid or expired." });
+            return BadRequest(new { message = "State GitHub OAuth không hợp lệ hoặc đã hết hạn." });
         }
 
         var token = await ExchangeCodeForTokenAsync(code, cancellationToken);
         if (string.IsNullOrWhiteSpace(token.AccessToken))
         {
-            return BadRequest(new { message = "Could not exchange GitHub OAuth code for an access token." });
+            return BadRequest(new { message = "Không thể đổi mã GitHub OAuth lấy access token." });
         }
 
         var client = CreateGithubClient(token.AccessToken);
@@ -124,7 +124,7 @@ public sealed class GithubController(
             cancellationToken);
         if (githubUser is null || string.IsNullOrWhiteSpace(githubUser.Login))
         {
-            return BadRequest(new { message = "Could not read GitHub user profile." });
+            return BadRequest(new { message = "Không thể đọc hồ sơ người dùng GitHub." });
         }
 
         var connection = await dbContext.GithubConnections
@@ -190,7 +190,7 @@ public sealed class GithubController(
 
         if (string.IsNullOrWhiteSpace(username))
         {
-            return BadRequest(new { message = "GitHub username is required." });
+            return BadRequest(new { message = "Tên người dùng GitHub là bắt buộc." });
         }
 
         var client = CreateGithubClient(useOAuthConnection ? githubConnection!.AccessToken : null);
@@ -205,7 +205,7 @@ public sealed class GithubController(
         {
             return StatusCode(StatusCodes.Status429TooManyRequests, new
             {
-                message = "GitHub API rate limit exceeded. Add GitHub:Token or wait before retrying."
+                message = "Vượt quá giới hạn tần suất gọi API GitHub. Vui lòng cấu hình GitHub:Token hoặc thử lại sau."
             });
         }
 
@@ -213,7 +213,7 @@ public sealed class GithubController(
         {
             return StatusCode((int)response.StatusCode, new
             {
-                message = "Could not read GitHub repositories.",
+                message = "Không thể đọc các kho lưu trữ GitHub.",
                 detail = await response.Content.ReadAsStringAsync(cancellationToken)
             });
         }
@@ -222,7 +222,7 @@ public sealed class GithubController(
 
         if (repos is null)
         {
-            return BadRequest(new { message = "Could not read GitHub repositories." });
+            return BadRequest(new { message = "Không thể đọc các kho lưu trữ GitHub." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -313,7 +313,7 @@ public sealed class GithubController(
 
         if (repository is null)
         {
-            return NotFound(new { message = "GitHub repository was not found." });
+            return NotFound(new { message = "Không tìm thấy kho lưu trữ GitHub." });
         }
 
         var readme = request.ReadmeContent?.Trim();
@@ -332,7 +332,7 @@ public sealed class GithubController(
 
         if (string.IsNullOrWhiteSpace(readme))
         {
-            return BadRequest(new { message = "README content was not found. Send readmeContent or use a public GitHub repository with README." });
+            return BadRequest(new { message = "Không tìm thấy nội dung README. Vui lòng gửi readmeContent hoặc sử dụng kho lưu trữ GitHub công khai có chứa README." });
         }
 
         var accessToken = await GetGithubAccessTokenAsync(userId, cancellationToken);
@@ -504,7 +504,7 @@ public sealed class GithubController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 
     private async Task<string?> GetGithubAccessTokenAsync(Guid userId, CancellationToken cancellationToken) =>

@@ -62,7 +62,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
                 cancellationToken);
         if (skill is null)
         {
-            return BadRequest(new { message = "Active skill was not found." });
+            return BadRequest(new { message = "Không tìm thấy kỹ năng hoạt động." });
         }
 
         var duplicate = await dbContext.UserSkills.AnyAsync(
@@ -70,7 +70,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             cancellationToken);
         if (duplicate)
         {
-            return Conflict(new { message = "This skill is already added for the current user." });
+            return Conflict(new { message = "Kỹ năng này đã được thêm cho người dùng hiện tại." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -127,7 +127,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         if (request.Level is not null)
@@ -169,7 +169,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         try
@@ -180,7 +180,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         }
         catch (DbUpdateException)
         {
-            return BadRequest(new { message = "Cannot delete this user skill because it is being referenced by other records." });
+            return BadRequest(new { message = "Không thể xóa kỹ năng này vì nó đang được tham chiếu bởi các bản ghi khác." });
         }
     }
 
@@ -198,7 +198,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         if (userSkill is null)
         {
-            return NotFound(new { message = "User skill was not found." });
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -216,7 +216,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     {
         if (request.SkillId == Guid.Empty)
         {
-            return "Skill is required.";
+            return "Kỹ năng là bắt buộc.";
         }
 
         var levelError = ValidateLevel(request.Level);
@@ -232,12 +232,12 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     {
         if (evidenceUrl is { Length: > 1024 })
         {
-            return "Evidence URL must be at most 1024 characters.";
+            return "Đường dẫn minh chứng phải có tối đa 1024 ký tự.";
         }
 
         if (evidenceType is { Length: > 50 })
         {
-            return "Evidence type must be at most 50 characters.";
+            return "Loại minh chứng phải có tối đa 50 ký tự.";
         }
 
         return null;
@@ -247,12 +247,12 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     {
         if (string.IsNullOrWhiteSpace(level))
         {
-            return "Level is required.";
+            return "Cấp độ là bắt buộc.";
         }
 
         if (!AllowedLevels.Contains(level.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            return "Level must be one of: Beginner, Intermediate, Advanced, Verified.";
+            return "Cấp độ phải là một trong các giá trị: Beginner, Intermediate, Advanced, Verified.";
         }
 
         return null;
@@ -280,6 +280,6 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 }

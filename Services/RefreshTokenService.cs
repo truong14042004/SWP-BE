@@ -35,7 +35,7 @@ public sealed class RefreshTokenService(
     {
         if (string.IsNullOrWhiteSpace(refreshToken))
         {
-            throw new UnauthorizedAccessException("Invalid refresh token.");
+            throw new UnauthorizedAccessException("Mã làm mới (refresh token) không hợp lệ.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -49,7 +49,7 @@ public sealed class RefreshTokenService(
             || storedToken.ExpiresAt <= now
             || !storedToken.User.IsActive)
         {
-            throw new UnauthorizedAccessException("Invalid or expired refresh token.");
+            throw new UnauthorizedAccessException("Mã làm mới (refresh token) không hợp lệ hoặc đã hết hạn.");
         }
 
         var replacementToken = CreateRefreshToken();

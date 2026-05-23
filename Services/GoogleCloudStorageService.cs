@@ -57,13 +57,13 @@ public sealed class GoogleCloudStorageService(
         var contentType = response.Content.Headers.ContentType?.MediaType ?? "application/octet-stream";
         if (!allowedContentTypes.Contains(contentType))
         {
-            throw new InvalidOperationException($"Unsupported content type: {contentType}.");
+            throw new InvalidOperationException($"Định dạng tệp không được hỗ trợ: {contentType}.");
         }
 
         var contentLength = response.Content.Headers.ContentLength;
         if (contentLength is > 0 && contentLength > maxBytes)
         {
-            throw new InvalidOperationException($"File is too large. Max size is {maxBytes} bytes.");
+            throw new InvalidOperationException($"Tệp tin quá lớn. Kích thước tối đa là {maxBytes} bytes.");
         }
 
         await using var remoteStream = await response.Content.ReadAsStreamAsync(cancellationToken);
@@ -168,7 +168,7 @@ public sealed class GoogleCloudStorageService(
         if (string.IsNullOrWhiteSpace(saEmail))
         {
             throw new InvalidOperationException(
-                "Could not resolve runtime service account email from metadata server.");
+                "Không thể phân giải email tài khoản dịch vụ runtime từ máy chủ metadata.");
         }
 
         var scoped = credential.CreateScoped("https://www.googleapis.com/auth/iam");
@@ -210,12 +210,12 @@ public sealed class GoogleCloudStorageService(
             if (!response.IsSuccessStatusCode)
             {
                 throw new InvalidOperationException(
-                    $"IAM signBlob failed with {(int)response.StatusCode}: {responseBody}");
+                    $"Yêu cầu ký blob (IAM signBlob) thất bại với mã {(int)response.StatusCode}: {responseBody}");
             }
 
             using var doc = System.Text.Json.JsonDocument.Parse(responseBody);
             return doc.RootElement.GetProperty("signedBlob").GetString()
-                ?? throw new InvalidOperationException("IAM signBlob response missing signedBlob.");
+                ?? throw new InvalidOperationException("Phản hồi ký blob (IAM signBlob) thiếu trường signedBlob.");
         }
 
         public string CreateSignature(byte[] data, UrlSigner.BlobSignerParameters parameters) =>
@@ -242,7 +242,7 @@ public sealed class GoogleCloudStorageService(
     {
         if (string.IsNullOrWhiteSpace(storageOptions.BucketName))
         {
-            throw new InvalidOperationException("Storage bucket is not configured.");
+            throw new InvalidOperationException("Chưa cấu hình bộ lưu trữ đám mây (Storage bucket).");
         }
     }
 
@@ -250,18 +250,18 @@ public sealed class GoogleCloudStorageService(
     {
         if (!sourceUrl.IsAbsoluteUri || sourceUrl.Scheme != Uri.UriSchemeHttps)
         {
-            throw new InvalidOperationException("Only absolute HTTPS URLs are allowed.");
+            throw new InvalidOperationException("Chỉ chấp nhận các đường dẫn HTTPS tuyệt đối.");
         }
 
         if (sourceUrl.IsLoopback)
         {
-            throw new InvalidOperationException("Loopback URLs are not allowed.");
+            throw new InvalidOperationException("Không chấp nhận các đường dẫn Loopback.");
         }
 
         var addresses = Dns.GetHostAddresses(sourceUrl.Host);
         if (addresses.Length == 0 || addresses.Any(IsPrivateAddress))
         {
-            throw new InvalidOperationException("Private network URLs are not allowed.");
+            throw new InvalidOperationException("Không chấp nhận các đường dẫn mạng nội bộ.");
         }
     }
 
@@ -337,7 +337,7 @@ public sealed class GoogleCloudStorageService(
             bytesRead += read;
             if (bytesRead > maxBytes)
             {
-                throw new InvalidOperationException($"File is too large. Max size is {maxBytes} bytes.");
+                throw new InvalidOperationException($"Tệp tin quá lớn. Kích thước tối đa là {maxBytes} bytes.");
             }
         }
     }
