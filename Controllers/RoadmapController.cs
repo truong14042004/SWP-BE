@@ -27,7 +27,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         if (careerRoleId is null)
         {
-            return BadRequest(new { message = "Career role is required before generating a roadmap." });
+            return BadRequest(new { message = "Cần chọn định hướng nghề nghiệp trước khi tạo lộ trình." });
         }
 
         var careerRole = await dbContext.CareerRoles
@@ -36,7 +36,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         if (careerRole is null)
         {
-            return NotFound(new { message = "Career role was not found." });
+            return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
         }
 
         var skillGapReportId = request.SkillGapReportId
@@ -55,7 +55,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 cancellationToken);
             if (!ownsReport)
             {
-                return BadRequest(new { message = "Skill gap report does not belong to the current user and career role." });
+                return BadRequest(new { message = "Bản báo cáo khoảng cách kỹ năng không thuộc về người dùng hoặc định hướng nghề nghiệp hiện tại." });
             }
         }
 
@@ -162,7 +162,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         if (roadmap is null)
         {
-            return NotFound(new { message = "Roadmap was not found." });
+            return NotFound(new { message = "Không tìm thấy lộ trình học tập." });
         }
 
         var nodes = await dbContext.RoadmapNodes
@@ -190,7 +190,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         {
             return BadRequest(new
             {
-                message = "Invalid status. Use the verify endpoint to set Verified."
+                message = "Trạng thái không hợp lệ. Vui lòng sử dụng endpoint verify để đổi sang Verified."
             });
         }
 
@@ -206,19 +206,19 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         if (node is null)
         {
-            return NotFound(new { message = "Roadmap node was not found." });
+            return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
         if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "Group nodes are roadmap containers. Update the child technical nodes instead." });
+            return BadRequest(new { message = "Nhóm module là thư mục chứa lộ trình. Vui lòng cập nhật các module kỹ thuật con bên trong." });
         }
 
         if (node.Status.Equals("Verified", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(new
             {
-                message = "Verified nodes can only be changed by a mentor or counselor."
+                message = "Các module đã được xác minh chỉ có thể thay đổi bởi mentor hoặc cố vấn."
             });
         }
 
@@ -266,12 +266,12 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         if (node is null)
         {
-            return NotFound(new { message = "Roadmap node was not found." });
+            return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
         if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
         {
-            return BadRequest(new { message = "Group nodes cannot be verified directly." });
+            return BadRequest(new { message = "Không thể trực tiếp xác minh nhóm module." });
         }
 
         if (!(node.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
@@ -280,7 +280,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
         {
             return BadRequest(new
             {
-                message = "Only nodes marked Completed or NeedReview can be verified."
+                message = "Chỉ các module được đánh dấu Hoàn thành (Completed) hoặc Cần đánh giá (NeedReview) mới có thể xác minh."
             });
         }
 

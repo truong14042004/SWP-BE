@@ -54,7 +54,7 @@ public sealed class RoadmapReviewController(
 
         if (node is null)
         {
-            return NotFound(new { message = "Roadmap node not found." });
+            return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
         // Counselor đã được admin gán cho student này
@@ -136,7 +136,7 @@ public sealed class RoadmapReviewController(
 
         if (node is null)
         {
-            return NotFound(new { message = "Roadmap node not found." });
+            return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
         // Group nodes: allow review only when all non-group descendants
@@ -151,7 +151,7 @@ public sealed class RoadmapReviewController(
 
             if (children.Count == 0)
             {
-                return BadRequest(new { message = "Group node has no children to review." });
+                return BadRequest(new { message = "Nhóm module không có bài học con nào để đánh giá." });
             }
 
             var nonGroupChildren = children
@@ -162,7 +162,7 @@ public sealed class RoadmapReviewController(
             {
                 return BadRequest(new
                 {
-                    message = "This group only contains sub-groups. Review the inner modules first."
+                    message = "Nhóm này chỉ chứa các nhóm con. Hãy đánh giá các bài học bên trong trước."
                 });
             }
 
@@ -182,7 +182,7 @@ public sealed class RoadmapReviewController(
         {
             if (node.Status is not ("Completed" or "NeedReview"))
             {
-                return BadRequest(new { message = "Node must be Completed before requesting review." });
+                return BadRequest(new { message = "Module phải được đánh dấu hoàn thành trước khi gửi yêu cầu đánh giá." });
             }
         }
 
@@ -193,12 +193,12 @@ public sealed class RoadmapReviewController(
 
         if (reviewer is null)
         {
-            return BadRequest(new { message = "Reviewer not found." });
+            return BadRequest(new { message = "Không tìm thấy người đánh giá." });
         }
 
         if (reviewer.Role != UserRoles.AcademicCounselor && reviewer.Role != UserRoles.IndustryMentor)
         {
-            return BadRequest(new { message = "Selected user cannot review roadmaps." });
+            return BadRequest(new { message = "Người dùng được chọn không có quyền đánh giá lộ trình." });
         }
 
         // If counselor: must be assigned to this student
@@ -212,7 +212,7 @@ public sealed class RoadmapReviewController(
 
             if (!isAssigned)
             {
-                return BadRequest(new { message = "This counselor is not assigned to you." });
+                return BadRequest(new { message = "Cố vấn này chưa được phân công cho bạn." });
             }
         }
 
@@ -317,7 +317,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest is null)
         {
-            return NotFound(new { message = "Review request not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
         }
 
         if (reviewRequest.StudentId != studentId)
@@ -327,7 +327,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.Status != "Pending")
         {
-            return BadRequest(new { message = "Only pending requests can be cancelled." });
+            return BadRequest(new { message = "Chỉ có thể hủy các yêu cầu đang ở trạng thái chờ duyệt." });
         }
 
         reviewRequest.Status = "Cancelled";
@@ -352,7 +352,7 @@ public sealed class RoadmapReviewController(
 
         if (node is null)
         {
-            return NotFound(new { message = "Roadmap node not found." });
+            return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
         var list = await dbContext.RoadmapNodeReviewRequests
@@ -378,12 +378,12 @@ public sealed class RoadmapReviewController(
     {
         if (request.File is null || request.File.Length <= 0)
         {
-            return BadRequest(new { message = "File is required." });
+            return BadRequest(new { message = "Vui lòng chọn tệp tin minh chứng." });
         }
 
         if (request.File.Length > MaxEvidenceFileSize)
         {
-            return BadRequest(new { message = "File exceeds 25 MB limit." });
+            return BadRequest(new { message = "Kích thước tệp tin vượt quá giới hạn 25 MB." });
         }
 
         var fileName = request.File.FileName;
@@ -402,7 +402,7 @@ public sealed class RoadmapReviewController(
             // Allow octet-stream for zip uploaded by some browsers
             if (contentType != "application/octet-stream")
             {
-                return BadRequest(new { message = $"Content type {contentType} not allowed." });
+                return BadRequest(new { message = $"Loại nội dung {contentType} không được phép tải lên." });
             }
         }
 
@@ -467,7 +467,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest is null)
         {
-            return NotFound(new { message = "Review request not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
         }
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
@@ -477,7 +477,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.Status != "Pending")
         {
-            return BadRequest(new { message = "Only pending requests can be approved." });
+            return BadRequest(new { message = "Chỉ có thể duyệt các yêu cầu ở trạng thái chờ duyệt." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -560,7 +560,7 @@ public sealed class RoadmapReviewController(
     {
         if (string.IsNullOrWhiteSpace(request.ReviewerNote))
         {
-            return BadRequest(new { message = "Reviewer note is required when rejecting." });
+            return BadRequest(new { message = "Vui lòng nhập nhận xét/lý do khi từ chối." });
         }
 
         var reviewerId = GetCurrentUserId();
@@ -571,7 +571,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest is null)
         {
-            return NotFound(new { message = "Review request not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
         }
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
@@ -581,7 +581,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.Status != "Pending")
         {
-            return BadRequest(new { message = "Only pending requests can be rejected." });
+            return BadRequest(new { message = "Chỉ có thể từ chối các yêu cầu ở trạng thái chờ duyệt." });
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -656,7 +656,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest is null)
         {
-            return NotFound(new { message = "Review request not found." });
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
         }
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
@@ -666,7 +666,7 @@ public sealed class RoadmapReviewController(
 
         if (string.IsNullOrWhiteSpace(reviewRequest.EvidenceUrl))
         {
-            return BadRequest(new { message = "This request has no file evidence." });
+            return BadRequest(new { message = "Yêu cầu này không đính kèm tệp minh chứng." });
         }
 
         // External git URL or absolute URL is already public

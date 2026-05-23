@@ -22,7 +22,7 @@ public sealed class AiMentorActionsController(
     {
         if (request.Roadmap is null)
         {
-            return BadRequest(new { message = "Roadmap payload is required." });
+            return BadRequest(new { message = "Nội dung lộ trình là bắt buộc." });
         }
 
         var userId = GetCurrentUserId();
@@ -67,7 +67,7 @@ public sealed class AiMentorActionsController(
 
         if (!targetRoleId.HasValue)
         {
-            return BadRequest(new { message = "No active career role available to attach the roadmap." });
+            return BadRequest(new { message = "Không có định hướng nghề nghiệp nào đang hoạt động để liên kết với lộ trình." });
         }
 
         var title = string.IsNullOrWhiteSpace(request.Roadmap.Title)
@@ -112,7 +112,7 @@ public sealed class AiMentorActionsController(
 
         if (nodes.Count == 0)
         {
-            return BadRequest(new { message = "Roadmap must contain at least one node." });
+            return BadRequest(new { message = "Lộ trình phải chứa ít nhất một module." });
         }
 
         try
@@ -202,7 +202,7 @@ public sealed class AiMentorActionsController(
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
         return Guid.TryParse(value, out var userId)
             ? userId
-            : throw new UnauthorizedAccessException("Invalid user token.");
+            : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 }
 
