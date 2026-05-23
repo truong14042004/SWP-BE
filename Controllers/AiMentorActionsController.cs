@@ -70,15 +70,34 @@ public sealed class AiMentorActionsController(
             return BadRequest(new { message = "No active career role available to attach the roadmap." });
         }
 
+        var title = string.IsNullOrWhiteSpace(request.Roadmap.Title)
+            ? "Roadmap đề xuất bởi AI Mentor"
+            : request.Roadmap.Title.Trim();
+
+        var titleLower = title.ToLowerInvariant();
+        var existingRoadmap = await dbContext.Roadmaps
+            .AsNoTracking()
+            .FirstOrDefaultAsync(r => r.UserId == userId && r.Title.ToLower() == titleLower, cancellationToken);
+
+        if (existingRoadmap is not null)
+        {
+            var existingNodeCount = await dbContext.RoadmapNodes
+                .CountAsync(n => n.RoadmapId == existingRoadmap.Id, cancellationToken);
+
+            return Ok(new ApplyAiRoadmapResponse(
+                existingRoadmap.Id,
+                existingRoadmap.Title,
+                existingNodeCount,
+                true));
+        }
+
         var now = DateTimeOffset.UtcNow;
         var roadmap = new Roadmap
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             CareerRoleId = targetRoleId.Value,
-            Title = string.IsNullOrWhiteSpace(request.Roadmap.Title)
-                ? "Roadmap đề xuất bởi AI Mentor"
-                : request.Roadmap.Title.Trim(),
+            Title = title,
             Description = request.Roadmap.Description?.Trim(),
             Status = "Active",
             Progress = 0m,
@@ -116,7 +135,8 @@ public sealed class AiMentorActionsController(
         return Ok(new ApplyAiRoadmapResponse(
             roadmap.Id,
             roadmap.Title,
-            nodes.Count));
+            nodes.Count,
+            false));
     }
 
     private static void FlattenNodes(
@@ -207,4 +227,5 @@ public sealed record AiRoadmapNodeDto(
 public sealed record ApplyAiRoadmapResponse(
     Guid RoadmapId,
     string Title,
-    int NodeCount);
+    int NodeCount,
+    bool IsExisting);
