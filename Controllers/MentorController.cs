@@ -180,10 +180,11 @@ public sealed class MentorController(
 
     private async Task<AiChatQuotaResponse> GetAiChatQuotaAsync(Guid userId, CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
         var subscription = await dbContext.Subscriptions
             .AsNoTracking()
             .Include(item => item.Plan)
-            .Where(item => item.UserId == userId && item.Status == "Active")
+            .Where(item => item.UserId == userId && (item.Status == "Active" || (item.Status == "Cancelled" && item.ExpiredAt > now)))
             .OrderByDescending(item => item.StartedAt ?? item.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 

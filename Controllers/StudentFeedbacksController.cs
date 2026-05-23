@@ -63,16 +63,46 @@ public sealed class StudentFeedbacksController(AppDbContext dbContext) : Control
                 item.CreatedAt))
             .ToListAsync(cancellationToken);
 
+        var reviewRequests = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .Include(item => item.Reviewer)
+            .Include(item => item.RoadmapNode)
+            .Where(item => item.StudentId == studentId
+                && !string.IsNullOrEmpty(item.ReviewerNote)
+                && (item.Status == "Approved" || item.Status == "Rejected"))
+            .OrderByDescending(item => item.RespondedAt)
+            .Select(item => new StudentFeedbackItem(
+                item.Id,
+                item.ReviewerRole == "AcademicCounselor" ? "Counselor" : "IndustryMentor",
+                item.Reviewer.Id,
+                item.Reviewer.FullName,
+                item.Reviewer.Email,
+                item.Reviewer.AvatarUrl,
+                $"[Module: {item.RoadmapNode.Title} - {(item.Status == "Approved" ? "Đã duyệt" : "Bị từ chối")}] {item.ReviewerNote}",
+                null,
+                null,
+                null,
+                null,
+                null,
+                item.RoadmapNode.RoadmapId,
+                null,
+                item.RespondedAt ?? item.RequestedAt))
+            .ToListAsync(cancellationToken);
+
         // Counselors are typically multi-feedback per student; collapse to a sorted timeline
         var combined = counselorItems
             .Concat(mentorItems)
+            .Concat(reviewRequests)
             .OrderByDescending(item => item.CreatedAt)
             .ToList();
 
+        var counselorCount = counselorItems.Count + reviewRequests.Count(item => item.Source == "Counselor");
+        var mentorCount = mentorItems.Count + reviewRequests.Count(item => item.Source == "IndustryMentor");
+
         return Ok(new StudentFeedbacksResponse(
             combined,
-            counselorItems.Count,
-            mentorItems.Count));
+            counselorCount,
+            mentorCount));
     }
 
     private Guid GetCurrentUserId()

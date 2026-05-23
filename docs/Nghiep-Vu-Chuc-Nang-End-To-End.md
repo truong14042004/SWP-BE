@@ -662,30 +662,31 @@ Admin theo doi:
 
 Counselor ho tro sinh vien bang feedback hoc thuat dua tren profile, skill gap va roadmap.
 
-### Cac buoc de xuat
+### Cac buoc
 
-1. Counselor dang nhap.
+1. Counselor dang nhap, JWT giai phong role `Counselor`.
 2. FE dieu huong vao counselor dashboard.
-3. Counselor xem danh sach student duoc phan cong.
-4. Counselor chon student.
-5. FE hien:
-   - Profile.
-   - Skills.
-   - Latest skill gap report.
-   - Roadmap.
-   - Feedback history.
-6. Counselor tao feedback:
-   - Feedback text.
-   - Rating.
-   - Recommendations.
-   - Private notes.
-7. BE luu `CounselorFeedback`.
-8. Student xem feedback neu nghiep vu cho phep public feedback.
+3. Counselor goi `GET /api/counselor/students` xem danh sach student duoc phan cong.
+4. Counselor chon student. FE goi song song:
+   - `GET /api/counselor/students/{id}/profile`.
+   - `GET /api/counselor/students/{id}/skills`.
+   - `GET /api/counselor/students/{id}/skill-gap/latest` hoac `skill-gaps` (history) hoac `skill-gap/{reportId}` (chi tiet).
+   - `GET /api/counselor/students/{id}/roadmap`.
+   - `GET /api/counselor/students/{id}/feedback` xem lich su feedback da gui cho student do.
+5. Counselor goi `POST /api/counselor/feedback` voi payload:
+   - `studentId` (bat buoc).
+   - `feedbackText` (bat buoc).
+   - `rating` 1-5 (optional).
+   - `recommendations` (optional).
+   - `privateNotes` (optional, chi counselor xem).
+   - `roadmapId` hoac `skillGapReportId` (optional, link feedback toi resource cu the).
+6. BE luu `CounselorFeedback`.
+7. Student xem feedback (truong `privateNotes` luon bi loc khoi response cua student API).
 
-### Trang thai hien tai can kiem tra
+### Trang thai hien tai
 
-- Co model va database cho counselor feedback.
-- Can dam bao controller/API counselor day du neu FE can su dung.
+- Controller: `CounselorController` da co 11 endpoint (students list/detail, profile, skills, skill-gap latest/history/by-id, roadmap, feedback POST/list mentor/list theo student).
+- Model: `CounselorFeedback` da co `FeedbackText, Rating, Recommendations, PrivateNotes, RoadmapId, SkillGapReportId`.
 
 ## 15. Luong 13: Industry Mentor operation
 
@@ -693,33 +694,41 @@ Counselor ho tro sinh vien bang feedback hoc thuat dua tren profile, skill gap v
 
 Industry Mentor review portfolio va danh gia job readiness.
 
-### Cac buoc de xuat
+### Cac buoc
 
-1. Mentor dang nhap.
+1. Mentor dang nhap, JWT chi giai phong cho role `IndustryMentor`.
 2. FE dieu huong vao mentor dashboard.
-3. Mentor xem review queue.
+3. Mentor goi `GET /api/industry-mentor/review-queue` xem danh sach sinh vien co portfolio da publish.
 4. Mentor chon student can review.
-5. FE hien:
-   - Public/internal portfolio.
-   - GitHub repositories.
-   - AI README summary.
-   - Tech stack.
-   - Skill gap summary neu can.
-6. Mentor tao feedback:
-   - Overall rating.
-   - Portfolio quality feedback.
-   - Technical skills assessment.
-   - Project quality feedback.
-   - Recommendations.
-   - Job readiness level.
-7. BE luu `MentorFeedback`.
-8. He thong tru mentor review usage theo subscription plan neu ap dung.
-9. Student xem ket qua review.
+5. FE goi song song:
+   - `GET /api/industry-mentor/students/{id}/portfolio` lay portfolio publish.
+   - `GET /api/industry-mentor/students/{id}/github` lay danh sach repo + AI summary + tech stack.
+   - `GET /api/industry-mentor/students/{id}/feedback` lay feedback cua mentor da gui truoc do.
+   - `GET /api/industry-mentor/students/{id}/quota` xem con bao nhieu luot review co the gui.
+6. Mentor goi `POST /api/industry-mentor/feedback` voi payload structured:
+   - `studentId`, `portfolioId`, `githubRepositoryId` (optional reference).
+   - `comment` (bat buoc, free text tom tat tong the).
+   - `rating` 1-5 (overall rating).
+   - `portfolioQualityFeedback` (chat luong portfolio).
+   - `technicalSkillsAssessment` (danh gia ky nang ky thuat).
+   - `projectQualityFeedback` (chat luong project).
+   - `recommendations` (khuyen nghi cu the).
+   - `jobReadinessLevel`: `NotReady | NeedsImprovement | Ready | Excellent`.
+7. BE validate:
+   - `comment` khong duoc rong.
+   - `rating` phai trong 1-5 neu co.
+   - `portfolioId` va `githubRepositoryId` phai thuoc ve `studentId`.
+   - `jobReadinessLevel` phai nam trong enum cho phep.
+   - **Quota check**: lay subscription active cua sinh vien, parse `mentorReviewLimit` tu `FeaturesJson`. Mac dinh sinh vien khong co subscription co quota Free = 2 review. Neu `Used >= Limit` tra `402 Payment Required`.
+8. BE luu `MentorFeedback` voi 5 field structured.
+9. Sinh vien xem feedback chi tiet tren dashboard cua minh.
 
-### Trang thai hien tai can kiem tra
+### Trang thai hien tai
 
-- Co model va database cho mentor feedback.
-- Can dam bao controller/API industry mentor day du neu FE can su dung.
+- Controller: `IndustryMentorController` da co full 7 endpoint (review-queue, portfolio, github, quota, feedback POST, feedback list mentor, feedback list theo student).
+- Model: `MentorFeedback` co 5 field structured (PortfolioQualityFeedback, TechnicalSkillsAssessment, ProjectQualityFeedback, Recommendations, JobReadinessLevel).
+- Quota: tinh tu `Subscriptions` active + `FeaturesJson.mentorReviewLimit`. Free plan default 2 luot/period.
+- Khac voi AI Virtual Mentor: AI Mentor la chatbot Gemini, Industry Mentor la real user role da xac thuc.
 
 ## 16. Luong 14: Market Pulse
 

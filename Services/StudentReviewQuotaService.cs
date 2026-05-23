@@ -43,10 +43,11 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
         Guid studentId,
         CancellationToken cancellationToken)
     {
+        var now = DateTimeOffset.UtcNow;
         var activeSubscription = await dbContext.Subscriptions
             .AsNoTracking()
             .Include(item => item.Plan)
-            .Where(item => item.UserId == studentId && item.Status == "Active")
+            .Where(item => item.UserId == studentId && (item.Status == "Active" || (item.Status == "Cancelled" && item.ExpiredAt > now)))
             .OrderByDescending(item => item.StartedAt ?? item.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 
@@ -77,11 +78,21 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
             .AsNoTracking()
             .CountAsync(
                 item => item.StudentId == studentId
+                    && item.ReviewerRole == "IndustryMentor"
                     && item.Status == "Approved"
                     && (item.RespondedAt ?? item.RequestedAt) >= since,
                 cancellationToken);
 
-        var used = portfolioFeedbackCount + approvedRoadmapReviewCount;
+        var pendingRoadmapReviewCount = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .CountAsync(
+                item => item.StudentId == studentId
+                    && item.ReviewerRole == "IndustryMentor"
+                    && item.Status == "Pending"
+                    && item.RequestedAt >= since,
+                cancellationToken);
+
+        var used = portfolioFeedbackCount + approvedRoadmapReviewCount + pendingRoadmapReviewCount;
 
         return new StudentReviewQuota(
             planName,

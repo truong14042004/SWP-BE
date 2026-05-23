@@ -230,7 +230,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 .Select(item => item.Status)
                 .SingleOrDefaultAsync(cancellationToken);
 
-            if (prerequisiteStatus is not ("Completed" or "Verified"))
+            if (prerequisiteStatus is not ("Completed" or "Verified" or "NeedReview"))
             {
                 return BadRequest(new
                 {
