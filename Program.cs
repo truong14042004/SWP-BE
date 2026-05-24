@@ -36,6 +36,8 @@ builder.Services.Configure<StorageOptions>(
     builder.Configuration.GetSection(StorageOptions.SectionName));
 builder.Services.Configure<PayOsOptions>(
     builder.Configuration.GetSection(PayOsOptions.SectionName));
+builder.Services.Configure<MarketPulseOptions>(
+    builder.Configuration.GetSection(MarketPulseOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
@@ -52,6 +54,10 @@ builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>(
 builder.Services.AddScoped<IStudentReviewQuotaService, StudentReviewQuotaService>();
 builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
+builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
+builder.Services.AddHttpClient<IJobScraper, TopCvScraper>();
+builder.Services.AddScoped<IMarketPulseRunner, MarketPulseRunner>();
+builder.Services.AddHostedService<MarketPulseScheduler>();
 builder.Services.AddSingleton(serviceProvider =>
 {
     var options = serviceProvider.GetRequiredService<IConfiguration>()

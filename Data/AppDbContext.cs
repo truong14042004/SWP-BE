@@ -39,6 +39,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CounselorAssignment> CounselorAssignments => Set<CounselorAssignment>();
     public DbSet<RoadmapNodeReviewRequest> RoadmapNodeReviewRequests => Set<RoadmapNodeReviewRequest>();
     public DbSet<Notification> Notifications => Set<Notification>();
+    public DbSet<JobPost> JobPosts => Set<JobPost>();
+    public DbSet<JobSkillMention> JobSkillMentions => Set<JobSkillMention>();
+    public DbSet<KeywordTrendSnapshot> KeywordTrendSnapshots => Set<KeywordTrendSnapshot>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -963,6 +966,60 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(item => item.UserId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<JobPost>(entity =>
+        {
+            entity.ToTable("job_posts");
+            entity.HasKey(post => post.Id);
+            entity.HasIndex(post => new { post.Source, post.ExternalId }).IsUnique();
+            entity.HasIndex(post => post.ScrapedAt);
+            entity.HasIndex(post => post.Source);
+            entity.Property(post => post.Source).HasMaxLength(50).IsRequired();
+            entity.Property(post => post.ExternalId).HasMaxLength(100).IsRequired();
+            entity.Property(post => post.Title).HasMaxLength(500).IsRequired();
+            entity.Property(post => post.CompanyName).HasMaxLength(300);
+            entity.Property(post => post.Location).HasMaxLength(300);
+            entity.Property(post => post.SalaryText).HasMaxLength(200);
+            entity.Property(post => post.SalaryMinMillionVnd).HasPrecision(10, 2);
+            entity.Property(post => post.SalaryMaxMillionVnd).HasPrecision(10, 2);
+            entity.Property(post => post.Description).HasColumnType("text");
+            entity.Property(post => post.SourceUrl).HasMaxLength(1024).IsRequired();
+        });
+
+        modelBuilder.Entity<JobSkillMention>(entity =>
+        {
+            entity.ToTable("job_skill_mentions");
+            entity.HasKey(mention => mention.Id);
+            entity.HasIndex(mention => new { mention.JobPostId, mention.Keyword }).IsUnique();
+            entity.HasIndex(mention => mention.Keyword);
+            entity.HasIndex(mention => mention.SkillId);
+            entity.Property(mention => mention.Keyword).HasMaxLength(100).IsRequired();
+            entity.HasCheckConstraint("CK_job_skill_mentions_MentionCount", "\"MentionCount\" >= 0");
+            entity.HasOne(mention => mention.JobPost)
+                .WithMany()
+                .HasForeignKey(mention => mention.JobPostId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(mention => mention.Skill)
+                .WithMany()
+                .HasForeignKey(mention => mention.SkillId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<KeywordTrendSnapshot>(entity =>
+        {
+            entity.ToTable("keyword_trend_snapshots");
+            entity.HasKey(snapshot => snapshot.Id);
+            entity.HasIndex(snapshot => new { snapshot.Keyword, snapshot.SnapshotDate, snapshot.WindowDays }).IsUnique();
+            entity.HasIndex(snapshot => snapshot.SnapshotDate);
+            entity.HasIndex(snapshot => snapshot.SkillId);
+            entity.Property(snapshot => snapshot.Keyword).HasMaxLength(100).IsRequired();
+            entity.HasCheckConstraint("CK_keyword_trend_snapshots_JobCount", "\"JobCount\" >= 0");
+            entity.HasCheckConstraint("CK_keyword_trend_snapshots_TotalMentions", "\"TotalMentions\" >= 0");
+            entity.HasOne(snapshot => snapshot.Skill)
+                .WithMany()
+                .HasForeignKey(snapshot => snapshot.SkillId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }
