@@ -51,6 +51,7 @@ public sealed class SubscriptionsController(
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
+        await CancelExpiredSubscriptionsAsync(userId, cancellationToken);
         var plan = await dbContext.SubscriptionPlans
             .AsNoTracking()
             .SingleOrDefaultAsync(item => item.Id == request.PlanId && item.IsActive, cancellationToken);
@@ -198,6 +199,7 @@ public sealed class SubscriptionsController(
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
+        await CancelExpiredSubscriptionsAsync(userId, cancellationToken);
         var subscriptions = await dbContext.Subscriptions
             .AsNoTracking()
             .Include(subscription => subscription.Plan)
@@ -256,6 +258,42 @@ public sealed class SubscriptionsController(
         var timestamp = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         var suffix = Random.Shared.Next(100, 999);
         return long.Parse($"{timestamp}{suffix}"[^15..]);
+    }
+
+    private async Task CancelExpiredSubscriptionsAsync(Guid userId, CancellationToken cancellationToken)
+    {
+        var tenMinutesAgo = DateTimeOffset.UtcNow.AddMinutes(-10);
+
+        var expiredSubscriptions = await dbContext.Subscriptions
+            .Where(s => s.UserId == userId && s.Status == "Pending" && s.CreatedAt < tenMinutesAgo)
+            .ToListAsync(cancellationToken);
+
+        if (expiredSubscriptions.Count == 0)
+        {
+            return;
+        }
+
+        var subscriptionIds = expiredSubscriptions.Select(s => s.Id).ToList();
+
+        var relatedPayments = await dbContext.PaymentTransactions
+            .Where(p => p.SubscriptionId.HasValue 
+                && subscriptionIds.Contains(p.SubscriptionId.Value) 
+                && p.Status == "Created")
+            .ToListAsync(cancellationToken);
+
+        foreach (var subscription in expiredSubscriptions)
+        {
+            subscription.Status = "Cancelled";
+            subscription.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        foreach (var payment in relatedPayments)
+        {
+            payment.Status = "Cancelled";
+            payment.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
     }
 }
 
