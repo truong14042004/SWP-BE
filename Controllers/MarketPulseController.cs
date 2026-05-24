@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -195,6 +197,35 @@ public sealed class MarketPulseController : ControllerBase
     public async Task<IActionResult> ReExtract(CancellationToken cancellationToken)
     {
         var result = await _runner.ReExtractAllAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("internal/scrape")]
+    [AllowAnonymous]
+    public async Task<IActionResult> InternalScrape(
+        [FromServices] IOptions<InternalAuthOptions> internalAuthOptions,
+        CancellationToken cancellationToken)
+    {
+        var expected = internalAuthOptions.Value.Token;
+        if (string.IsNullOrWhiteSpace(expected))
+        {
+            return StatusCode(503, new { message = "Internal auth not configured." });
+        }
+
+        if (!Request.Headers.TryGetValue("X-Internal-Token", out var provided))
+        {
+            return Unauthorized();
+        }
+
+        var providedBytes = Encoding.UTF8.GetBytes(provided.ToString());
+        var expectedBytes = Encoding.UTF8.GetBytes(expected);
+        if (providedBytes.Length != expectedBytes.Length
+            || !CryptographicOperations.FixedTimeEquals(providedBytes, expectedBytes))
+        {
+            return Unauthorized();
+        }
+
+        var result = await _runner.RunAsync(cancellationToken);
         return Ok(result);
     }
 

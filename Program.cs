@@ -38,6 +38,8 @@ builder.Services.Configure<PayOsOptions>(
     builder.Configuration.GetSection(PayOsOptions.SectionName));
 builder.Services.Configure<MarketPulseOptions>(
     builder.Configuration.GetSection(MarketPulseOptions.SectionName));
+builder.Services.Configure<InternalAuthOptions>(
+    builder.Configuration.GetSection(InternalAuthOptions.SectionName));
 
 builder.Services.AddDbContext<AppDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
