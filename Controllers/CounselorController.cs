@@ -678,7 +678,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             resource.FileSize,
             resource.ResourceType,
             resource.Difficulty,
-            resource.EstimatedHours);
+            resource.EstimatedHours,
+            resource.LessonNumber);
 }
 
 // ── Request DTOs ─────────────────────────────────────────────────────────────

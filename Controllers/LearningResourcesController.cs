@@ -29,6 +29,7 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
         var resources = await query
             .OrderBy(resource => resource.Skill == null ? null : resource.Skill.Category)
             .ThenBy(resource => resource.Skill == null ? null : resource.Skill.Name)
+            .ThenBy(resource => resource.LessonNumber)
             .ThenBy(resource => resource.Title)
             .Select(resource => ToResponse(resource))
             .ToListAsync(cancellationToken);
@@ -63,7 +64,8 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
             resource.FileSize,
             resource.ResourceType,
             resource.Difficulty,
-            resource.EstimatedHours);
+            resource.EstimatedHours,
+            resource.LessonNumber);
 }
 
 public sealed record StudentLearningResourceResponse(
@@ -77,4 +79,5 @@ public sealed record StudentLearningResourceResponse(
     long? FileSize,
     string ResourceType,
     string? Difficulty,
-    int? EstimatedHours);
+    int? EstimatedHours,
+    int LessonNumber);

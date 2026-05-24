@@ -224,6 +224,7 @@ public sealed class AdminController(
             ResourceType = request.ResourceType!.Trim(),
             Difficulty = request.Difficulty?.Trim(),
             EstimatedHours = request.EstimatedHours,
+            LessonNumber = request.LessonNumber ?? 1,
             IsActive = request.IsActive ?? true,
             CreatedAt = now,
             UpdatedAt = now
@@ -267,6 +268,7 @@ public sealed class AdminController(
             ResourceType = request.ResourceType!.Trim(),
             Difficulty = request.Difficulty?.Trim(),
             EstimatedHours = request.EstimatedHours,
+            LessonNumber = request.LessonNumber ?? 1,
             IsActive = request.IsActive ?? true,
             CreatedAt = now,
             UpdatedAt = now
@@ -312,6 +314,7 @@ public sealed class AdminController(
         resource.ResourceType = request.ResourceType!.Trim();
         resource.Difficulty = request.Difficulty?.Trim();
         resource.EstimatedHours = request.EstimatedHours;
+        resource.LessonNumber = request.LessonNumber ?? 1;
         resource.IsActive = request.IsActive ?? resource.IsActive;
         resource.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -358,6 +361,11 @@ public sealed class AdminController(
         if (request.EstimatedHours is < 0)
         {
             return "Thời gian ước tính phải lớn hơn hoặc bằng 0.";
+        }
+
+        if (request.LessonNumber is < 1)
+        {
+            return "Số thứ tự bài học (Lesson Number) phải lớn hơn hoặc bằng 1.";
         }
 
         if (request.File is null || request.File.Length == 0)
@@ -573,6 +581,11 @@ public sealed class AdminController(
             return "Thời gian ước tính phải lớn hơn hoặc bằng 0.";
         }
 
+        if (request.LessonNumber is < 1)
+        {
+            return "Số thứ tự bài học (Lesson Number) phải lớn hơn hoặc bằng 1.";
+        }
+
         if (request.SkillId is not null)
         {
             var skillExists = await dbContext.Skills.AnyAsync(
@@ -658,6 +671,7 @@ public sealed class AdminController(
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
+            resource.LessonNumber,
             resource.IsActive,
             resource.CreatedAt,
             resource.UpdatedAt);
@@ -756,7 +770,8 @@ public sealed record SaveLearningResourceRequest(
     string? ResourceType,
     string? Difficulty,
     int? EstimatedHours,
-    bool? IsActive);
+    bool? IsActive,
+    int? LessonNumber);
 
 public sealed class UploadLearningResourceRequest
 {
@@ -766,6 +781,7 @@ public sealed class UploadLearningResourceRequest
     public string? Difficulty { get; set; }
     public int? EstimatedHours { get; set; }
     public bool? IsActive { get; set; }
+    public int? LessonNumber { get; set; }
     public IFormFile File { get; set; } = null!;
 }
 
@@ -781,6 +797,7 @@ public sealed record LearningResourceResponse(
     string ResourceType,
     string? Difficulty,
     int? EstimatedHours,
+    int LessonNumber,
     bool IsActive,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

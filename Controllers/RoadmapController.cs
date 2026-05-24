@@ -478,7 +478,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                 resource.Id,
                 resource.Difficulty,
                 resource.StorageObjectName,
-                resource.Title
+                resource.Title,
+                resource.LessonNumber
             })
             .ToListAsync(cancellationToken);
 
@@ -487,7 +488,8 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             .ToDictionary(
                 group => group.Key,
                 group => (IReadOnlyList<Guid>)group
-                    .OrderBy(resource => DifficultyRank(resource.Difficulty))
+                    .OrderBy(resource => resource.LessonNumber)
+                    .ThenBy(resource => DifficultyRank(resource.Difficulty))
                     .ThenBy(resource => resource.StorageObjectName == null ? 0 : 1)
                     .ThenBy(resource => resource.Title)
                     .Select(resource => resource.Id)
@@ -659,6 +661,21 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             .ToList();
     }
 
+    private static RoadmapLearningResourceResponse ToLearningResourceResponse(LearningResource resource) =>
+        new(
+            resource.Id,
+            resource.SkillId,
+            resource.Skill?.Name,
+            resource.Title,
+            resource.Url,
+            resource.StorageObjectName is null ? "Link" : "File",
+            resource.ContentType,
+            resource.FileSize,
+            resource.ResourceType,
+            resource.Difficulty,
+            resource.EstimatedHours,
+            resource.LessonNumber);
+
     private static RoadmapNodeResponse ToNodeResponse(
         RoadmapNode node,
         IReadOnlyList<RoadmapNodeResponse>? children = null)
@@ -688,20 +705,6 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             learningResources,
             children ?? []);
     }
-
-    private static RoadmapLearningResourceResponse ToLearningResourceResponse(LearningResource resource) =>
-        new(
-            resource.Id,
-            resource.SkillId,
-            resource.Skill?.Name,
-            resource.Title,
-            resource.Url,
-            resource.StorageObjectName is null ? "Link" : "File",
-            resource.ContentType,
-            resource.FileSize,
-            resource.ResourceType,
-            resource.Difficulty,
-            resource.EstimatedHours);
 
     private sealed record RoadmapNodeInput(
         Guid? SkillId,
@@ -771,4 +774,5 @@ public sealed record RoadmapLearningResourceResponse(
     long? FileSize,
     string ResourceType,
     string? Difficulty,
-    int? EstimatedHours);
+    int? EstimatedHours,
+    int LessonNumber);

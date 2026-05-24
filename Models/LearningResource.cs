@@ -12,6 +12,7 @@ public sealed class LearningResource
     public string ResourceType { get; set; } = string.Empty;
     public string? Difficulty { get; set; }
     public int? EstimatedHours { get; set; }
+    public int LessonNumber { get; set; } = 1;
     public bool IsActive { get; set; } = true;
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }
