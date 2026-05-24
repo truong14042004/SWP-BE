@@ -201,8 +201,9 @@ public sealed class AdminController(
     }
 
     [HttpPost("learning-resources")]
+    [Consumes("multipart/form-data")]
     public async Task<ActionResult<LearningResourceResponse>> CreateLearningResource(
-        SaveLearningResourceRequest request,
+        [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
         var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
@@ -212,67 +213,53 @@ public sealed class AdminController(
         }
 
         var now = DateTimeOffset.UtcNow;
-        var resource = new LearningResource
-        {
-            Id = Guid.NewGuid(),
-            SkillId = request.SkillId,
-            Title = request.Title!.Trim(),
-            Url = request.Url!.Trim(),
-            StorageObjectName = null,
-            ContentType = null,
-            FileSize = null,
-            ResourceType = request.ResourceType!.Trim(),
-            Difficulty = request.Difficulty?.Trim(),
-            EstimatedHours = request.EstimatedHours,
-            LessonNumber = request.LessonNumber ?? 1,
-            IsActive = request.IsActive ?? true,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        dbContext.LearningResources.Add(resource);
-        await dbContext.SaveChangesAsync(cancellationToken);
-        await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
-
-        return CreatedAtAction(nameof(GetLearningResource), new { id = resource.Id }, ToResponse(resource));
-    }
-
-    [HttpPost("learning-resources/upload")]
-    [Consumes("multipart/form-data")]
-    public async Task<ActionResult<LearningResourceResponse>> UploadLearningResource(
-        [FromForm] UploadLearningResourceRequest request,
-        CancellationToken cancellationToken)
-    {
-        var validationError = await ValidateUploadLearningResourceRequest(request, cancellationToken);
-        if (validationError is not null)
-        {
-            return BadRequest(new { message = validationError });
-        }
-
-        var now = DateTimeOffset.UtcNow;
         var resourceId = Guid.NewGuid();
-        var objectName = BuildLearningResourceObjectName(resourceId, request.File.FileName, request.File.ContentType);
 
-        await using var stream = request.File.OpenReadStream();
-        var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
-
-        var resource = new LearningResource
+        LearningResource resource;
+        if (request.File is not null && request.File.Length > 0)
         {
-            Id = resourceId,
-            SkillId = request.SkillId,
-            Title = request.Title!.Trim(),
-            Url = $"/api/storage/learning-resources/{resourceId}/download",
-            StorageObjectName = result.ObjectName,
-            ContentType = result.ContentType,
-            FileSize = result.Size,
-            ResourceType = request.ResourceType!.Trim(),
-            Difficulty = request.Difficulty?.Trim(),
-            EstimatedHours = request.EstimatedHours,
-            LessonNumber = request.LessonNumber ?? 1,
-            IsActive = request.IsActive ?? true,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+            var objectName = BuildLearningResourceObjectName(resourceId, request.File.FileName, request.File.ContentType);
+            await using var stream = request.File.OpenReadStream();
+            var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
+
+            resource = new LearningResource
+            {
+                Id = resourceId,
+                SkillId = request.SkillId,
+                Title = request.Title!.Trim(),
+                Url = $"/api/storage/learning-resources/{resourceId}/download",
+                StorageObjectName = result.ObjectName,
+                ContentType = result.ContentType,
+                FileSize = result.Size,
+                ResourceType = request.ResourceType!.Trim(),
+                Difficulty = request.Difficulty?.Trim(),
+                EstimatedHours = request.EstimatedHours,
+                LessonNumber = request.LessonNumber ?? 1,
+                IsActive = request.IsActive ?? true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+        }
+        else
+        {
+            resource = new LearningResource
+            {
+                Id = resourceId,
+                SkillId = request.SkillId,
+                Title = request.Title!.Trim(),
+                Url = request.Url!.Trim(),
+                StorageObjectName = null,
+                ContentType = null,
+                FileSize = null,
+                ResourceType = request.ResourceType!.Trim(),
+                Difficulty = request.Difficulty?.Trim(),
+                EstimatedHours = request.EstimatedHours,
+                LessonNumber = request.LessonNumber ?? 1,
+                IsActive = request.IsActive ?? true,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+        }
 
         dbContext.LearningResources.Add(resource);
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -282,9 +269,10 @@ public sealed class AdminController(
     }
 
     [HttpPut("learning-resources/{id:guid}")]
+    [Consumes("multipart/form-data")]
     public async Task<ActionResult<LearningResourceResponse>> UpdateLearningResource(
         Guid id,
-        SaveLearningResourceRequest request,
+        [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
         var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
@@ -300,23 +288,49 @@ public sealed class AdminController(
             return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
-        if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
-        {
-            await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
-        }
-
         resource.SkillId = request.SkillId;
         resource.Title = request.Title!.Trim();
-        resource.Url = request.Url!.Trim();
-        resource.StorageObjectName = null;
-        resource.ContentType = null;
-        resource.FileSize = null;
         resource.ResourceType = request.ResourceType!.Trim();
         resource.Difficulty = request.Difficulty?.Trim();
         resource.EstimatedHours = request.EstimatedHours;
         resource.LessonNumber = request.LessonNumber ?? 1;
         resource.IsActive = request.IsActive ?? resource.IsActive;
         resource.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (request.File is not null && request.File.Length > 0)
+        {
+            if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+            {
+                await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+            }
+
+            var objectName = BuildLearningResourceObjectName(id, request.File.FileName, request.File.ContentType);
+            await using var stream = request.File.OpenReadStream();
+            var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
+
+            resource.Url = $"/api/storage/learning-resources/{id}/download";
+            resource.StorageObjectName = result.ObjectName;
+            resource.ContentType = result.ContentType;
+            resource.FileSize = result.Size;
+        }
+        else
+        {
+            var trimmedUrl = request.Url?.Trim() ?? string.Empty;
+            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
+
+            if (!isLocalDownloadUrl)
+            {
+                if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+                {
+                    await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+                }
+                resource.StorageObjectName = null;
+                resource.ContentType = null;
+                resource.FileSize = null;
+            }
+
+            resource.Url = trimmedUrl;
+        }
 
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
@@ -344,58 +358,7 @@ public sealed class AdminController(
         return NoContent();
     }
 
-    private async Task<string?> ValidateUploadLearningResourceRequest(
-        UploadLearningResourceRequest request,
-        CancellationToken cancellationToken)
-    {
-        if (string.IsNullOrWhiteSpace(request.Title))
-        {
-            return "Tiêu đề tài nguyên học tập là bắt buộc.";
-        }
-
-        if (string.IsNullOrWhiteSpace(request.ResourceType))
-        {
-            return "Loại tài nguyên học tập là bắt buộc.";
-        }
-
-        if (request.EstimatedHours is < 0)
-        {
-            return "Thời gian ước tính phải lớn hơn hoặc bằng 0.";
-        }
-
-        if (request.LessonNumber is < 1)
-        {
-            return "Số thứ tự bài học (Lesson Number) phải lớn hơn hoặc bằng 1.";
-        }
-
-        if (request.File is null || request.File.Length == 0)
-        {
-            return "Tệp tài nguyên học tập là bắt buộc.";
-        }
-
-        if (request.File.Length > options.MaxUploadBytes)
-        {
-            return $"Tệp quá lớn. Kích thước tối đa là {options.MaxUploadBytes} bytes.";
-        }
-
-        if (!LearningResourceContentTypes.Contains(request.File.ContentType))
-        {
-            return $"Định dạng tệp không được hỗ trợ: {request.File.ContentType}.";
-        }
-
-        if (request.SkillId is not null)
-        {
-            var skillExists = await dbContext.Skills.AnyAsync(
-                skill => skill.Id == request.SkillId && skill.IsActive,
-                cancellationToken);
-            if (!skillExists)
-            {
-                return "Không tìm thấy kỹ năng đang hoạt động.";
-            }
-        }
-
-        return null;
-    }
+    // Unified validation covers both file and url modes
 
     [HttpGet("role-skill-requirements")]
     public async Task<ActionResult<IReadOnlyList<RoleSkillRequirementResponse>>> GetRoleSkillRequirements(
@@ -561,14 +524,32 @@ public sealed class AdminController(
             return "Tiêu đề tài nguyên học tập là bắt buộc.";
         }
 
-        if (string.IsNullOrWhiteSpace(request.Url))
+        if (request.File is null || request.File.Length == 0)
         {
-            return "Đường dẫn (URL) tài nguyên học tập là bắt buộc.";
-        }
+            if (string.IsNullOrWhiteSpace(request.Url))
+            {
+                return "Đường dẫn (URL) hoặc Tệp tin tải lên là bắt buộc.";
+            }
 
-        if (!Uri.TryCreate(request.Url.Trim(), UriKind.Absolute, out _))
+            var trimmedUrl = request.Url.Trim();
+            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
+
+            if (!isLocalDownloadUrl && !Uri.TryCreate(trimmedUrl, UriKind.Absolute, out _))
+            {
+                return "Đường dẫn (URL) tài nguyên học tập phải là đường dẫn tuyệt đối hoặc đường dẫn tải tệp tin hợp lệ.";
+            }
+        }
+        else
         {
-            return "Đường dẫn (URL) tài nguyên học tập phải là đường dẫn tuyệt đối.";
+            if (request.File.Length > options.MaxUploadBytes)
+            {
+                return $"Tệp quá lớn. Kích thước tối đa là {options.MaxUploadBytes} bytes.";
+            }
+
+            if (!LearningResourceContentTypes.Contains(request.File.ContentType))
+            {
+                return $"Định dạng tệp không được hỗ trợ: {request.File.ContentType}.";
+            }
         }
 
         if (string.IsNullOrWhiteSpace(request.ResourceType))
@@ -763,26 +744,17 @@ public sealed record SkillResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 
-public sealed record SaveLearningResourceRequest(
-    Guid? SkillId,
-    string? Title,
-    string? Url,
-    string? ResourceType,
-    string? Difficulty,
-    int? EstimatedHours,
-    bool? IsActive,
-    int? LessonNumber);
-
-public sealed class UploadLearningResourceRequest
+public sealed class SaveLearningResourceRequest
 {
     public Guid? SkillId { get; set; }
     public string? Title { get; set; }
+    public string? Url { get; set; }
     public string? ResourceType { get; set; }
     public string? Difficulty { get; set; }
     public int? EstimatedHours { get; set; }
     public bool? IsActive { get; set; }
     public int? LessonNumber { get; set; }
-    public IFormFile File { get; set; } = null!;
+    public IFormFile? File { get; set; }
 }
 
 public sealed record LearningResourceResponse(
