@@ -30,7 +30,9 @@ public sealed class AdminController(
         "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
         "image/jpeg",
         "image/png",
-        "image/webp"
+        "image/webp",
+        "application/zip",
+        "application/x-zip-compressed"
     };
 
     private readonly StorageOptions options = storageOptions.Value;
@@ -725,6 +727,8 @@ public sealed class AdminController(
             "image/jpeg" => ".jpg",
             "image/png" => ".png",
             "image/webp" => ".webp",
+            "application/zip" => ".zip",
+            "application/x-zip-compressed" => ".zip",
             _ => string.Empty
         };
     }
