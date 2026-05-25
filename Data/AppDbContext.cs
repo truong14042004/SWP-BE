@@ -38,6 +38,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<CounselorFeedback> CounselorFeedbacks => Set<CounselorFeedback>();
     public DbSet<CounselorAssignment> CounselorAssignments => Set<CounselorAssignment>();
     public DbSet<RoadmapNodeReviewRequest> RoadmapNodeReviewRequests => Set<RoadmapNodeReviewRequest>();
+    public DbSet<AiReviewSummary> AiReviewSummaries => Set<AiReviewSummary>();
+    public DbSet<LessonProgress> LessonProgresses => Set<LessonProgress>();
     public DbSet<Notification> Notifications => Set<Notification>();
     public DbSet<JobPost> JobPosts => Set<JobPost>();
     public DbSet<JobSkillMention> JobSkillMentions => Set<JobSkillMention>();
@@ -949,6 +951,54 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(item => item.ReviewerId)
                 .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.AiSummary)
+                .WithOne(summary => summary.ReviewRequest)
+                .HasForeignKey<RoadmapNodeReviewRequest>(item => item.AiSummaryId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AiReviewSummary>(entity =>
+        {
+            entity.ToTable("ai_review_summaries");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.ReviewRequestId).IsUnique();
+            entity.HasIndex(item => item.GeneratedAt);
+            entity.Property(item => item.EvidenceType).HasMaxLength(50).IsRequired();
+            entity.Property(item => item.EvidenceUrl).HasMaxLength(2048).IsRequired();
+            entity.Property(item => item.Model).HasMaxLength(100);
+            entity.Property(item => item.TechStackJson).HasColumnType("jsonb");
+            entity.Property(item => item.StrengthsJson).HasColumnType("jsonb");
+            entity.Property(item => item.WeaknessesJson).HasColumnType("jsonb");
+            entity.Property(item => item.SuggestedQuestionsJson).HasColumnType("jsonb");
+            entity.Property(item => item.SkillMappingJson).HasColumnType("jsonb");
+            entity.Property(item => item.OverallSummary).HasColumnType("text");
+            entity.HasCheckConstraint("CK_ai_review_summaries_TokensUsed",
+                "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0");
+            entity.HasOne(item => item.GeneratedByUser)
+                .WithMany()
+                .HasForeignKey(item => item.GeneratedByUserId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<LessonProgress>(entity =>
+        {
+            entity.ToTable("lesson_progresses");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.UserId, item.RoadmapNodeId, item.LearningResourceId })
+                .IsUnique();
+            entity.HasIndex(item => new { item.UserId, item.RoadmapNodeId });
+            entity.HasOne(item => item.User)
+                .WithMany()
+                .HasForeignKey(item => item.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.RoadmapNode)
+                .WithMany()
+                .HasForeignKey(item => item.RoadmapNodeId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.LearningResource)
+                .WithMany()
+                .HasForeignKey(item => item.LearningResourceId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Notification>(entity =>

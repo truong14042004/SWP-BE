@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SWP_BE.Data;
@@ -11,9 +12,11 @@ using SWP_BE.Data;
 namespace SWP_BE.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260525111613_AddAiReviewSummary")]
+    partial class AddAiReviewSummary
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -1071,38 +1074,6 @@ namespace SWP_BE.Migrations
                             UpdatedAt = new DateTimeOffset(new DateTime(2026, 5, 15, 0, 0, 0, 0, DateTimeKind.Unspecified), new TimeSpan(0, 0, 0, 0, 0)),
                             Url = "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes"
                         });
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.LessonProgress", b =>
-                {
-                    b.Property<Guid>("Id")
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("uuid");
-
-                    b.Property<DateTimeOffset>("CompletedAt")
-                        .HasColumnType("timestamp with time zone");
-
-                    b.Property<Guid>("LearningResourceId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("RoadmapNodeId")
-                        .HasColumnType("uuid");
-
-                    b.Property<Guid>("UserId")
-                        .HasColumnType("uuid");
-
-                    b.HasKey("Id");
-
-                    b.HasIndex("LearningResourceId");
-
-                    b.HasIndex("RoadmapNodeId");
-
-                    b.HasIndex("UserId", "RoadmapNodeId");
-
-                    b.HasIndex("UserId", "RoadmapNodeId", "LearningResourceId")
-                        .IsUnique();
-
-                    b.ToTable("lesson_progresses", (string)null);
                 });
 
             modelBuilder.Entity("SWP_BE.Models.MentorFeedback", b =>
@@ -3157,33 +3128,6 @@ namespace SWP_BE.Migrations
                         .OnDelete(DeleteBehavior.SetNull);
 
                     b.Navigation("Skill");
-                });
-
-            modelBuilder.Entity("SWP_BE.Models.LessonProgress", b =>
-                {
-                    b.HasOne("SWP_BE.Models.LearningResource", "LearningResource")
-                        .WithMany()
-                        .HasForeignKey("LearningResourceId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SWP_BE.Models.RoadmapNode", "RoadmapNode")
-                        .WithMany()
-                        .HasForeignKey("RoadmapNodeId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.HasOne("SWP_BE.Models.User", "User")
-                        .WithMany()
-                        .HasForeignKey("UserId")
-                        .OnDelete(DeleteBehavior.Cascade)
-                        .IsRequired();
-
-                    b.Navigation("LearningResource");
-
-                    b.Navigation("RoadmapNode");
-
-                    b.Navigation("User");
                 });
 
             modelBuilder.Entity("SWP_BE.Models.MentorFeedback", b =>

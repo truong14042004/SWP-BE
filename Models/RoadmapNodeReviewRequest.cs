@@ -16,7 +16,13 @@ public sealed class RoadmapNodeReviewRequest
     public DateTimeOffset RequestedAt { get; set; }
     public DateTimeOffset? RespondedAt { get; set; }
 
+    /// <summary>
+    /// FK toi AiReviewSummary neu mentor da bam "Review bang AI" cho request nay. Null = chua quet.
+    /// </summary>
+    public Guid? AiSummaryId { get; set; }
+
     public RoadmapNode RoadmapNode { get; set; } = null!;
     public User Student { get; set; } = null!;
     public User Reviewer { get; set; } = null!;
+    public AiReviewSummary? AiSummary { get; set; }
 }

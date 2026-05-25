@@ -16,6 +16,7 @@ public sealed class RoadmapReviewController(
     IFileStorageService storageService,
     IEmailSender emailSender,
     IStudentReviewQuotaService quotaService,
+    IAiReviewSummaryService aiReviewSummaryService,
     ILogger<RoadmapReviewController> logger) : ControllerBase
 {
     private const long MaxEvidenceFileSize = 25 * 1024 * 1024; // 25 MB
@@ -706,6 +707,184 @@ public sealed class RoadmapReviewController(
     }
 
     // ============================================================
+    //  AI REVIEW SUMMARY (mentor on-demand)
+    // ============================================================
+
+    [Authorize(Roles = $"{UserRoles.IndustryMentor},{UserRoles.Admin}")]
+    [HttpPost("api/roadmap-node/review-requests/{requestId:guid}/ai-summary")]
+    public async Task<ActionResult<AiReviewSummaryResponse>> GenerateAiSummary(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var reviewerId = GetCurrentUserId();
+
+        var request = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken);
+
+        if (request is null)
+        {
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
+        }
+
+        if (request.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
+        {
+            return Forbid();
+        }
+
+        try
+        {
+            var summary = await aiReviewSummaryService.GenerateAsync(requestId, reviewerId, cancellationToken);
+            return Ok(ToAiSummaryResponse(summary));
+        }
+        catch (InvalidOperationException ex)
+        {
+            return BadRequest(new { message = ex.Message });
+        }
+    }
+
+    [Authorize(Roles = $"{UserRoles.IndustryMentor},{UserRoles.AcademicCounselor},{UserRoles.Admin}")]
+    [HttpGet("api/roadmap-node/review-requests/{requestId:guid}/ai-summary")]
+    public async Task<ActionResult<AiReviewSummaryResponse>> GetAiSummary(
+        Guid requestId,
+        CancellationToken cancellationToken)
+    {
+        var reviewerId = GetCurrentUserId();
+
+        var request = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .Include(item => item.AiSummary)
+            .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken);
+
+        if (request is null)
+        {
+            return NotFound(new { message = "Không tìm thấy yêu cầu review." });
+        }
+
+        if (request.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
+        {
+            return Forbid();
+        }
+
+        if (request.AiSummary is null)
+        {
+            return NoContent();
+        }
+
+        return Ok(ToAiSummaryResponse(request.AiSummary));
+    }
+
+    private static AiReviewSummaryResponse ToAiSummaryResponse(AiReviewSummary summary)
+    {
+        return new AiReviewSummaryResponse(
+            summary.Id,
+            summary.ReviewRequestId,
+            summary.EvidenceType,
+            summary.EvidenceUrl,
+            summary.Model,
+            summary.TokensUsed,
+            ParseStringArray(summary.TechStackJson),
+            ParseStringArray(summary.StrengthsJson),
+            ParseStringArray(summary.WeaknessesJson),
+            ParseStringArray(summary.SuggestedQuestionsJson),
+            ParseSkillMapping(summary.SkillMappingJson),
+            summary.OverallSummary,
+            summary.GeneratedAt);
+    }
+
+    private static IReadOnlyList<string> ParseStringArray(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return [];
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Array)
+            {
+                return [];
+            }
+
+            var list = new List<string>();
+            foreach (var element in doc.RootElement.EnumerateArray())
+            {
+                if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+                {
+                    var value = element.GetString();
+                    if (!string.IsNullOrWhiteSpace(value))
+                    {
+                        list.Add(value);
+                    }
+                }
+            }
+
+            return list;
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return [];
+        }
+    }
+
+    private static AiReviewSkillMapping? ParseSkillMapping(string json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+        {
+            return null;
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            var root = doc.RootElement;
+            bool? matches = null;
+            if (root.TryGetProperty("matchesNode", out var matchesElement)
+                && (matchesElement.ValueKind == System.Text.Json.JsonValueKind.True
+                    || matchesElement.ValueKind == System.Text.Json.JsonValueKind.False))
+            {
+                matches = matchesElement.GetBoolean();
+            }
+
+            string? reason = null;
+            if (root.TryGetProperty("reason", out var reasonElement)
+                && reasonElement.ValueKind == System.Text.Json.JsonValueKind.String)
+            {
+                reason = reasonElement.GetString();
+            }
+
+            var missing = new List<string>();
+            if (root.TryGetProperty("missingAspects", out var missingElement)
+                && missingElement.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var element in missingElement.EnumerateArray())
+                {
+                    if (element.ValueKind == System.Text.Json.JsonValueKind.String)
+                    {
+                        var value = element.GetString();
+                        if (!string.IsNullOrWhiteSpace(value))
+                        {
+                            missing.Add(value);
+                        }
+                    }
+                }
+            }
+
+            return new AiReviewSkillMapping(matches, reason, missing);
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return null;
+        }
+    }
+
+    // ============================================================
     //  HELPERS
     // ============================================================
 
@@ -1005,3 +1184,23 @@ public sealed record ReviewerQueueItemResponse(
     string? EvidenceFileName,
     ReviewerQueueStudentInfo Student,
     ReviewerQueueNodeInfo Node);
+
+public sealed record AiReviewSkillMapping(
+    bool? MatchesNode,
+    string? Reason,
+    IReadOnlyList<string> MissingAspects);
+
+public sealed record AiReviewSummaryResponse(
+    Guid Id,
+    Guid ReviewRequestId,
+    string EvidenceType,
+    string EvidenceUrl,
+    string? Model,
+    int? TokensUsed,
+    IReadOnlyList<string> TechStack,
+    IReadOnlyList<string> Strengths,
+    IReadOnlyList<string> Weaknesses,
+    IReadOnlyList<string> SuggestedQuestions,
+    AiReviewSkillMapping? SkillMapping,
+    string? OverallSummary,
+    DateTimeOffset GeneratedAt);
