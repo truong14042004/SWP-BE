@@ -61,6 +61,20 @@ public sealed class SubscriptionsController(
             return NotFound(new { message = "Không tìm thấy gói đăng ký." });
         }
 
+        var activeSubscription = await dbContext.Subscriptions
+            .Include(s => s.Plan)
+            .Where(s => s.UserId == userId && (s.Status == "Active" || (s.Status == "Cancelled" && s.ExpiredAt > DateTimeOffset.UtcNow)))
+            .OrderByDescending(s => s.StartedAt ?? s.CreatedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        if (activeSubscription is not null && activeSubscription.Plan.Price > 0)
+        {
+            if (activeSubscription.PlanId != plan.Id)
+            {
+                return BadRequest(new { message = $"Bạn đang sử dụng gói đăng ký '{activeSubscription.Plan.Name}'. Vui lòng hủy gói hiện tại trước khi đăng ký gói mới." });
+            }
+        }
+
         if (!string.Equals(plan.Currency, "VND", StringComparison.OrdinalIgnoreCase))
         {
             return BadRequest(new { message = "Thanh toán qua PayOS hiện chỉ hỗ trợ các gói bằng VND." });
@@ -205,17 +219,29 @@ public sealed class SubscriptionsController(
             .Include(subscription => subscription.Plan)
             .Where(subscription => subscription.UserId == userId)
             .OrderByDescending(subscription => subscription.CreatedAt)
-            .Select(subscription => new MySubscriptionResponse(
-                subscription.Id,
-                subscription.PlanId,
-                subscription.Plan.Name,
-                subscription.Status,
-                subscription.StartedAt,
-                subscription.ExpiredAt,
-                subscription.CancelledAt,
-                subscription.Provider,
-                subscription.CreatedAt,
-                subscription.UpdatedAt))
+            .Select(subscription => new
+            {
+                Subscription = subscription,
+                Plan = subscription.Plan,
+                LatestPayment = dbContext.PaymentTransactions
+                    .Where(p => p.SubscriptionId == subscription.Id)
+                    .OrderByDescending(p => p.CreatedAt)
+                    .FirstOrDefault()
+            })
+            .Select(item => new MySubscriptionResponse(
+                item.Subscription.Id,
+                item.Subscription.PlanId,
+                item.Plan.Name,
+                item.Subscription.Status,
+                item.Subscription.StartedAt,
+                item.Subscription.ExpiredAt,
+                item.Subscription.CancelledAt,
+                item.Subscription.Provider,
+                item.Subscription.CreatedAt,
+                item.Subscription.UpdatedAt,
+                item.LatestPayment != null ? item.LatestPayment.Amount : item.Plan.Price,
+                item.LatestPayment != null ? item.LatestPayment.Currency : item.Plan.Currency,
+                item.LatestPayment != null ? item.LatestPayment.CheckoutUrl : null))
             .ToListAsync(cancellationToken);
 
         return Ok(subscriptions);
@@ -330,4 +356,7 @@ public sealed record MySubscriptionResponse(
     DateTimeOffset? CancelledAt,
     string? Provider,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    decimal Amount,
+    string Currency,
+    string? CheckoutUrl);

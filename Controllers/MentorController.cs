@@ -200,7 +200,21 @@ public sealed class MentorController(
             var parsedLimit = ParseAiChatLimit(subscription.Plan.FeaturesJson);
             if (parsedLimit.HasValue)
             {
-                limit = parsedLimit.Value;
+                var baseLimit = parsedLimit.Value;
+                if (baseLimit < 0)
+                {
+                    limit = -1;
+                }
+                else if (subscription.StartedAt.HasValue && subscription.ExpiredAt.HasValue)
+                {
+                    var billingCycle = subscription.Plan.BillingCycle ?? "Monthly";
+                    var periods = CalculatePeriods(subscription.StartedAt.Value, subscription.ExpiredAt.Value, billingCycle);
+                    limit = baseLimit * periods;
+                }
+                else
+                {
+                    limit = baseLimit;
+                }
             }
         }
 
@@ -565,6 +579,32 @@ public sealed class MentorController(
             quota);
 
     private sealed record ParsedAiResponse(string Answer, string Intent, object? Suggestions);
+
+    private static int CalculatePeriods(DateTimeOffset start, DateTimeOffset end, string billingCycle)
+    {
+        if (billingCycle.Equals("Free", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        var months = (end.Year - start.Year) * 12 + end.Month - start.Month;
+        if (months <= 0)
+        {
+            return 1;
+        }
+
+        if (billingCycle.Equals("Yearly", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Max(1, months / 12);
+        }
+        if (billingCycle.Equals("Quarterly", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Max(1, months / 3);
+        }
+
+        // Default to Monthly
+        return months;
+    }
 }
 
 public sealed record MentorChatRequest(string Question, string? ContextJson);

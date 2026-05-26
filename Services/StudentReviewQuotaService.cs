@@ -60,10 +60,21 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
         if (activeSubscription is not null)
         {
             planName = activeSubscription.Plan?.Name ?? FreePlanName;
-            limit = ParseFeatureLimit(activeSubscription.Plan?.FeaturesJson) ?? FreePlanReviewLimit;
+            var baseLimit = ParseFeatureLimit(activeSubscription.Plan?.FeaturesJson) ?? FreePlanReviewLimit;
             since = activeSubscription.StartedAt ?? activeSubscription.CreatedAt;
             periodStart = activeSubscription.StartedAt;
             periodEnd = activeSubscription.ExpiredAt;
+
+            if (activeSubscription.StartedAt.HasValue && activeSubscription.ExpiredAt.HasValue)
+            {
+                var billingCycle = activeSubscription.Plan?.BillingCycle ?? "Monthly";
+                var periods = CalculatePeriods(activeSubscription.StartedAt.Value, activeSubscription.ExpiredAt.Value, billingCycle);
+                limit = baseLimit == int.MaxValue ? int.MaxValue : baseLimit * periods;
+            }
+            else
+            {
+                limit = baseLimit;
+            }
         }
 
         // Used = (số portfolio feedback nhận được) + (số roadmap node review đã được approve)
@@ -170,5 +181,31 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
             default:
                 return null;
         }
+    }
+
+    private static int CalculatePeriods(DateTimeOffset start, DateTimeOffset end, string billingCycle)
+    {
+        if (billingCycle.Equals("Free", StringComparison.OrdinalIgnoreCase))
+        {
+            return 1;
+        }
+
+        var months = (end.Year - start.Year) * 12 + end.Month - start.Month;
+        if (months <= 0)
+        {
+            return 1;
+        }
+
+        if (billingCycle.Equals("Yearly", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Max(1, months / 12);
+        }
+        if (billingCycle.Equals("Quarterly", StringComparison.OrdinalIgnoreCase))
+        {
+            return Math.Max(1, months / 3);
+        }
+
+        // Default to Monthly
+        return months;
     }
 }
