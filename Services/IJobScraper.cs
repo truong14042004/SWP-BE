@@ -3,7 +3,9 @@ namespace SWP_BE.Services;
 public interface IJobScraper
 {
     string SourceName { get; }
-    IAsyncEnumerable<ScrapedJob> ScrapeAsync(CancellationToken cancellationToken);
+    IAsyncEnumerable<ScrapedJob> ScrapeAsync(
+        IReadOnlySet<string> existingExternalIds,
+        CancellationToken cancellationToken);
 }
 
 public sealed class ScrapedJob

@@ -107,7 +107,14 @@ public sealed class MarketPulseRunner : IMarketPulseRunner
 
         foreach (var scraper in _scrapers)
         {
-            await foreach (var scrapedJob in scraper.ScrapeAsync(cancellationToken))
+            var existingExternalIdList = await _dbContext.JobPosts
+                .AsNoTracking()
+                .Where(post => post.Source == scraper.SourceName)
+                .Select(post => post.ExternalId)
+                .ToListAsync(cancellationToken);
+            var existingExternalIds = existingExternalIdList.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+            await foreach (var scrapedJob in scraper.ScrapeAsync(existingExternalIds, cancellationToken))
             {
                 if (cancellationToken.IsCancellationRequested)
                 {

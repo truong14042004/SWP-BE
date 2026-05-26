@@ -19,9 +19,23 @@ public sealed class TopCvScraperOptions
     public string BaseUrl { get; set; } = "https://www.topcv.vn";
     public string ListPath { get; set; } = "/viec-lam-it";
     public int MaxPages { get; set; } = 5;
-    public int MaxJobsPerRun { get; set; } = 100;
-    public int RequestDelayMs { get; set; } = 2500;
+    public int MaxJobsPerRun { get; set; } = 20;
+    public int MinRequestDelayMs { get; set; } = 20_000;
+    public int MaxRequestDelayMs { get; set; } = 45_000;
     public int RequestTimeoutSeconds { get; set; } = 30;
+    public int BlockCooldownMs { get; set; } = 300_000;
+    public int MaxProxyRotationsPerRun { get; set; } = 1;
+    public bool RefreshExistingJobs { get; set; } = false;
     public string UserAgent { get; set; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";
+    public string? ProxyServer { get; set; }
+    public string? ProxyUsername { get; set; }
+    public string? ProxyPassword { get; set; }
+    public bool UseDynamicProxy { get; set; } = false;
+    public string? ProxyKey { get; set; }
+    public string ProxyApiUrl { get; set; } = "https://proxyxoay.shop/api/get.php";
+    public string ProxyRotateUrl { get; set; } = "https://proxyxoay.shop/api/up.php";
+    public string ProxyNetwork { get; set; } = "random";
+    public int ProxyLocation { get; set; } = 0;
+    public string? ProxyWhitelist { get; set; }
 }

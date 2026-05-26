@@ -58,7 +58,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
 builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
-builder.Services.AddHttpClient<IJobScraper, TopCvScraper>();
+builder.Services.AddScoped<IJobScraper, TopCvScraper>();
 builder.Services.AddScoped<IMarketPulseRunner, MarketPulseRunner>();
 builder.Services.AddHostedService<MarketPulseScheduler>();
 builder.Services.AddSingleton(serviceProvider =>

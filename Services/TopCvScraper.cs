@@ -1,9 +1,12 @@
 using System.Globalization;
 using System.Net;
+using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text.Json.Serialization;
 using System.Text.RegularExpressions;
 using HtmlAgilityPack;
 using Microsoft.Extensions.Options;
+using Microsoft.Playwright;
 using SWP_BE.Options;
 
 namespace SWP_BE.Services;
@@ -12,31 +15,32 @@ public sealed class TopCvScraper : IJobScraper
 {
     public string SourceName => "TopCV";
 
-    private readonly HttpClient _httpClient;
     private readonly TopCvScraperOptions _options;
     private readonly ILogger<TopCvScraper> _logger;
+    private readonly IHttpClientFactory _httpClientFactory;
     private bool _blocked;
+    private static string? _cachedProxy;
 
     private static readonly Regex JobIdFromUrl = new(@"/viec-lam/[^/]+/(\d+)\.html", RegexOptions.Compiled);
+    private static readonly Regex JobUrlCandidate = new(
+        @"(?:https?:)?(?://www\.topcv\.vn)?/viec-lam/[^""'\\\s<>]+/\d+\.html(?:\?[^""'\\\s<>]*)?",
+        RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SalaryRange = new(@"(\d+(?:[.,]\d+)?)\s*-\s*(\d+(?:[.,]\d+)?)\s*(triệu|tr|million|usd)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
     private static readonly Regex SalaryUpTo = new(@"(?:tới|đến|up to)\s*(\d+(?:[.,]\d+)?)\s*(triệu|tr|million|usd)", RegexOptions.IgnoreCase | RegexOptions.Compiled);
 
-    public TopCvScraper(HttpClient httpClient, IOptions<MarketPulseOptions> options, ILogger<TopCvScraper> logger)
+    public TopCvScraper(
+        IOptions<MarketPulseOptions> options,
+        IHttpClientFactory httpClientFactory,
+        ILogger<TopCvScraper> logger)
     {
-        _httpClient = httpClient;
         _options = options.Value.TopCv;
+        _httpClientFactory = httpClientFactory;
         _logger = logger;
-
-        _httpClient.Timeout = TimeSpan.FromSeconds(_options.RequestTimeoutSeconds);
-        if (!_httpClient.DefaultRequestHeaders.UserAgent.TryParseAdd(_options.UserAgent))
-        {
-            _httpClient.DefaultRequestHeaders.Add("User-Agent", _options.UserAgent);
-        }
-        _httpClient.DefaultRequestHeaders.AcceptLanguage.ParseAdd("vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7");
-        _httpClient.DefaultRequestHeaders.Accept.ParseAdd("text/html,application/xhtml+xml");
     }
 
-    public async IAsyncEnumerable<ScrapedJob> ScrapeAsync([EnumeratorCancellation] CancellationToken cancellationToken)
+    public async IAsyncEnumerable<ScrapedJob> ScrapeAsync(
+        IReadOnlySet<string> existingExternalIds,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         if (!_options.Enabled)
         {
@@ -47,135 +51,384 @@ public sealed class TopCvScraper : IJobScraper
         _blocked = false;
         var seenIds = new HashSet<string>();
         var yielded = 0;
+        var proxyRotations = 0;
+        var maxProxyRotations = Math.Max(0, _options.MaxProxyRotationsPerRun);
 
-        for (var page = 1; page <= _options.MaxPages; page++)
+        _logger.LogInformation("Starting TopCV scrape run using Playwright.");
+
+        using var playwright = await Playwright.CreateAsync();
+
+        var browser = await CreateBrowserAsync(playwright, await ResolveProxyAsync(forceNew: true, cancellationToken));
+        var (context, page) = await CreateContextAsync(browser);
+
+        var consecutiveBlocks = 0;
+        try
         {
-            if (_blocked)
+            for (var pageNum = 1; pageNum <= _options.MaxPages; pageNum++)
             {
-                yield break;
-            }
-
-            var listUrl = $"{_options.BaseUrl.TrimEnd('/')}{_options.ListPath}?page={page}";
-            HtmlDocument? listDocument;
-
-            try
-            {
-                listDocument = await FetchAsync(listUrl, cancellationToken);
-            }
-            catch (Exception exception)
-            {
-                _logger.LogWarning(exception, "Failed to fetch TopCV list page {Page}.", page);
-                break;
-            }
-
-            if (listDocument is null)
-            {
-                break;
-            }
-
-            var jobUrls = ExtractJobUrls(listDocument);
-            if (jobUrls.Count == 0)
-            {
-                _logger.LogInformation("No job URLs found on page {Page}. Stopping pagination.", page);
-                break;
-            }
-
-            foreach (var jobUrl in jobUrls)
-            {
-                if (cancellationToken.IsCancellationRequested || yielded >= _options.MaxJobsPerRun || _blocked)
+                if (cancellationToken.IsCancellationRequested)
                 {
                     yield break;
                 }
 
-                var externalId = ExtractExternalId(jobUrl);
-                if (string.IsNullOrWhiteSpace(externalId) || !seenIds.Add(externalId))
-                {
-                    continue;
-                }
+                var listUrl = $"{_options.BaseUrl.TrimEnd('/')}{_options.ListPath}?page={pageNum}";
+                HtmlDocument? listDocument;
 
-                ScrapedJob? scraped = null;
                 try
                 {
-                    await Task.Delay(_options.RequestDelayMs, cancellationToken);
-                    var detailDocument = await FetchAsync(jobUrl, cancellationToken);
-                    if (detailDocument is null)
-                    {
-                        if (_blocked)
-                        {
-                            yield break;
-                        }
-                        continue;
-                    }
-                    scraped = ParseJobDetail(detailDocument, jobUrl, externalId);
-                }
-                catch (OperationCanceledException)
-                {
-                    yield break;
+                    _blocked = false;
+                    listDocument = await FetchAsync(page, listUrl, cancellationToken);
                 }
                 catch (Exception exception)
                 {
-                    _logger.LogWarning(exception, "Failed to scrape TopCV job {Url}.", jobUrl);
+                    _logger.LogWarning(exception, "Failed to fetch TopCV list page {Page}.", pageNum);
+                    break;
                 }
 
-                if (scraped is not null)
+                if (listDocument is null)
                 {
-                    yielded++;
-                    yield return scraped;
+                    break;
+                }
+
+                var jobUrls = ExtractJobUrls(listDocument);
+                if (jobUrls.Count == 0)
+                {
+                    var pageTitle = SelectText(listDocument, "//title") ?? "(no title)";
+                    var linkCount = listDocument.DocumentNode.SelectNodes("//a[@href]")?.Count ?? 0;
+                    var htmlLength = listDocument.DocumentNode.OuterHtml.Length;
+                    _logger.LogInformation(
+                        "No job URLs found on page {Page}. Stopping pagination. Page title: {Title}. Link count: {LinkCount}. Html length: {HtmlLength}.",
+                        pageNum,
+                        pageTitle,
+                        linkCount,
+                        htmlLength);
+                    break;
+                }
+
+                foreach (var jobUrl in jobUrls)
+                {
+                    if (cancellationToken.IsCancellationRequested || yielded >= _options.MaxJobsPerRun)
+                    {
+                        yield break;
+                    }
+
+                    var externalId = ExtractExternalId(jobUrl);
+                    if (string.IsNullOrWhiteSpace(externalId) || !seenIds.Add(externalId))
+                    {
+                        continue;
+                    }
+
+                    if (!_options.RefreshExistingJobs && existingExternalIds.Contains(externalId))
+                    {
+                        _logger.LogDebug("Skipping existing TopCV job {ExternalId} without opening detail page.", externalId);
+                        continue;
+                    }
+
+                    ScrapedJob? scraped = null;
+                    try
+                    {
+                        // Randomized delay (±30%) to appear more human-like
+                        await DelayBeforeDetailRequestAsync(cancellationToken);
+
+                        _blocked = false;
+                        var detailDocument = await FetchAsync(page, jobUrl, cancellationToken);
+
+                        if (detailDocument is null && _blocked)
+                        {
+                            consecutiveBlocks++;
+                            _logger.LogWarning(
+                                "Detail page blocked (#{Count}): {Url}", consecutiveBlocks, jobUrl);
+
+                            if (consecutiveBlocks >= 3)
+                            {
+                                if (proxyRotations >= maxProxyRotations)
+                                {
+                                    _logger.LogWarning(
+                                        "Exhausted {Max} proxy rotations. Stopping scrape run.", maxProxyRotations);
+                                    yield break;
+                                }
+
+                                proxyRotations++;
+                                _logger.LogInformation(
+                                    "Rotating proxy (attempt {N}/{Max})...", proxyRotations, maxProxyRotations);
+
+                                await Task.Delay(15_000, cancellationToken);
+
+                                await context.DisposeAsync();
+                                await browser.DisposeAsync();
+
+                                browser = await CreateBrowserAsync(
+                                    playwright,
+                                    await ResolveProxyAsync(forceNew: true, cancellationToken));
+                                (context, page) = await CreateContextAsync(browser);
+
+                                consecutiveBlocks = 0;
+                            }
+
+                            continue;
+                        }
+
+                        if (detailDocument is null)
+                        {
+                            continue;
+                        }
+
+                        consecutiveBlocks = 0;
+                        scraped = ParseJobDetail(detailDocument, jobUrl, externalId);
+                    }
+                    catch (OperationCanceledException)
+                    {
+                        yield break;
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogWarning(exception, "Failed to scrape TopCV job {Url}.", jobUrl);
+                    }
+
+                    if (scraped is not null)
+                    {
+                        yielded++;
+                        yield return scraped;
+                    }
                 }
             }
         }
+        finally
+        {
+            await context.DisposeAsync();
+            await browser.DisposeAsync();
+        }
     }
 
-    private async Task<HtmlDocument?> FetchAsync(string url, CancellationToken cancellationToken)
+    private async Task DelayBeforeDetailRequestAsync(CancellationToken cancellationToken)
     {
-        using var response = await _httpClient.GetAsync(url, cancellationToken);
-        if (response.StatusCode == HttpStatusCode.NotFound)
+        var minDelay = Math.Max(3000, _options.MinRequestDelayMs);
+        var maxDelay = Math.Max(minDelay, _options.MaxRequestDelayMs);
+        var delay = Random.Shared.Next(minDelay, maxDelay + 1);
+
+        _logger.LogDebug("Waiting {DelayMs}ms before next TopCV detail request.", delay);
+        await Task.Delay(delay, cancellationToken);
+    }
+    private async Task<IBrowser> CreateBrowserAsync(IPlaywright playwright, string? proxyServer)
+    {
+        var launchOptions = new BrowserTypeLaunchOptions
         {
+            Headless = true,
+            Args = ["--no-sandbox", "--disable-setuid-sandbox", "--disable-dev-shm-usage", "--disable-gpu"]
+        };
+
+        if (!string.IsNullOrWhiteSpace(proxyServer))
+        {
+            _logger.LogInformation("Using proxy: {ProxyServer}", proxyServer);
+            launchOptions.Proxy = new Proxy { Server = proxyServer };
+        }
+
+        return await playwright.Chromium.LaunchAsync(launchOptions);
+    }
+
+    private static async Task<(IBrowserContext context, IPage page)> CreateContextAsync(IBrowser browser)
+    {
+        var context = await browser.NewContextAsync(new BrowserNewContextOptions
+        {
+            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
+            Locale = "vi-VN",
+            ExtraHTTPHeaders = new Dictionary<string, string>
+            {
+                { "Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" }
+            },
+            JavaScriptEnabled = false
+        });
+
+        await context.AddInitScriptAsync(@"
+            Object.defineProperty(navigator, 'webdriver', { get: () => undefined });
+            window.chrome = { runtime: {} };
+            Object.defineProperty(navigator, 'languages', { get: () => ['vi-VN', 'vi', 'en-US', 'en'] });
+            Object.defineProperty(navigator, 'plugins', { get: () => [1, 2, 3, 4, 5] });
+        ");
+
+        var page = await context.NewPageAsync();
+        return (context, page);
+    }
+
+    private async Task<string?> ResolveProxyAsync(bool forceNew, CancellationToken cancellationToken)
+    {
+        string? resolved = null;
+
+        if (_options.UseDynamicProxy && !string.IsNullOrWhiteSpace(_options.ProxyKey))
+        {
+            try
+            {
+                resolved = await GetDynamicProxyAsync(forceNew, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to fetch dynamic proxy. Trying static fallback proxy.");
+            }
+        }
+
+        if (string.IsNullOrWhiteSpace(resolved) && !string.IsNullOrWhiteSpace(_options.ProxyServer))
+        {
+            resolved = _options.ProxyServer;
+        }
+
+        return resolved;
+    }
+
+    private async Task<HtmlDocument?> FetchAsync(IPage page, string url, CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await page.GotoAsync(url, new PageGotoOptions
+            {
+                WaitUntil = WaitUntilState.DOMContentLoaded,
+                Timeout = _options.RequestTimeoutSeconds * 1000
+            });
+
+            if (response == null)
+            {
+                return null;
+            }
+
+            if (response.Status == 404)
+            {
+                return null;
+            }
+
+            if (response.Status is 403 or 429 or 503)
+            {
+                _blocked = true;
+                _logger.LogWarning("TopCV blocked request ({StatusCode}) for {Url}. Stopping scrape run.",
+                    response.Status, url);
+                return null;
+            }
+
+            try
+            {
+                await page.WaitForLoadStateAsync(LoadState.NetworkIdle, new PageWaitForLoadStateOptions
+                {
+                    Timeout = Math.Min(_options.RequestTimeoutSeconds * 1000, 10000)
+                });
+            }
+            catch (TimeoutException)
+            {
+                _logger.LogDebug("Timed out waiting for network idle on {Url}; continuing with current DOM.", url);
+            }
+
+            // Give client-side rendering one more beat before reading the DOM.
+            await Task.Delay(2000, cancellationToken);
+
+            var title = await page.TitleAsync();
+            if (title.Contains("Cloudflare") || title.Contains("Just a moment"))
+            {
+                _blocked = true;
+                _logger.LogWarning("TopCV blocked request (Cloudflare challenge detected) for {Url}. Stopping scrape run.",
+                    url);
+                return null;
+            }
+
+            if (!response.Ok)
+            {
+                _logger.LogWarning("Failed to fetch {Url} with status {Status}.", url, response.Status);
+                return null;
+            }
+
+            var html = await page.ContentAsync();
+            var document = new HtmlDocument();
+            document.LoadHtml(html);
+            return document;
+        }
+        catch (Exception exception)
+        {
+            _logger.LogWarning(exception, "Error while navigating to {Url}.", url);
             return null;
         }
-        if (response.StatusCode is HttpStatusCode.Forbidden
-            or HttpStatusCode.TooManyRequests
-            or HttpStatusCode.ServiceUnavailable)
-        {
-            _blocked = true;
-            _logger.LogWarning("TopCV blocked request ({StatusCode}) for {Url}. Stopping scrape run.",
-                (int)response.StatusCode, url);
-            return null;
-        }
-        response.EnsureSuccessStatusCode();
-        var html = await response.Content.ReadAsStringAsync(cancellationToken);
-        var document = new HtmlDocument();
-        document.LoadHtml(html);
-        return document;
     }
 
     private static List<string> ExtractJobUrls(HtmlDocument document)
     {
-        var links = document.DocumentNode
-            .SelectNodes("//a[contains(@href,'/viec-lam/')]")
-            ?? new HtmlNodeCollection(null);
-
         var urls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var link in links)
+        var links = document.DocumentNode.SelectNodes("//a[contains(@href,'/viec-lam/')]");
+        if (links is not null)
         {
-            var href = link.GetAttributeValue("href", string.Empty);
-            if (string.IsNullOrWhiteSpace(href))
+            foreach (var link in links)
             {
-                continue;
+                AddJobUrlCandidate(urls, link.GetAttributeValue("href", string.Empty));
             }
+        }
 
-            if (!JobIdFromUrl.IsMatch(href))
+        var html = document.DocumentNode.OuterHtml;
+        foreach (Match match in JobUrlCandidate.Matches(html))
+        {
+            AddJobUrlCandidate(urls, match.Value);
+        }
+
+        var decodedHtml = WebUtility.HtmlDecode(html).Replace("\\/", "/", StringComparison.Ordinal);
+        if (!string.Equals(decodedHtml, html, StringComparison.Ordinal))
+        {
+            foreach (Match match in JobUrlCandidate.Matches(decodedHtml))
             {
-                continue;
+                AddJobUrlCandidate(urls, match.Value);
             }
-
-            var absolute = href.StartsWith("http", StringComparison.OrdinalIgnoreCase)
-                ? href
-                : $"https://www.topcv.vn{href}";
-            urls.Add(absolute);
         }
 
         return urls.ToList();
+    }
+
+    private static void AddJobUrlCandidate(HashSet<string> urls, string candidate)
+    {
+        if (string.IsNullOrWhiteSpace(candidate))
+        {
+            return;
+        }
+
+        var decodedHref = WebUtility.HtmlDecode(candidate)
+            .Replace("\\/", "/", StringComparison.Ordinal)
+            .Trim();
+
+        if (!JobIdFromUrl.IsMatch(decodedHref))
+        {
+            return;
+        }
+
+        string absolute;
+        if (decodedHref.StartsWith("//", StringComparison.Ordinal))
+        {
+            absolute = $"https:{decodedHref}";
+        }
+        else if (decodedHref.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        {
+            absolute = decodedHref;
+        }
+        else if (decodedHref.StartsWith("/", StringComparison.Ordinal))
+        {
+            absolute = $"https://www.topcv.vn{decodedHref}";
+        }
+        else
+        {
+            return;
+        }
+
+        // Strip tracking/session parameters (ta_source, u_sr_id, etc.)
+        // These are session tokens tied to the scraping session IP, causing Cloudflare
+        // to detect the bot when the same token is reused with a different connection.
+        var cleanUrl = StripTrackingParams(absolute);
+        urls.Add(cleanUrl);
+    }
+
+    private static string StripTrackingParams(string url)
+    {
+        try
+        {
+            var uri = new Uri(url);
+            // Keep only the path — drop all query string parameters
+            // (ta_source, u_sr_id and similar are session/tracking tokens)
+            return $"{uri.Scheme}://{uri.Host}{uri.AbsolutePath}";
+        }
+        catch
+        {
+            return url;
+        }
     }
 
     private static string ExtractExternalId(string url)
@@ -352,4 +605,119 @@ public sealed class TopCvScraper : IJobScraper
             ? value
             : null;
     }
+
+    private async Task<string?> GetDynamicProxyAsync(bool forceNew, CancellationToken cancellationToken)
+    {
+        // If not forcing a new proxy and we have a valid cached one, return it
+        if (!forceNew && !string.IsNullOrWhiteSpace(_cachedProxy))
+        {
+            return _cachedProxy;
+        }
+
+        var client = _httpClientFactory.CreateClient();
+
+        if (forceNew && !string.IsNullOrWhiteSpace(_options.ProxyRotateUrl))
+        {
+            _logger.LogInformation("Forcing proxy IP rotation via API...");
+            try
+            {
+                var rotateUrl = $"{_options.ProxyRotateUrl}?key={_options.ProxyKey}";
+                var rotateResponse = await client.GetAsync(rotateUrl, cancellationToken);
+                var responseContent = await rotateResponse.Content.ReadAsStringAsync(cancellationToken);
+                _logger.LogInformation("Proxy rotation response: {Response}", responseContent?.Trim());
+                
+                // Wait 3 seconds for the IP change to propagate on the server side
+                await Task.Delay(3000, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Failed to force proxy rotation via API.");
+            }
+        }
+
+        var url = $"{_options.ProxyApiUrl}?key={_options.ProxyKey}&nhamang={_options.ProxyNetwork}&tinhthanh={_options.ProxyLocation}";
+        if (!string.IsNullOrWhiteSpace(_options.ProxyWhitelist))
+        {
+            url += $"&whitelist={_options.ProxyWhitelist}";
+        }
+
+        _logger.LogInformation("Requesting dynamic proxy from ProxyXoay API...");
+        try
+        {
+            var response = await client.GetFromJsonAsync<ProxyXoayResponse>(url, cancellationToken);
+            if (response != null)
+            {
+                if (response.Status == 100 && !string.IsNullOrWhiteSpace(response.ProxyHttp))
+                {
+                    var cleanProxy = CleanProxyUrl(response.ProxyHttp);
+                    if (!string.IsNullOrWhiteSpace(cleanProxy))
+                    {
+                        _cachedProxy = cleanProxy;
+                        _logger.LogInformation("Successfully retrieved new dynamic proxy: {Proxy}", cleanProxy);
+                        return cleanProxy;
+                    }
+                }
+                else if (response.Status == 101)
+                {
+                    _logger.LogInformation(
+                        "ProxyXoay API returned status 101 (cooldown): {Message}. Waiting 30s before retry...",
+                        response.Message);
+                    // Wait out the cooldown and retry once
+                    await Task.Delay(30_000, cancellationToken);
+                    var retry = await client.GetFromJsonAsync<ProxyXoayResponse>(url, cancellationToken);
+                    if (retry?.Status == 100 && !string.IsNullOrWhiteSpace(retry.ProxyHttp))
+                    {
+                        var cleanProxy = CleanProxyUrl(retry.ProxyHttp);
+                        if (!string.IsNullOrWhiteSpace(cleanProxy))
+                        {
+                            _cachedProxy = cleanProxy;
+                            _logger.LogInformation("Successfully retrieved new dynamic proxy after cooldown: {Proxy}", cleanProxy);
+                            return cleanProxy;
+                        }
+                    }
+                    // Still in cooldown — reuse cached if available
+                    if (!string.IsNullOrWhiteSpace(_cachedProxy))
+                    {
+                        return _cachedProxy;
+                    }
+                }
+                else
+                {
+                    _logger.LogWarning("ProxyXoay API returned status {Status}: {Message}", response.Status, response.Message);
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Error while calling ProxyXoay API.");
+        }
+
+        return _cachedProxy;
+    }
+
+    private static string? CleanProxyUrl(string rawProxy)
+    {
+        // e.g., "160.250.166.38:10413::" -> "http://160.250.166.38:10413"
+        var parts = rawProxy.Split(':', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length >= 2)
+        {
+            return $"http://{parts[0]}:{parts[1]}";
+        }
+        return null;
+    }
+}
+
+public sealed class ProxyXoayResponse
+{
+    [JsonPropertyName("status")]
+    public int Status { get; set; }
+
+    [JsonPropertyName("message")]
+    public string? Message { get; set; }
+
+    [JsonPropertyName("proxyhttp")]
+    public string? ProxyHttp { get; set; }
+
+    [JsonPropertyName("proxysocks5")]
+    public string? ProxySocks5 { get; set; }
 }
