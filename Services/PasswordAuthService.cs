@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using System.Security.Cryptography;
+using System.Text.RegularExpressions;
 using SWP_BE.Contracts.Auth;
 using SWP_BE.Data;
 using SWP_BE.Models;
@@ -14,6 +15,8 @@ public sealed class PasswordAuthService(
     IEmailSender emailSender) : IPasswordAuthService
 {
     private static readonly TimeSpan OtpLifetime = TimeSpan.FromMinutes(10);
+    private static readonly Regex UsernameRegex = new("^[a-z0-9._-]{3,32}$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+    private static readonly Regex GmailRegex = new("^[a-z0-9](?:[a-z0-9._%+-]{0,62}[a-z0-9])?@gmail\\.com$", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public async Task<AuthMessageResponse> RegisterAsync(
         RegisterRequest request,
@@ -23,14 +26,11 @@ public sealed class PasswordAuthService(
         var email = Normalize(request.Email);
         var fullName = request.FullName.Trim();
 
+        ValidateRegistration(username, email, fullName, request.Password);
+
         if (request.Password != request.ConfirmPassword)
         {
             throw new InvalidOperationException("Mật khẩu xác nhận không trùng khớp.");
-        }
-
-        if (string.IsNullOrWhiteSpace(username) || string.IsNullOrWhiteSpace(fullName))
-        {
-            throw new InvalidOperationException("Tên đăng nhập và họ tên là bắt buộc.");
         }
 
         var now = DateTimeOffset.UtcNow;
@@ -225,6 +225,34 @@ public sealed class PasswordAuthService(
 
     private static string CreateOtp() =>
         RandomNumberGenerator.GetInt32(100000, 1000000).ToString();
+
+    private static void ValidateRegistration(string username, string email, string fullName, string password)
+    {
+        if (fullName.Length < 2)
+        {
+            throw new InvalidOperationException("Họ và tên phải có ít nhất 2 ký tự.");
+        }
+
+        if (!UsernameRegex.IsMatch(username))
+        {
+            throw new InvalidOperationException("Tên đăng nhập phải dài 3-32 ký tự và chỉ gồm chữ, số, dấu chấm, gạch dưới hoặc gạch ngang.");
+        }
+
+        if (!GmailRegex.IsMatch(email))
+        {
+            throw new InvalidOperationException("Email phải là địa chỉ Gmail hợp lệ, ví dụ name@gmail.com.");
+        }
+
+        if (password.Length < 8)
+        {
+            throw new InvalidOperationException("Mật khẩu phải có ít nhất 8 ký tự.");
+        }
+
+        if (!password.Any(char.IsLetter) || !password.Any(char.IsDigit))
+        {
+            throw new InvalidOperationException("Mật khẩu phải có ít nhất 1 chữ cái và 1 chữ số.");
+        }
+    }
 
     private static string Normalize(string value) => value.Trim().ToLowerInvariant();
 }
