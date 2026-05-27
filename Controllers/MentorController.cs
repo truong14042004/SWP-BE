@@ -50,7 +50,24 @@ public sealed class MentorController(
             });
         }
 
+        MentorSession? existingSession = null;
+        IReadOnlyList<MentorChatMessageResponse> existingMessages = [];
+        if (request.SessionId is Guid sessionId)
+        {
+            existingSession = await dbContext.MentorSessions
+                .SingleOrDefaultAsync(item => item.Id == sessionId && item.UserId == userId, cancellationToken);
+            if (existingSession is null)
+            {
+                return NotFound(new { message = "Không tìm thấy phiên tư vấn." });
+            }
+
+            existingMessages = GetSessionMessages(existingSession, ParseAiResponse(existingSession.Answer));
+        }
+
         var context = await BuildMentorContext(userId, request.ContextJson, cancellationToken);
+        var previousMessagesText = existingMessages.Count == 0
+            ? "No previous messages in this thread."
+            : string.Join("\n", existingMessages.Select(item => $"{item.Role}: {item.Content}"));
 
         AiTextResult aiResult;
         try
@@ -60,6 +77,9 @@ public sealed class MentorController(
                 $"""
                 Student context:
                 {context}
+
+                Previous messages in this mentor thread:
+                {previousMessagesText}
 
                 Student question:
                 {request.Question.Trim()}
@@ -90,25 +110,49 @@ public sealed class MentorController(
         {
             answer = parsed.Answer,
             intent = parsed.Intent,
-            suggestions = parsed.Suggestions
+            suggestions = parsed.Suggestions,
+            messages = existingMessages
+                .Concat([
+                    new MentorChatMessageResponse(
+                        $"user-{now.ToUnixTimeMilliseconds()}",
+                        "user",
+                        request.Question.Trim(),
+                        now,
+                        null,
+                        null,
+                        null),
+                    new MentorChatMessageResponse(
+                        $"assistant-{now.ToUnixTimeMilliseconds()}",
+                        "assistant",
+                        parsed.Answer,
+                        now,
+                        aiResult.TokensUsed,
+                        aiResult.Model,
+                        parsed.Intent,
+                        parsed.Suggestions)
+                ])
+                .ToList()
         };
         var payloadJson = JsonSerializer.Serialize(sessionPayload, LooseJson);
 
-        var session = new MentorSession
+        var session = existingSession ?? new MentorSession
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             Question = request.Question.Trim(),
-            Answer = payloadJson,
-            ContextJson = context,
-            Model = aiResult.Model,
-            TokensUsed = aiResult.TokensUsed,
             CreatedAt = now
         };
+        session.Answer = payloadJson;
+        session.ContextJson = context;
+        session.Model = aiResult.Model;
+        session.TokensUsed = (session.TokensUsed ?? 0) + (aiResult.TokensUsed ?? 0);
 
         try
         {
-            dbContext.MentorSessions.Add(session);
+            if (existingSession is null)
+            {
+                dbContext.MentorSessions.Add(session);
+            }
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException dbEx)
@@ -742,7 +786,53 @@ public sealed class MentorController(
             session.Model,
             session.TokensUsed,
             session.CreatedAt,
-            quota);
+            quota,
+            GetSessionMessages(session, parsed));
+
+    private static IReadOnlyList<MentorChatMessageResponse> GetSessionMessages(
+        MentorSession session,
+        ParsedAiResponse parsed)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(session.Answer);
+            if (doc.RootElement.TryGetProperty("messages", out var messagesElement)
+                && messagesElement.ValueKind == JsonValueKind.Array)
+            {
+                var messages = JsonSerializer.Deserialize<List<MentorChatMessageResponse>>(
+                    messagesElement.GetRawText(),
+                    LooseJson);
+                if (messages is { Count: > 0 })
+                {
+                    return messages;
+                }
+            }
+        }
+        catch
+        {
+            // Older rows may contain plain text or an envelope without transcript messages.
+        }
+
+        return [
+            new MentorChatMessageResponse(
+                $"{session.Id}-question",
+                "user",
+                session.Question,
+                session.CreatedAt,
+                null,
+                null,
+                null),
+            new MentorChatMessageResponse(
+                $"{session.Id}-answer",
+                "assistant",
+                parsed.Answer,
+                session.CreatedAt,
+                session.TokensUsed,
+                session.Model,
+                parsed.Intent,
+                parsed.Suggestions)
+        ];
+    }
 
     private sealed record ParsedAiResponse(string Answer, string Intent, object? Suggestions);
 
@@ -773,7 +863,7 @@ public sealed class MentorController(
     }
 }
 
-public sealed record MentorChatRequest(string Question, string? ContextJson);
+public sealed record MentorChatRequest(string Question, string? ContextJson, Guid? SessionId);
 
 public sealed record MentorSessionResponse(
     Guid Id,
@@ -785,7 +875,18 @@ public sealed record MentorSessionResponse(
     string? Model,
     int? TokensUsed,
     DateTimeOffset CreatedAt,
-    AiChatQuotaResponse? Quota);
+    AiChatQuotaResponse? Quota,
+    IReadOnlyList<MentorChatMessageResponse> Messages);
+
+public sealed record MentorChatMessageResponse(
+    string Id,
+    string Role,
+    string Content,
+    DateTimeOffset CreatedAt,
+    int? TokensUsed,
+    string? Model,
+    string? Intent,
+    object? Suggestions = null);
 
 public sealed record AiChatQuotaResponse(
     string PlanName,
