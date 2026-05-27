@@ -313,11 +313,14 @@ public sealed class MentorController(
         Other rules:
         - If the student asks you to review or analyze their CV, use the `cvParsedText` (which contains the raw text extracted from their PDF CV) to provide specific, detailed feedback on their content, spelling, and professional impact. If `cvParsedText` is 'none', advise them to upload a CV first.
         - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
+        - Learning modules/resources MUST come only from the "Database learning resources" section in Student context. Do not invent modules, courses, lessons, URLs, or external materials that are not listed there.
+        - If you return suggestions.resources, every item must exactly match a listed database resource title and URL. If no matching database resource exists, return an empty resources array.
+        - If you return suggestions.roadmap, use only module/resource titles that appear in the database context; prefer grouping existing database lessons instead of creating new lesson names.
         - Keep "answer" focused and ≤ 800 words.
         - Use Vietnamese for all human-readable strings.
         - When you DO return roadmap: 3-7 top-level groups, each with 2-6 child modules. Estimated hours realistic.
         - "actions" tối đa 3 items, chỉ trả khi thực sự hữu ích cho câu hỏi.
-        - "resources" tối đa 5 items, chỉ URL công khai thật.
+        - "resources" toi da 5 items, chi lay tu Database learning resources.
 
         Examples:
         Q: "React là gì?"
@@ -403,6 +406,17 @@ public sealed class MentorController(
             .OrderByDescending(item => item.QualityScore)
             .Take(5)
             .Select(item => $"{item.RepoName}: language={item.MainLanguage}, score={item.QualityScore}, summary={item.AiSummary}")
+            .ToListAsync(cancellationToken);
+
+        var databaseResources = await dbContext.LearningResources
+            .AsNoTracking()
+            .Include(item => item.Skill)
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.Skill == null ? "" : item.Skill.Category)
+            .ThenBy(item => item.Skill == null ? "" : item.Skill.Name)
+            .ThenBy(item => item.LessonNumber)
+            .Take(80)
+            .Select(item => $"{item.Title} | skill={(item.Skill == null ? "none" : item.Skill.Name)} | type={item.ResourceType} | difficulty={(item.Difficulty ?? "unknown")} | hours={item.EstimatedHours} | url={item.Url}")
             .ToListAsync(cancellationToken);
 
         // NEW: mentor + counselor feedbacks (5 most recent each)
