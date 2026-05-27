@@ -106,9 +106,34 @@ public sealed class AiMentorActionsController(
         };
         dbContext.Roadmaps.Add(roadmap);
 
+        var categoryTitles = await dbContext.Skills
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => item.Category)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var categorySet = categoryTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var moduleTitles = await dbContext.Skills
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => item.Name)
+            .ToListAsync(cancellationToken);
+
+        var resourceTitles = await dbContext.LearningResources
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => item.Title)
+            .ToListAsync(cancellationToken);
+
+        var allowedModuleTitles = moduleTitles
+            .Concat(resourceTitles)
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var sanitizedNodes = SanitizeRoadmapCategories(request.Roadmap.Nodes, categorySet, allowedModuleTitles);
+
         var nodes = new List<RoadmapNode>();
         var globalOrder = 0;
-        FlattenNodes(request.Roadmap.Nodes, roadmap.Id, parentId: null, level: 0, ref globalOrder, now, nodes);
+        FlattenNodes(sanitizedNodes, roadmap.Id, parentId: null, level: 0, ref globalOrder, now, nodes);
 
         if (nodes.Count == 0)
         {
@@ -137,6 +162,58 @@ public sealed class AiMentorActionsController(
             roadmap.Title,
             nodes.Count,
             false));
+    }
+
+    private static IReadOnlyList<AiRoadmapNodeDto> SanitizeRoadmapCategories(
+        IReadOnlyList<AiRoadmapNodeDto>? source,
+        HashSet<string> categorySet,
+        HashSet<string> allowedModuleTitles)
+    {
+        if (source is null) return [];
+
+        var output = new List<AiRoadmapNodeDto>();
+        foreach (var item in source)
+        {
+            if (string.IsNullOrWhiteSpace(item.Title) || !categorySet.Contains(item.Title)) continue;
+
+            output.Add(item with
+            {
+                Title = item.Title.Trim(),
+                NodeType = "Group",
+                Children = SanitizeRoadmapModules(item.Children, allowedModuleTitles)
+            });
+        }
+
+        return output;
+    }
+
+    private static IReadOnlyList<AiRoadmapNodeDto> SanitizeRoadmapModules(
+        IReadOnlyList<AiRoadmapNodeDto>? source,
+        HashSet<string> allowedModuleTitles)
+    {
+        if (source is null) return [];
+
+        var output = new List<AiRoadmapNodeDto>();
+        foreach (var item in source)
+        {
+            if (string.IsNullOrWhiteSpace(item.Title)) continue;
+
+            var children = SanitizeRoadmapModules(item.Children, allowedModuleTitles);
+            if (!allowedModuleTitles.Contains(item.Title))
+            {
+                output.AddRange(children);
+                continue;
+            }
+
+            output.Add(item with
+            {
+                Title = item.Title.Trim(),
+                NodeType = children.Count > 0 ? "Group" : "Module",
+                Children = children
+            });
+        }
+
+        return output;
     }
 
     private static void FlattenNodes(
