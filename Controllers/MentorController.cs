@@ -1,6 +1,7 @@
 using System.Security.Claims;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -82,7 +83,7 @@ public sealed class MentorController(
         }
 
         // Parse AI JSON output. Fallback: if not valid JSON, treat whole text as Q&A answer.
-        var parsed = ParseAiResponse(aiResult.Text);
+        var parsed = await SanitizeParsedAiResponseAsync(ParseAiResponse(aiResult.Text), cancellationToken);
 
         var now = DateTimeOffset.UtcNow;
         var sessionPayload = new
@@ -315,10 +316,10 @@ public sealed class MentorController(
         - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
         - Learning modules/resources MUST come only from the "Database learning resources" section in Student context. Do not invent modules, courses, lessons, URLs, or external materials that are not listed there.
         - If you return suggestions.resources, every item must exactly match a listed database resource title and URL. If no matching database resource exists, return an empty resources array.
-        - If you return suggestions.roadmap, use only module/resource titles that appear in the database context; prefer grouping existing database lessons instead of creating new lesson names.
+        - If you return suggestions.roadmap, top-level group titles MUST exactly match one of the Skill.Category values in "Database skill categories". Module titles MUST exactly match a Skill.Name or LearningResource.Title listed in context.
         - Keep "answer" focused and ≤ 800 words.
         - Use Vietnamese for all human-readable strings.
-        - When you DO return roadmap: 3-7 top-level groups, each with 2-6 child modules. Estimated hours realistic.
+        - When you DO return roadmap: use only existing database skill categories as top-level groups, each with existing database skills/resources as child modules. Estimated hours realistic.
         - "actions" tối đa 3 items, chỉ trả khi thực sự hữu ích cho câu hỏi.
         - "resources" toi da 5 items, chi lay tu Database learning resources.
 
@@ -408,6 +409,14 @@ public sealed class MentorController(
             .Select(item => $"{item.RepoName}: language={item.MainLanguage}, score={item.QualityScore}, summary={item.AiSummary}")
             .ToListAsync(cancellationToken);
 
+        var databaseSkillCategories = await dbContext.Skills
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .OrderBy(item => item.Category)
+            .ThenBy(item => item.Name)
+            .Select(item => $"{item.Category} | skill={item.Name}")
+            .ToListAsync(cancellationToken);
+
         var databaseResources = await dbContext.LearningResources
             .AsNoTracking()
             .Include(item => item.Skill)
@@ -416,7 +425,7 @@ public sealed class MentorController(
             .ThenBy(item => item.Skill == null ? "" : item.Skill.Name)
             .ThenBy(item => item.LessonNumber)
             .Take(80)
-            .Select(item => $"{item.Title} | skill={(item.Skill == null ? "none" : item.Skill.Name)} | type={item.ResourceType} | difficulty={(item.Difficulty ?? "unknown")} | hours={item.EstimatedHours} | url={item.Url}")
+            .Select(item => $"{item.Title} | skill={(item.Skill == null ? "none" : item.Skill.Name)} | category={(item.Skill == null ? "none" : item.Skill.Category)} | type={item.ResourceType} | difficulty={(item.Difficulty ?? "unknown")} | hours={item.EstimatedHours} | url={item.Url}")
             .ToListAsync(cancellationToken);
 
         // NEW: mentor + counselor feedbacks (5 most recent each)
@@ -499,6 +508,12 @@ public sealed class MentorController(
         GitHub repositories:
         {{string.Join("\n", repos.DefaultIfEmpty("No repositories analyzed."))}}
 
+        Database skill categories:
+        {{string.Join("\n", databaseSkillCategories.DefaultIfEmpty("No active skills in database."))}}
+
+        Database learning resources:
+        {{string.Join("\n", databaseResources.DefaultIfEmpty("No active learning resources in database."))}}
+
         Recent mentor feedbacks:
         {{string.Join("\n", mentorFeedbacks.DefaultIfEmpty("No mentor feedbacks."))}}
 
@@ -576,6 +591,111 @@ public sealed class MentorController(
         return new ParsedAiResponse(raw, "QnA", null);
     }
 
+    private async Task<ParsedAiResponse> SanitizeParsedAiResponseAsync(
+        ParsedAiResponse parsed,
+        CancellationToken cancellationToken)
+    {
+        if (parsed.Suggestions is not JsonElement element || element.ValueKind != JsonValueKind.Object)
+        {
+            return parsed;
+        }
+
+        var categories = await dbContext.Skills
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => item.Category)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+        var categorySet = categories.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var skillTitles = await dbContext.Skills
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => item.Name)
+            .ToListAsync(cancellationToken);
+        var allowedModuleTitles = skillTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var resources = await dbContext.LearningResources
+            .AsNoTracking()
+            .Where(item => item.IsActive)
+            .Select(item => new { item.Title, item.Url })
+            .ToListAsync(cancellationToken);
+        foreach (var resource in resources)
+        {
+            allowedModuleTitles.Add(resource.Title);
+        }
+
+        var resourceKeys = resources
+            .Select(item => $"{item.Title}\n{item.Url}")
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        var suggestions = JsonNode.Parse(element.GetRawText()) as JsonObject;
+        if (suggestions is null)
+        {
+            return parsed;
+        }
+
+        if (suggestions["resources"] is JsonArray resourcesArray)
+        {
+            var filtered = new JsonArray();
+            foreach (var node in resourcesArray)
+            {
+                if (node is not JsonObject obj) continue;
+                var title = obj["title"]?.GetValue<string>();
+                var url = obj["url"]?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(title)
+                    && !string.IsNullOrWhiteSpace(url)
+                    && resourceKeys.Contains($"{title}\n{url}"))
+                {
+                    filtered.Add(obj.DeepClone());
+                }
+            }
+            suggestions["resources"] = filtered;
+        }
+
+        if (suggestions["roadmap"] is JsonObject roadmap && roadmap["nodes"] is JsonArray nodes)
+        {
+            var sanitizedTopLevel = SanitizeRoadmapNodes(nodes, categorySet, allowedModuleTitles, requireCategoryTitle: true);
+            roadmap["nodes"] = sanitizedTopLevel;
+            if (sanitizedTopLevel.Count == 0)
+            {
+                suggestions["roadmap"] = null;
+            }
+        }
+
+        return parsed with
+        {
+            Suggestions = JsonSerializer.Deserialize<JsonElement>(suggestions.ToJsonString())
+        };
+    }
+
+    private static JsonArray SanitizeRoadmapNodes(
+        JsonArray nodes,
+        HashSet<string> categorySet,
+        HashSet<string> allowedModuleTitles,
+        bool requireCategoryTitle)
+    {
+        var sanitized = new JsonArray();
+        foreach (var node in nodes)
+        {
+            if (node is not JsonObject obj) continue;
+            var title = obj["title"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(title)) continue;
+
+            var titleAllowed = requireCategoryTitle
+                ? categorySet.Contains(title)
+                : allowedModuleTitles.Contains(title) || categorySet.Contains(title);
+            if (!titleAllowed) continue;
+
+            var clone = (JsonObject)obj.DeepClone();
+            if (clone["children"] is JsonArray children)
+            {
+                clone["children"] = SanitizeRoadmapNodes(children, categorySet, allowedModuleTitles, requireCategoryTitle: false);
+            }
+            sanitized.Add(clone);
+        }
+        return sanitized;
+    }
     private static MentorSessionResponse ToResponse(
         MentorSession session,
         ParsedAiResponse parsed,
