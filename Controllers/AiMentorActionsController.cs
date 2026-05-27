@@ -106,34 +106,66 @@ public sealed class AiMentorActionsController(
         };
         dbContext.Roadmaps.Add(roadmap);
 
-        var categoryTitles = await dbContext.Skills
+        var skills = await dbContext.Skills
             .AsNoTracking()
             .Where(item => item.IsActive)
-            .Select(item => item.Category)
-            .Distinct()
+            .Select(item => new { item.Id, item.Name, item.Category })
             .ToListAsync(cancellationToken);
+        var categoryTitles = skills.Select(item => item.Category).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
         var categorySet = categoryTitles.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var skillIdsByTitle = skills
+            .GroupBy(item => item.Name, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
 
-        var moduleTitles = await dbContext.Skills
+        var resources = await dbContext.LearningResources
             .AsNoTracking()
             .Where(item => item.IsActive)
-            .Select(item => item.Name)
+            .Select(item => new
+            {
+                item.Id,
+                item.SkillId,
+                item.Title,
+                item.Difficulty,
+                item.StorageObjectName,
+                item.LessonNumber
+            })
             .ToListAsync(cancellationToken);
+        var resourceIdsByTitle = resources
+            .GroupBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
+            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+        var resourceIdsBySkill = resources
+            .Where(item => item.SkillId is not null)
+            .GroupBy(item => item.SkillId!.Value)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<Guid>)group
+                    .OrderBy(item => item.LessonNumber)
+                    .ThenBy(item => DifficultyRank(item.Difficulty))
+                    .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
+                    .ThenBy(item => item.Title)
+                    .Select(item => item.Id)
+                    .ToList());
 
-        var resourceTitles = await dbContext.LearningResources
-            .AsNoTracking()
-            .Where(item => item.IsActive)
-            .Select(item => item.Title)
-            .ToListAsync(cancellationToken);
-
-        var allowedModuleTitles = moduleTitles
-            .Concat(resourceTitles)
+        var allowedModuleTitles = skillIdsByTitle.Keys
+            .Concat(resourceIdsByTitle.Keys)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
         var sanitizedNodes = SanitizeRoadmapCategories(request.Roadmap.Nodes, categorySet, allowedModuleTitles);
 
         var nodes = new List<RoadmapNode>();
+        var nodeResources = new List<RoadmapNodeResource>();
         var globalOrder = 0;
-        FlattenNodes(sanitizedNodes, roadmap.Id, parentId: null, level: 0, ref globalOrder, now, nodes);
+        FlattenNodes(
+            sanitizedNodes,
+            roadmap.Id,
+            parentId: null,
+            level: 0,
+            ref globalOrder,
+            now,
+            nodes,
+            nodeResources,
+            skillIdsByTitle,
+            resourceIdsByTitle,
+            resourceIdsBySkill);
 
         if (nodes.Count == 0)
         {
@@ -143,6 +175,7 @@ public sealed class AiMentorActionsController(
         try
         {
             dbContext.RoadmapNodes.AddRange(nodes);
+            dbContext.RoadmapNodeResources.AddRange(nodeResources);
             await dbContext.SaveChangesAsync(cancellationToken);
         }
         catch (DbUpdateException dbEx)
@@ -223,7 +256,11 @@ public sealed class AiMentorActionsController(
         int level,
         ref int globalOrder,
         DateTimeOffset now,
-        List<RoadmapNode> output)
+        List<RoadmapNode> output,
+        List<RoadmapNodeResource> nodeResources,
+        IReadOnlyDictionary<string, Guid> skillIdsByTitle,
+        IReadOnlyDictionary<string, Guid> resourceIdsByTitle,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> resourceIdsBySkill)
     {
         if (source is null) return;
 
@@ -235,10 +272,26 @@ public sealed class AiMentorActionsController(
         foreach (var item in source)
         {
             if (string.IsNullOrWhiteSpace(item.Title)) continue;
+            var title = item.Title.Trim();
 
             var nodeType = string.IsNullOrWhiteSpace(item.NodeType)
                 ? (item.Children?.Count > 0 ? "Group" : "Module")
                 : item.NodeType.Trim();
+
+            Guid? skillId = null;
+            var relatedResourceIds = new List<Guid>();
+            if (skillIdsByTitle.TryGetValue(title, out var matchedSkillId))
+            {
+                skillId = matchedSkillId;
+                if (resourceIdsBySkill.TryGetValue(matchedSkillId, out var skillResourceIds))
+                {
+                    relatedResourceIds.AddRange(skillResourceIds);
+                }
+            }
+            else if (resourceIdsByTitle.TryGetValue(title, out var matchedResourceId))
+            {
+                relatedResourceIds.Add(matchedResourceId);
+            }
 
             // Squash any AI-supplied 1-10 priority down to 1-5.
             int priority = item.Priority switch
@@ -253,8 +306,10 @@ public sealed class AiMentorActionsController(
             {
                 Id = Guid.NewGuid(),
                 RoadmapId = roadmapId,
+                SkillId = skillId,
+                LearningResourceId = relatedResourceIds.Select(resourceId => (Guid?)resourceId).FirstOrDefault(),
                 ParentNodeId = parentId,
-                Title = item.Title.Trim(),
+                Title = title,
                 Description = item.Description?.Trim(),
                 NodeType = nodeType,
                 Status = "NotStarted",
@@ -268,11 +323,40 @@ public sealed class AiMentorActionsController(
                 UpdatedAt = now
             };
             output.Add(node);
+            nodeResources.AddRange(relatedResourceIds
+                .Distinct()
+                .Select((resourceId, resourceIndex) => new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = node.Id,
+                    LearningResourceId = resourceId,
+                    OrderIndex = resourceIndex + 1,
+                    CreatedAt = now
+                }));
             globalOrder++;
 
-            FlattenNodes(item.Children, roadmapId, node.Id, level + 1, ref globalOrder, now, output);
+            FlattenNodes(
+                item.Children,
+                roadmapId,
+                node.Id,
+                level + 1,
+                ref globalOrder,
+                now,
+                output,
+                nodeResources,
+                skillIdsByTitle,
+                resourceIdsByTitle,
+                resourceIdsBySkill);
         }
     }
+
+    private static int DifficultyRank(string? difficulty) => difficulty?.Trim().ToLowerInvariant() switch
+    {
+        "beginner" or "basic" or "cÆ¡ báº£n" => 0,
+        "intermediate" or "trung cáº¥p" => 1,
+        "advanced" or "nĂ¢ng cao" => 2,
+        _ => 3
+    };
 
     private Guid GetCurrentUserId()
     {
