@@ -655,7 +655,7 @@ public sealed class MentorController(
 
         if (suggestions["roadmap"] is JsonObject roadmap && roadmap["nodes"] is JsonArray nodes)
         {
-            var sanitizedTopLevel = SanitizeRoadmapNodes(nodes, categorySet, allowedModuleTitles, requireCategoryTitle: true);
+            var sanitizedTopLevel = SanitizeRoadmapCategories(nodes, categorySet, allowedModuleTitles);
             roadmap["nodes"] = sanitizedTopLevel;
             if (sanitizedTopLevel.Count == 0)
             {
@@ -669,11 +669,31 @@ public sealed class MentorController(
         };
     }
 
-    private static JsonArray SanitizeRoadmapNodes(
+    private static JsonArray SanitizeRoadmapCategories(
         JsonArray nodes,
         HashSet<string> categorySet,
-        HashSet<string> allowedModuleTitles,
-        bool requireCategoryTitle)
+        HashSet<string> allowedModuleTitles)
+    {
+        var sanitized = new JsonArray();
+        foreach (var node in nodes)
+        {
+            if (node is not JsonObject obj) continue;
+            var title = obj["title"]?.GetValue<string>();
+            if (string.IsNullOrWhiteSpace(title) || !categorySet.Contains(title)) continue;
+
+            var clone = (JsonObject)obj.DeepClone();
+            if (clone["children"] is JsonArray children)
+            {
+                clone["children"] = SanitizeRoadmapModules(children, allowedModuleTitles);
+            }
+            sanitized.Add(clone);
+        }
+        return sanitized;
+    }
+
+    private static JsonArray SanitizeRoadmapModules(
+        JsonArray nodes,
+        HashSet<string> allowedModuleTitles)
     {
         var sanitized = new JsonArray();
         foreach (var node in nodes)
@@ -682,15 +702,27 @@ public sealed class MentorController(
             var title = obj["title"]?.GetValue<string>();
             if (string.IsNullOrWhiteSpace(title)) continue;
 
-            var titleAllowed = requireCategoryTitle
-                ? categorySet.Contains(title)
-                : allowedModuleTitles.Contains(title) || categorySet.Contains(title);
-            if (!titleAllowed) continue;
+            var sanitizedChildren = obj["children"] is JsonArray children
+                ? SanitizeRoadmapModules(children, allowedModuleTitles)
+                : [];
+
+            if (!allowedModuleTitles.Contains(title))
+            {
+                foreach (var child in sanitizedChildren)
+                {
+                    sanitized.Add(child?.DeepClone());
+                }
+                continue;
+            }
 
             var clone = (JsonObject)obj.DeepClone();
-            if (clone["children"] is JsonArray children)
+            if (sanitizedChildren.Count > 0)
             {
-                clone["children"] = SanitizeRoadmapNodes(children, categorySet, allowedModuleTitles, requireCategoryTitle: false);
+                clone["children"] = sanitizedChildren;
+            }
+            else
+            {
+                clone.Remove("children");
             }
             sanitized.Add(clone);
         }
