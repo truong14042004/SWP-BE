@@ -158,6 +158,49 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
         return NoContent();
     }
 
+    // PUT /api/admin/counselor-assignments/{id}/enable
+    // Kích hoạt lại phân công cố vấn - sinh viên đang Inactive
+    [HttpPut("{id:guid}/enable")]
+    public async Task<ActionResult<CounselorAssignmentResponse>> Enable(Guid id, CancellationToken cancellationToken)
+    {
+        var assignment = await dbContext.CounselorAssignments
+            .SingleOrDefaultAsync(a => a.Id == id, cancellationToken);
+
+        if (assignment is null)
+        {
+            return NotFound(new { message = "Không tìm thấy phân công cố vấn." });
+        }
+
+        if (assignment.Status == "Active")
+        {
+            return Conflict(new { message = "Phân công này đã đang hoạt động." });
+        }
+
+        var counselor = await dbContext.Users
+            .SingleOrDefaultAsync(u => u.Id == assignment.CounselorId, cancellationToken);
+        if (counselor is null || !counselor.IsActive)
+        {
+            return BadRequest(new { message = "Cố vấn đã bị vô hiệu hóa, không thể kích hoạt lại phân công." });
+        }
+
+        var student = await dbContext.Users
+            .SingleOrDefaultAsync(u => u.Id == assignment.StudentId, cancellationToken);
+        if (student is null || !student.IsActive)
+        {
+            return BadRequest(new { message = "Sinh viên đã bị vô hiệu hóa, không thể kích hoạt lại phân công." });
+        }
+
+        assignment.Status = "Active";
+        assignment.UpdatedAt = DateTimeOffset.UtcNow;
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        await dbContext.Entry(assignment).Reference(a => a.Counselor).LoadAsync(cancellationToken);
+        await dbContext.Entry(assignment).Reference(a => a.Student).LoadAsync(cancellationToken);
+        await dbContext.Entry(assignment).Reference(a => a.AssignedByAdmin).LoadAsync(cancellationToken);
+
+        return Ok(ToResponse(assignment));
+    }
+
     private Guid GetCurrentUserId()
     {
         var nameIdentifier = User.FindFirstValue(ClaimTypes.NameIdentifier);
