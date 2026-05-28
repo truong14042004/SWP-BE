@@ -163,32 +163,54 @@ public sealed class PasswordAuthService(
             throw new UnauthorizedAccessException("Tên đăng nhập hoặc email đã tồn tại.");
         }
 
-        // Remove conflicting inactive users to avoid unique key constraint violations
-        var conflictingInactiveUsers = await dbContext.Users
-            .Where(user => (user.Username == pendingRegistration.Username || user.Email == pendingRegistration.Email) && !user.IsActive)
-            .ToListAsync(cancellationToken);
-        if (conflictingInactiveUsers.Count > 0)
+        var now = DateTimeOffset.UtcNow;
+
+        // If there's an inactive user with the same email, we reactivate it to avoid foreign key delete constraints (e.g. payments/subscriptions)
+        var existingUser = await dbContext.Users
+            .SingleOrDefaultAsync(user => user.Email == pendingRegistration.Email, cancellationToken);
+
+        // If there is another inactive user using the new username, we must delete it first to free up the username
+        var conflictingUsernameUser = await dbContext.Users
+            .SingleOrDefaultAsync(user => user.Username == pendingRegistration.Username && user.Email != pendingRegistration.Email, cancellationToken);
+        if (conflictingUsernameUser is not null)
         {
-            dbContext.Users.RemoveRange(conflictingInactiveUsers);
+            dbContext.Users.Remove(conflictingUsernameUser);
+            await dbContext.SaveChangesAsync(cancellationToken); // Save to free up username unique index
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var user = new User
+        User user;
+        if (existingUser is not null)
         {
-            Id = Guid.NewGuid(),
-            Username = pendingRegistration.Username,
-            Email = pendingRegistration.Email,
-            FullName = pendingRegistration.FullName,
-            PasswordHash = pendingRegistration.PasswordHash,
-            Role = UserRoles.Student,
-            IsActive = true,
-            IsEmailVerified = true,
-            EmailVerifiedAt = now,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
+            user = existingUser;
+            user.Username = pendingRegistration.Username;
+            user.FullName = pendingRegistration.FullName;
+            user.PasswordHash = pendingRegistration.PasswordHash;
+            user.IsActive = true;
+            user.IsEmailVerified = true;
+            user.EmailVerifiedAt = now;
+            user.UpdatedAt = now;
+            
+            dbContext.Users.Update(user);
+        }
+        else
+        {
+            user = new User
+            {
+                Id = Guid.NewGuid(),
+                Username = pendingRegistration.Username,
+                Email = pendingRegistration.Email,
+                FullName = pendingRegistration.FullName,
+                PasswordHash = pendingRegistration.PasswordHash,
+                Role = UserRoles.Student,
+                IsActive = true,
+                IsEmailVerified = true,
+                EmailVerifiedAt = now,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            dbContext.Users.Add(user);
+        }
 
-        dbContext.Users.Add(user);
         dbContext.PendingRegistrations.Remove(pendingRegistration);
         await dbContext.SaveChangesAsync(cancellationToken);
 
