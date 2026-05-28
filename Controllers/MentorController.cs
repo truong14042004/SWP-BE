@@ -19,7 +19,32 @@ public sealed class MentorController(
     IAiTextGenerationService aiTextGenerationService,
     ILogger<MentorController> logger) : ControllerBase
 {
+    private sealed record ReferenceResource(string Keyword, string Title, string Url, string Type);
+
     private const int FreePlanAiChatLimit = 20;
+
+    private static readonly ReferenceResource[] MentorReferenceCatalog = [
+        new("AI API Integration", "OpenAI API documentation", "https://platform.openai.com/docs", "Article"),
+        new("Prompt Engineering", "OpenAI prompt engineering guide", "https://platform.openai.com/docs/guides/prompt-engineering", "Article"),
+        new("Authentication and Authorization", "Microsoft Learn: ASP.NET Core authentication", "https://learn.microsoft.com/en-us/aspnet/core/security/authentication/", "Article"),
+        new("Backend", "Microsoft Learn: Build web APIs with ASP.NET Core", "https://learn.microsoft.com/en-us/training/modules/build-web-api-aspnet-core/", "Course"),
+        new("REST API Design", "Microsoft REST API Guidelines", "https://github.com/microsoft/api-guidelines", "Article"),
+        new("Database Design", "Microsoft Learn: EF Core modeling", "https://learn.microsoft.com/en-us/ef/core/modeling/", "Article"),
+        new("SQL", "SQLBolt interactive SQL lessons", "https://sqlbolt.com/", "Course"),
+        new("Unit Testing", "Microsoft Learn: Unit testing C#", "https://learn.microsoft.com/en-us/dotnet/core/testing/unit-testing-with-dotnet-test", "Article"),
+        new("Test Automation", "Playwright documentation", "https://playwright.dev/docs/intro", "Article"),
+        new("React", "React documentation", "https://react.dev/learn", "Article"),
+        new("TypeScript", "TypeScript handbook", "https://www.typescriptlang.org/docs/handbook/intro.html", "Book"),
+        new("Responsive UI", "MDN responsive design", "https://developer.mozilla.org/en-US/docs/Learn_web_development/Core/CSS_layout/Responsive_Design", "Article"),
+        new("API Integration", "MDN Fetch API", "https://developer.mozilla.org/en-US/docs/Web/API/Fetch_API", "Article"),
+        new("Docker", "Docker Get Started", "https://docs.docker.com/get-started/", "Article"),
+        new("CI/CD", "GitHub Actions documentation", "https://docs.github.com/en/actions", "Article"),
+        new("Cloud Deployment", "Google Cloud Run documentation", "https://cloud.google.com/run/docs", "Article"),
+        new("Data Pipeline", "Microsoft Learn: Data engineering", "https://learn.microsoft.com/en-us/training/paths/data-engineer-azure-databricks/", "Course"),
+        new("GitHub Portfolio", "GitHub Docs: About READMEs", "https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-readmes", "Article"),
+        new("Mobile UI", "Material Design mobile guidelines", "https://m3.material.io/", "Article"),
+        new("Kỹ năng Thuyết trình", "Harvard ManageMentor: Presentation skills", "https://www.harvardbusiness.org/insight/presentation-skills/", "Article")
+    ];
 
     private static readonly JsonSerializerOptions LooseJson = new()
     {
@@ -365,7 +390,7 @@ public sealed class MentorController(
         - Use Vietnamese for all human-readable strings.
         - When you DO return roadmap: use only existing database skill categories as top-level groups, each with existing database skills/resources as child modules. Estimated hours realistic.
         - "actions" tối đa 3 items, chỉ trả khi thực sự hữu ích cho câu hỏi.
-        - "resources" toi da 5 items, co the la link tham khao ben ngoai; moi item can co title va url hop le.
+        - Luon tra "resources" 1-5 items khi cau tra loi co kien thuc ky thuat hoac roadmap. Resources co the la link tham khao ben ngoai; moi item can co title va url hop le.
 
         Examples:
         Q: "React là gì?"
@@ -690,6 +715,11 @@ public sealed class MentorController(
             }
         }
 
+        if (suggestions["resources"] is not JsonArray sanitizedResources || sanitizedResources.Count == 0)
+        {
+            suggestions["resources"] = BuildFallbackReferenceResources(suggestions, parsed.Answer);
+        }
+
         return parsed with
         {
             Suggestions = JsonSerializer.Deserialize<JsonElement>(suggestions.ToJsonString())
@@ -725,6 +755,64 @@ public sealed class MentorController(
         }
 
         return sanitized;
+    }
+
+    private static JsonArray BuildFallbackReferenceResources(JsonObject suggestions, string answer)
+    {
+        var titles = new List<string>();
+        CollectSuggestionTitles(suggestions["roadmap"], titles);
+
+        var searchText = string.Join('\n', titles.Append(answer ?? string.Empty));
+        var resources = new JsonArray();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var reference in MentorReferenceCatalog)
+        {
+            if (resources.Count >= 5) break;
+            if (!searchText.Contains(reference.Keyword, StringComparison.OrdinalIgnoreCase)) continue;
+            if (!seenUrls.Add(reference.Url)) continue;
+
+            resources.Add(new JsonObject
+            {
+                ["title"] = reference.Title,
+                ["url"] = reference.Url,
+                ["type"] = reference.Type
+            });
+        }
+
+        if (resources.Count == 0)
+        {
+            resources.Add(new JsonObject
+            {
+                ["title"] = "Microsoft Learn",
+                ["url"] = "https://learn.microsoft.com/en-us/training/",
+                ["type"] = "Course"
+            });
+        }
+
+        return resources;
+    }
+
+    private static void CollectSuggestionTitles(JsonNode? node, List<string> titles)
+    {
+        switch (node)
+        {
+            case JsonObject obj:
+                var title = obj["title"]?.GetValue<string>();
+                if (!string.IsNullOrWhiteSpace(title))
+                {
+                    titles.Add(title);
+                }
+                CollectSuggestionTitles(obj["nodes"], titles);
+                CollectSuggestionTitles(obj["children"], titles);
+                break;
+            case JsonArray array:
+                foreach (var child in array)
+                {
+                    CollectSuggestionTitles(child, titles);
+                }
+                break;
+        }
     }
 
     private static bool IsAllowedReferenceUrl(string url)
