@@ -300,10 +300,16 @@ public sealed class AdminUsersController(
             return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
-        user.IsActive = false;
-        user.UpdatedAt = DateTimeOffset.UtcNow;
-        await RevokeUserRefreshTokensAsync(user.Id, cancellationToken);
-        await dbContext.SaveChangesAsync(cancellationToken);
+        dbContext.Users.Remove(user);
+        
+        try 
+        {
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (DbUpdateException)
+        {
+            return BadRequest(new { message = "Không thể xóa người dùng này vì có dữ liệu liên quan (lịch sử thanh toán, v.v.). Bạn có thể vô hiệu hóa tài khoản thay vì xóa." });
+        }
 
         return NoContent();
     }
