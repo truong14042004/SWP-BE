@@ -38,9 +38,9 @@ public sealed class PasswordAuthService(
             .Where(registration => registration.EmailVerificationOtpExpiresAt < now)
             .ExecuteDeleteAsync(cancellationToken);
 
-        var userExists = await dbContext.Users
-            .AnyAsync(user => user.Username == username || user.Email == email, cancellationToken);
-        if (userExists)
+        var activeUserExists = await dbContext.Users
+            .AnyAsync(user => (user.Username == username || user.Email == email) && user.IsActive, cancellationToken);
+        if (activeUserExists)
         {
             throw new InvalidOperationException("Tên đăng nhập hoặc email đã tồn tại.");
         }
@@ -90,9 +90,9 @@ public sealed class PasswordAuthService(
     {
         var email = Normalize(request.Email);
 
-        var verifiedUserExists = await dbContext.Users
-            .AnyAsync(user => user.Email == email && user.IsEmailVerified, cancellationToken);
-        if (verifiedUserExists)
+        var verifiedActiveUserExists = await dbContext.Users
+            .AnyAsync(user => user.Email == email && user.IsEmailVerified && user.IsActive, cancellationToken);
+        if (verifiedActiveUserExists)
         {
             throw new InvalidOperationException("Email đã được đăng ký và xác thực.");
         }
@@ -155,12 +155,21 @@ public sealed class PasswordAuthService(
             throw new UnauthorizedAccessException("Mã OTP không hợp lệ hoặc đã hết hạn.");
         }
 
-        var userExists = await dbContext.Users.AnyAsync(
-            user => user.Username == pendingRegistration.Username || user.Email == pendingRegistration.Email,
+        var activeUserExists = await dbContext.Users.AnyAsync(
+            user => (user.Username == pendingRegistration.Username || user.Email == pendingRegistration.Email) && user.IsActive,
             cancellationToken);
-        if (userExists)
+        if (activeUserExists)
         {
             throw new UnauthorizedAccessException("Tên đăng nhập hoặc email đã tồn tại.");
+        }
+
+        // Remove conflicting inactive users to avoid unique key constraint violations
+        var conflictingInactiveUsers = await dbContext.Users
+            .Where(user => (user.Username == pendingRegistration.Username || user.Email == pendingRegistration.Email) && !user.IsActive)
+            .ToListAsync(cancellationToken);
+        if (conflictingInactiveUsers.Count > 0)
+        {
+            dbContext.Users.RemoveRange(conflictingInactiveUsers);
         }
 
         var now = DateTimeOffset.UtcNow;
