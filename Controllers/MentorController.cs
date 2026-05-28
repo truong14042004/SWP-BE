@@ -358,14 +358,14 @@ public sealed class MentorController(
         Other rules:
         - If the student asks you to review or analyze their CV, use the `cvParsedText` (which contains the raw text extracted from their PDF CV) to provide specific, detailed feedback on their content, spelling, and professional impact. If `cvParsedText` is 'none', advise them to upload a CV first.
         - Base every recommendation on the student profile/skill/feedback context. Do not invent unrelated content.
-        - Learning modules/resources MUST come only from the "Database learning resources" section in Student context. Do not invent modules, courses, lessons, URLs, or external materials that are not listed there.
-        - If you return suggestions.resources, every item must exactly match a listed database resource title and URL. If no matching database resource exists, return an empty resources array.
+        - Roadmap modules/resources MUST come only from the "Database learning resources" and "Database skill categories" sections in Student context. Do not invent roadmap modules, courses, lessons, or applied learning items that are not listed there.
+        - suggestions.resources is only a reference-links section for the chat answer. It MAY include external public links when useful, preferably official documentation or reputable learning references. Do not treat these links as roadmap modules.
         - If you return suggestions.roadmap, top-level group titles MUST exactly match one of the Skill.Category values in "Database skill categories". Module titles MUST exactly match a Skill.Name or LearningResource.Title listed in context.
         - Keep "answer" focused and ≤ 800 words.
         - Use Vietnamese for all human-readable strings.
         - When you DO return roadmap: use only existing database skill categories as top-level groups, each with existing database skills/resources as child modules. Estimated hours realistic.
         - "actions" tối đa 3 items, chỉ trả khi thực sự hữu ích cho câu hỏi.
-        - "resources" toi da 5 items, chi lay tu Database learning resources.
+        - "resources" toi da 5 items, co the la link tham khao ben ngoai; moi item can co title va url hop le.
 
         Examples:
         Q: "React là gì?"
@@ -669,10 +669,6 @@ public sealed class MentorController(
             allowedModuleTitles.Add(resource.Title);
         }
 
-        var resourceKeys = resources
-            .Select(item => $"{item.Title}\n{item.Url}")
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
         var suggestions = JsonNode.Parse(element.GetRawText()) as JsonObject;
         if (suggestions is null)
         {
@@ -681,20 +677,7 @@ public sealed class MentorController(
 
         if (suggestions["resources"] is JsonArray resourcesArray)
         {
-            var filtered = new JsonArray();
-            foreach (var node in resourcesArray)
-            {
-                if (node is not JsonObject obj) continue;
-                var title = obj["title"]?.GetValue<string>();
-                var url = obj["url"]?.GetValue<string>();
-                if (!string.IsNullOrWhiteSpace(title)
-                    && !string.IsNullOrWhiteSpace(url)
-                    && resourceKeys.Contains($"{title}\n{url}"))
-                {
-                    filtered.Add(obj.DeepClone());
-                }
-            }
-            suggestions["resources"] = filtered;
+            suggestions["resources"] = SanitizeReferenceResources(resourcesArray);
         }
 
         if (suggestions["roadmap"] is JsonObject roadmap && roadmap["nodes"] is JsonArray nodes)
@@ -710,6 +693,61 @@ public sealed class MentorController(
         return parsed with
         {
             Suggestions = JsonSerializer.Deserialize<JsonElement>(suggestions.ToJsonString())
+        };
+    }
+
+    private static JsonArray SanitizeReferenceResources(JsonArray resources)
+    {
+        var sanitized = new JsonArray();
+        var seenUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var node in resources)
+        {
+            if (sanitized.Count >= 5) break;
+            if (node is not JsonObject obj) continue;
+
+            var title = obj["title"]?.GetValue<string>()?.Trim();
+            var url = obj["url"]?.GetValue<string>()?.Trim();
+            if (string.IsNullOrWhiteSpace(title)
+                || string.IsNullOrWhiteSpace(url)
+                || !IsAllowedReferenceUrl(url)
+                || !seenUrls.Add(url))
+            {
+                continue;
+            }
+
+            sanitized.Add(new JsonObject
+            {
+                ["title"] = title.Length > 200 ? title[..200] : title,
+                ["url"] = url,
+                ["type"] = NormalizeReferenceType(obj["type"]?.GetValue<string>())
+            });
+        }
+
+        return sanitized;
+    }
+
+    private static bool IsAllowedReferenceUrl(string url)
+    {
+        if (Uri.TryCreate(url, UriKind.Absolute, out var absoluteUri))
+        {
+            return absoluteUri.Scheme == Uri.UriSchemeHttps || absoluteUri.Scheme == Uri.UriSchemeHttp;
+        }
+
+        return Uri.TryCreate(url, UriKind.Relative, out _)
+            && url.StartsWith('/');
+    }
+
+    private static string NormalizeReferenceType(string? type)
+    {
+        if (string.IsNullOrWhiteSpace(type)) return "Article";
+
+        return type.Trim() switch
+        {
+            var value when value.Equals("Course", StringComparison.OrdinalIgnoreCase) => "Course",
+            var value when value.Equals("Video", StringComparison.OrdinalIgnoreCase) => "Video",
+            var value when value.Equals("Book", StringComparison.OrdinalIgnoreCase) => "Book",
+            _ => "Article"
         };
     }
 
