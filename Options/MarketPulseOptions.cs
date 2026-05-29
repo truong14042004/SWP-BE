@@ -1,4 +1,4 @@
-namespace SWP_BE.Options;
+﻿namespace SWP_BE.Options;
 
 public sealed class MarketPulseOptions
 {
@@ -17,7 +17,7 @@ public sealed class TopCvScraperOptions
 {
     public bool Enabled { get; set; } = true;
     public string BaseUrl { get; set; } = "https://www.topcv.vn";
-    public string ListPath { get; set; } = "/viec-lam-it";
+    public string ListPath { get; set; } = "/tim-viec-lam-cong-nghe-thong-tin-cr257";
     public int MaxPages { get; set; } = 5;
     public int MaxJobsPerRun { get; set; } = 20;
     public int MinRequestDelayMs { get; set; } = 20_000;

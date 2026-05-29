@@ -1,4 +1,4 @@
-using System.Globalization;
+﻿using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
@@ -72,17 +72,49 @@ public sealed class TopCvScraper : IJobScraper
                 }
 
                 var listUrl = $"{_options.BaseUrl.TrimEnd('/')}{_options.ListPath}?page={pageNum}";
-                HtmlDocument? listDocument;
+                HtmlDocument? listDocument = null;
+                var listAttempt = 0;
 
-                try
+                while (true)
                 {
-                    _blocked = false;
-                    listDocument = await FetchAsync(page, listUrl, cancellationToken);
-                }
-                catch (Exception exception)
-                {
-                    _logger.LogWarning(exception, "Failed to fetch TopCV list page {Page}.", pageNum);
-                    break;
+                    listAttempt++;
+
+                    try
+                    {
+                        _blocked = false;
+                        listDocument = await FetchAsync(page, listUrl, cancellationToken);
+                    }
+                    catch (Exception exception)
+                    {
+                        _logger.LogWarning(exception, "Failed to fetch TopCV list page {Page}.", pageNum);
+                    }
+
+                    if (listDocument is not null)
+                    {
+                        break;
+                    }
+
+                    if (!_blocked || proxyRotations >= maxProxyRotations)
+                    {
+                        break;
+                    }
+
+                    proxyRotations++;
+                    _logger.LogInformation(
+                        "List page {Page} blocked/network-failed; rotating proxy (attempt {N}/{Max})...",
+                        pageNum, proxyRotations, maxProxyRotations);
+
+                    await Task.Delay(15_000, cancellationToken);
+
+                    await context.DisposeAsync();
+                    await browser.DisposeAsync();
+
+                    browser = await CreateBrowserAsync(
+                        playwright,
+                        await ResolveProxyAsync(forceNew: true, cancellationToken));
+                    (context, page) = await CreateContextAsync(browser);
+
+                    consecutiveBlocks = 0;
                 }
 
                 if (listDocument is null)
@@ -340,9 +372,41 @@ public sealed class TopCvScraper : IJobScraper
         }
         catch (Exception exception)
         {
+            if (IsTransientNetworkFailure(exception))
+            {
+                _blocked = true;
+            }
+
             _logger.LogWarning(exception, "Error while navigating to {Url}.", url);
             return null;
         }
+    }
+
+    private static bool IsTransientNetworkFailure(Exception exception)
+    {
+        for (var current = exception; current is not null; current = current.InnerException)
+        {
+            var message = current.Message;
+            if (string.IsNullOrEmpty(message))
+            {
+                continue;
+            }
+
+            if (message.Contains("ERR_CONNECTION_", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_TUNNEL_", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_PROXY_", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_TIMED_OUT", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_NETWORK_", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_NAME_NOT_RESOLVED", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_SOCKS_", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("ERR_EMPTY_RESPONSE", StringComparison.OrdinalIgnoreCase)
+                || message.Contains("net::ERR_", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return exception is TimeoutException;
     }
 
     private static List<string> ExtractJobUrls(HtmlDocument document)

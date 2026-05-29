@@ -309,6 +309,67 @@ public sealed class GithubController(
             connection.UpdatedAt));
     }
 
+    [HttpDelete("connection")]
+    public async Task<IActionResult> DeleteConnection(CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var now = DateTimeOffset.UtcNow;
+
+        var connection = await dbContext.GithubConnections
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+
+        var connectionLogin = connection?.GithubUsername?.Trim();
+
+        var profile = await dbContext.StudentProfiles
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+        var profileLogin = profile?.GithubUsername?.Trim();
+
+        var loginsToPurge = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!string.IsNullOrWhiteSpace(connectionLogin))
+        {
+            loginsToPurge.Add(connectionLogin);
+        }
+        if (!string.IsNullOrWhiteSpace(profileLogin))
+        {
+            loginsToPurge.Add(profileLogin);
+        }
+
+        if (loginsToPurge.Count > 0)
+        {
+            var staleRepositories = await dbContext.GithubRepositories
+                .Where(repository => repository.UserId == userId
+                    && repository.GithubAccountLogin != null
+                    && loginsToPurge.Contains(repository.GithubAccountLogin))
+                .ToListAsync(cancellationToken);
+            if (staleRepositories.Count > 0)
+            {
+                dbContext.GithubRepositories.RemoveRange(staleRepositories);
+            }
+        }
+
+        if (connection is not null)
+        {
+            dbContext.GithubConnections.Remove(connection);
+        }
+
+        await dbContext.GithubOAuthStates
+            .Where(state => state.UserId == userId)
+            .ExecuteDeleteAsync(cancellationToken);
+
+        if (profile is not null
+            && !string.IsNullOrWhiteSpace(profileLogin)
+            && (string.Equals(profileLogin, connectionLogin, StringComparison.OrdinalIgnoreCase)
+                || connection is null))
+        {
+            profile.GithubUsername = null;
+            profile.UpdatedAt = now;
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new GithubConnectionResponse(false, null, null, null));
+    }
+
     [HttpPost("analyze-readme")]
     public async Task<ActionResult<GithubRepositoryResponse>> AnalyzeReadme(
         AnalyzeReadmeRequest request,
