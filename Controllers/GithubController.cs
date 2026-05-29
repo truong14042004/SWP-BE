@@ -226,12 +226,17 @@ public sealed class GithubController(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var accountLogin = (useOAuthConnection ? githubConnection!.GithubUsername : username).Trim();
         var existing = await dbContext.GithubRepositories
             .Where(repository => repository.UserId == userId)
             .ToDictionaryAsync(repository => repository.RepoUrl, cancellationToken);
 
+        var syncedUrls = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
         foreach (var repo in repos.Where(repo => !string.IsNullOrWhiteSpace(repo.HtmlUrl)))
         {
+            syncedUrls.Add(repo.HtmlUrl);
+
             if (!existing.TryGetValue(repo.HtmlUrl, out var repository))
             {
                 repository = new GithubRepository
@@ -244,11 +249,21 @@ public sealed class GithubController(
                 dbContext.GithubRepositories.Add(repository);
             }
 
+            repository.GithubAccountLogin = accountLogin;
             repository.RepoName = repo.Name;
             repository.Description = repo.Description;
             repository.MainLanguage = repo.Language;
             repository.LastSyncedAt = now;
             repository.UpdatedAt = now;
+        }
+
+        var staleRepositories = existing.Values
+            .Where(repository => !syncedUrls.Contains(repository.RepoUrl)
+                && string.Equals(repository.GithubAccountLogin, accountLogin, StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        if (staleRepositories.Count > 0)
+        {
+            dbContext.GithubRepositories.RemoveRange(staleRepositories);
         }
 
         var profile = await dbContext.StudentProfiles
@@ -261,14 +276,16 @@ public sealed class GithubController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(await GetRepositoryResponses(userId, cancellationToken));
+        return Ok(await GetRepositoryResponses(userId, cancellationToken, accountLogin));
     }
 
     [HttpGet("repositories")]
     public async Task<ActionResult<IReadOnlyList<GithubRepositoryResponse>>> GetRepositories(
         CancellationToken cancellationToken)
     {
-        return Ok(await GetRepositoryResponses(GetCurrentUserId(), cancellationToken));
+        var userId = GetCurrentUserId();
+        var accountLogin = await ResolveActiveAccountLoginAsync(userId, cancellationToken);
+        return Ok(await GetRepositoryResponses(userId, cancellationToken, accountLogin));
     }
 
     [HttpGet("connection")]
@@ -438,14 +455,43 @@ public sealed class GithubController(
 
     private async Task<IReadOnlyList<GithubRepositoryResponse>> GetRepositoryResponses(
         Guid userId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? accountLogin = null)
     {
-        return await dbContext.GithubRepositories
+        var query = dbContext.GithubRepositories
             .AsNoTracking()
-            .Where(repository => repository.UserId == userId)
+            .Where(repository => repository.UserId == userId);
+
+        if (!string.IsNullOrWhiteSpace(accountLogin))
+        {
+            query = query.Where(repository => repository.GithubAccountLogin == accountLogin);
+        }
+
+        return await query
             .OrderBy(repository => repository.RepoName)
             .Select(repository => ToResponse(repository))
             .ToListAsync(cancellationToken);
+    }
+
+    private async Task<string?> ResolveActiveAccountLoginAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var profileLogin = await dbContext.StudentProfiles
+            .AsNoTracking()
+            .Where(profile => profile.UserId == userId)
+            .Select(profile => profile.GithubUsername)
+            .SingleOrDefaultAsync(cancellationToken);
+        if (!string.IsNullOrWhiteSpace(profileLogin))
+        {
+            return profileLogin;
+        }
+
+        return await dbContext.GithubConnections
+            .AsNoTracking()
+            .Where(connection => connection.UserId == userId)
+            .Select(connection => connection.GithubUsername)
+            .SingleOrDefaultAsync(cancellationToken);
     }
 
     private async Task MapRepositorySkills(
@@ -976,6 +1022,7 @@ public sealed class GithubController(
             repository.RepoUrl,
             repository.Description,
             repository.MainLanguage,
+            repository.GithubAccountLogin,
             repository.AiSummary,
             repository.TechStackJson,
             repository.QualityScore,
@@ -1123,6 +1170,7 @@ public sealed record GithubRepositoryResponse(
     string RepoUrl,
     string? Description,
     string? MainLanguage,
+    string? GithubAccountLogin,
     string? AiSummary,
     string? TechStackJson,
     decimal? QualityScore,

@@ -595,8 +595,10 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasKey(repository => repository.Id);
             entity.HasIndex(repository => new { repository.UserId, repository.RepoUrl }).IsUnique();
             entity.HasIndex(repository => repository.MainLanguage);
+            entity.HasIndex(repository => new { repository.UserId, repository.GithubAccountLogin });
             entity.Property(repository => repository.RepoName).HasMaxLength(200).IsRequired();
             entity.Property(repository => repository.RepoUrl).HasMaxLength(1024).IsRequired();
+            entity.Property(repository => repository.GithubAccountLogin).HasMaxLength(100);
             entity.Property(repository => repository.Description).HasMaxLength(2000);
             entity.Property(repository => repository.MainLanguage).HasMaxLength(100);
             entity.Property(repository => repository.ReadmeContent).HasColumnType("text");

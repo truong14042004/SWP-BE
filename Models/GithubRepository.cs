@@ -4,6 +4,7 @@ public sealed class GithubRepository
 {
     public Guid Id { get; set; }
     public Guid UserId { get; set; }
+    public string? GithubAccountLogin { get; set; }
     public string RepoName { get; set; } = string.Empty;
     public string RepoUrl { get; set; } = string.Empty;
     public string? Description { get; set; }
