@@ -39,7 +39,7 @@ public sealed class MarketPulseController : ControllerBase
         var since = DateTime.UtcNow.AddDays(-days);
 
         var trending = await _dbContext.JobSkillMentions
-            .Where(mention => mention.JobPost.ScrapedAt >= since)
+            .Where(mention => (mention.JobPost.PostedAt ?? mention.JobPost.ScrapedAt) >= since)
             .GroupBy(mention => mention.Keyword)
             .Select(group => new
             {
@@ -61,6 +61,57 @@ public sealed class MarketPulseController : ControllerBase
         });
     }
 
+    [HttpGet("keywords/{keyword}/daily")]
+    public async Task<IActionResult> GetKeywordDaily(
+        string keyword,
+        [FromQuery] int days = 30,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(keyword))
+        {
+            return BadRequest(new { message = "Keyword là bắt buộc." });
+        }
+        days = Math.Clamp(days, 1, 365);
+        var since = DateTime.UtcNow.AddDays(-days);
+        var loweredKeyword = keyword.ToLower();
+
+        var raw = await _dbContext.JobSkillMentions
+            .Where(mention => mention.Keyword.ToLower() == loweredKeyword
+                && (mention.JobPost.PostedAt ?? mention.JobPost.ScrapedAt) >= since)
+            .Select(mention => new
+            {
+                postedAt = mention.JobPost.PostedAt,
+                scrapedAt = mention.JobPost.ScrapedAt,
+                jobId = mention.JobPostId,
+                mentions = mention.MentionCount,
+            })
+            .ToListAsync(cancellationToken);
+
+        var grouped = raw
+            .GroupBy(item => DateOnly.FromDateTime((item.postedAt ?? item.scrapedAt).UtcDateTime))
+            .Select(group => new
+            {
+                date = group.Key,
+                jobCount = group.Select(item => item.jobId).Distinct().Count(),
+                totalMentions = group.Sum(item => item.mentions),
+            })
+            .OrderBy(item => item.date)
+            .ToList();
+
+        var lastScrapedAt = await _dbContext.JobPosts
+            .OrderByDescending(post => post.ScrapedAt)
+            .Select(post => (DateTimeOffset?)post.ScrapedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
+        return Ok(new
+        {
+            keyword,
+            days,
+            lastScrapedAt,
+            points = grouped,
+        });
+    }
+
     [HttpGet("keywords/{keyword}/trend")]
     public async Task<IActionResult> GetKeywordTrend(
         string keyword,
@@ -71,7 +122,7 @@ public sealed class MarketPulseController : ControllerBase
         {
             return BadRequest(new { message = "Keyword là bắt buộc." });
         }
-        days = Math.Clamp(days, 7, 365);
+        days = Math.Clamp(days, 1, 365);
         var since = DateOnly.FromDateTime(DateTime.UtcNow.AddDays(-days));
 
         var trend = await _dbContext.KeywordTrendSnapshots
@@ -184,6 +235,31 @@ public sealed class MarketPulseController : ControllerBase
         return Ok(post);
     }
 
+    [HttpGet("stats")]
+    public async Task<IActionResult> GetStats(CancellationToken cancellationToken)
+    {
+        var totalJobs = await _dbContext.JobPosts.CountAsync(cancellationToken);
+        var totalKeywords = await _dbContext.JobSkillMentions
+            .Select(mention => mention.Keyword)
+            .Distinct()
+            .CountAsync(cancellationToken);
+        var lastScrapedAt = await _dbContext.JobPosts
+            .OrderByDescending(post => post.ScrapedAt)
+            .Select(post => (DateTimeOffset?)post.ScrapedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+        var sources = await _dbContext.JobPosts
+            .GroupBy(post => post.Source)
+            .Select(group => new { source = group.Key, count = group.Count() })
+            .ToListAsync(cancellationToken);
+
+        return Ok(new
+        {
+            totalJobs,
+            totalKeywords,
+            lastScrapedAt,
+            sources,
+        });
+    }
     [HttpPost("scrape-now")]
     [Authorize(Roles = "Admin")]
     public async Task<IActionResult> ScrapeNow(CancellationToken cancellationToken)
