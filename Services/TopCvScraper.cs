@@ -1,4 +1,4 @@
-﻿using System.Globalization;
+using System.Globalization;
 using System.Net;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
@@ -20,6 +20,7 @@ public sealed class TopCvScraper : IJobScraper
     private readonly IHttpClientFactory _httpClientFactory;
     private bool _blocked;
     private static string? _cachedProxy;
+    private static string? _cachedOutboundIp;
 
     private static readonly Regex JobIdFromUrl = new(@"/viec-lam/[^/]+/(\d+)\.html", RegexOptions.Compiled);
     private static readonly Regex JobUrlCandidate = new(
@@ -672,7 +673,6 @@ public sealed class TopCvScraper : IJobScraper
 
     private async Task<string?> GetDynamicProxyAsync(bool forceNew, CancellationToken cancellationToken)
     {
-        // If not forcing a new proxy and we have a valid cached one, return it
         if (!forceNew && !string.IsNullOrWhiteSpace(_cachedProxy))
         {
             return _cachedProxy;
@@ -680,18 +680,55 @@ public sealed class TopCvScraper : IJobScraper
 
         var client = _httpClientFactory.CreateClient();
 
+        var getUrl = $"{_options.ProxyApiUrl}?key={_options.ProxyKey}&nhamang={_options.ProxyNetwork}&tinhthanh={_options.ProxyLocation}";
+        if (!string.IsNullOrWhiteSpace(_options.ProxyWhitelist))
+        {
+            getUrl += $"&whitelist={_options.ProxyWhitelist}";
+        }
+
+        if (!forceNew)
+        {
+            try
+            {
+                var direct = await client.GetFromJsonAsync<ProxyXoayResponse>(getUrl, cancellationToken);
+                if (direct?.Status == 100 && !string.IsNullOrWhiteSpace(direct.ProxyHttp))
+                {
+                    var clean = CleanProxyUrl(direct.ProxyHttp);
+                    if (!string.IsNullOrWhiteSpace(clean))
+                    {
+                        _cachedProxy = clean;
+                        if (!string.IsNullOrWhiteSpace(direct.Ip))
+                        {
+                            _cachedOutboundIp = direct.Ip;
+                        }
+                        _logger.LogInformation(
+                            "Reusing current dynamic proxy: {Proxy} (outbound {Ip}).",
+                            clean, direct.Ip ?? "?");
+                        return clean;
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error while calling ProxyXoay API (initial).");
+            }
+        }
+
+        var previousIp = _cachedOutboundIp;
         if (forceNew && !string.IsNullOrWhiteSpace(_options.ProxyRotateUrl))
         {
-            _logger.LogInformation("Forcing proxy IP rotation via API...");
+            _logger.LogInformation(
+                "Forcing proxy IP rotation via API (previous outbound {Ip}).",
+                previousIp ?? "?");
             try
             {
                 var rotateUrl = $"{_options.ProxyRotateUrl}?key={_options.ProxyKey}";
                 var rotateResponse = await client.GetAsync(rotateUrl, cancellationToken);
                 var responseContent = await rotateResponse.Content.ReadAsStringAsync(cancellationToken);
-                _logger.LogInformation("Proxy rotation response: {Response}", responseContent?.Trim());
-                
-                // Wait 3 seconds for the IP change to propagate on the server side
-                await Task.Delay(3000, cancellationToken);
+                _logger.LogInformation(
+                    "Proxy rotation HTTP {Status}: {Response}",
+                    (int)rotateResponse.StatusCode,
+                    string.IsNullOrWhiteSpace(responseContent) ? "<empty>" : responseContent.Trim());
             }
             catch (Exception ex)
             {
@@ -699,63 +736,70 @@ public sealed class TopCvScraper : IJobScraper
             }
         }
 
-        var url = $"{_options.ProxyApiUrl}?key={_options.ProxyKey}&nhamang={_options.ProxyNetwork}&tinhthanh={_options.ProxyLocation}";
-        if (!string.IsNullOrWhiteSpace(_options.ProxyWhitelist))
+        const int pollDelayMs = 5000;
+        const int maxWaitMs = 90_000;
+        var elapsed = 0;
+        ProxyXoayResponse? lastResponse = null;
+        while (elapsed < maxWaitMs)
         {
-            url += $"&whitelist={_options.ProxyWhitelist}";
-        }
-
-        _logger.LogInformation("Requesting dynamic proxy from ProxyXoay API...");
-        try
-        {
-            var response = await client.GetFromJsonAsync<ProxyXoayResponse>(url, cancellationToken);
-            if (response != null)
+            try
             {
-                if (response.Status == 100 && !string.IsNullOrWhiteSpace(response.ProxyHttp))
-                {
-                    var cleanProxy = CleanProxyUrl(response.ProxyHttp);
-                    if (!string.IsNullOrWhiteSpace(cleanProxy))
-                    {
-                        _cachedProxy = cleanProxy;
-                        _logger.LogInformation("Successfully retrieved new dynamic proxy: {Proxy}", cleanProxy);
-                        return cleanProxy;
-                    }
-                }
-                else if (response.Status == 101)
+                lastResponse = await client.GetFromJsonAsync<ProxyXoayResponse>(getUrl, cancellationToken);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Error while polling ProxyXoay API at {Elapsed}ms.", elapsed);
+                lastResponse = null;
+            }
+
+            if (lastResponse?.Status == 100 && !string.IsNullOrWhiteSpace(lastResponse.ProxyHttp))
+            {
+                if (forceNew
+                    && !string.IsNullOrWhiteSpace(previousIp)
+                    && !string.IsNullOrWhiteSpace(lastResponse.Ip)
+                    && string.Equals(previousIp, lastResponse.Ip, StringComparison.OrdinalIgnoreCase))
                 {
                     _logger.LogInformation(
-                        "ProxyXoay API returned status 101 (cooldown): {Message}. Waiting 30s before retry...",
-                        response.Message);
-                    // Wait out the cooldown and retry once
-                    await Task.Delay(30_000, cancellationToken);
-                    var retry = await client.GetFromJsonAsync<ProxyXoayResponse>(url, cancellationToken);
-                    if (retry?.Status == 100 && !string.IsNullOrWhiteSpace(retry.ProxyHttp))
-                    {
-                        var cleanProxy = CleanProxyUrl(retry.ProxyHttp);
-                        if (!string.IsNullOrWhiteSpace(cleanProxy))
-                        {
-                            _cachedProxy = cleanProxy;
-                            _logger.LogInformation("Successfully retrieved new dynamic proxy after cooldown: {Proxy}", cleanProxy);
-                            return cleanProxy;
-                        }
-                    }
-                    // Still in cooldown — reuse cached if available
-                    if (!string.IsNullOrWhiteSpace(_cachedProxy))
-                    {
-                        return _cachedProxy;
-                    }
+                        "ProxyXoay still returns previous outbound {Ip} after {Elapsed}ms; waiting...",
+                        lastResponse.Ip, elapsed);
                 }
                 else
                 {
-                    _logger.LogWarning("ProxyXoay API returned status {Status}: {Message}", response.Status, response.Message);
+                    var cleanProxy = CleanProxyUrl(lastResponse.ProxyHttp);
+                    if (!string.IsNullOrWhiteSpace(cleanProxy))
+                    {
+                        _cachedProxy = cleanProxy;
+                        if (!string.IsNullOrWhiteSpace(lastResponse.Ip))
+                        {
+                            _cachedOutboundIp = lastResponse.Ip;
+                        }
+                        _logger.LogInformation(
+                            "Acquired dynamic proxy {Proxy} (outbound {Ip}) after {Elapsed}ms.",
+                            cleanProxy, lastResponse.Ip ?? "?", elapsed);
+                        return cleanProxy;
+                    }
                 }
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Error while calling ProxyXoay API.");
+            else if (lastResponse?.Status == 101)
+            {
+                _logger.LogInformation(
+                    "ProxyXoay cooldown at {Elapsed}ms: {Message}",
+                    elapsed, lastResponse.Message);
+            }
+            else if (lastResponse is not null)
+            {
+                _logger.LogWarning(
+                    "ProxyXoay returned status {Status} at {Elapsed}ms: {Message}",
+                    lastResponse.Status, elapsed, lastResponse.Message);
+            }
+
+            await Task.Delay(pollDelayMs, cancellationToken);
+            elapsed += pollDelayMs;
         }
 
+        _logger.LogWarning(
+            "Gave up waiting for ProxyXoay rotation after {Elapsed}ms; falling back to last known proxy {Proxy}.",
+            elapsed, _cachedProxy ?? "<none>");
         return _cachedProxy;
     }
 
@@ -784,4 +828,7 @@ public sealed class ProxyXoayResponse
 
     [JsonPropertyName("proxysocks5")]
     public string? ProxySocks5 { get; set; }
+
+    [JsonPropertyName("ip")]
+    public string? Ip { get; set; }
 }
