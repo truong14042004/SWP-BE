@@ -1003,7 +1003,9 @@ public sealed class RoadmapReviewController(
     private Guid GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
-        return Guid.Parse(value!);
+        return Guid.TryParse(value, out var userId)
+            ? userId
+            : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
 
     private async Task SendReviewEmailSafelyAsync(string toEmail, string subject, string body)
