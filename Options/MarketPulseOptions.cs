@@ -24,7 +24,7 @@ public sealed class TopCvScraperOptions
     public int MaxRequestDelayMs { get; set; } = 45_000;
     public int RequestTimeoutSeconds { get; set; } = 30;
     public int BlockCooldownMs { get; set; } = 300_000;
-    public int MaxProxyRotationsPerRun { get; set; } = 3;
+    public int MaxProxyRotationsPerRun { get; set; } = 1;
     public bool RefreshExistingJobs { get; set; } = false;
     public string UserAgent { get; set; } =
         "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36";

@@ -259,18 +259,28 @@ public sealed class TopCvScraper : IJobScraper
         return await playwright.Chromium.LaunchAsync(launchOptions);
     }
 
+    private static readonly string[] UserAgentPool =
+    {
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_6_0) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36 Edg/130.0.0.0",
+        "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+    };
+
     private static async Task<(IBrowserContext context, IPage page)> CreateContextAsync(IBrowser browser)
     {
+        var userAgent = UserAgentPool[Random.Shared.Next(UserAgentPool.Length)];
         var context = await browser.NewContextAsync(new BrowserNewContextOptions
         {
-            UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36",
+            UserAgent = userAgent,
             ViewportSize = new ViewportSize { Width = 1280, Height = 800 },
             Locale = "vi-VN",
             ExtraHTTPHeaders = new Dictionary<string, string>
             {
                 { "Accept-Language", "vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7" }
             },
-            JavaScriptEnabled = false
+            JavaScriptEnabled = true
         });
 
         await context.AddInitScriptAsync(@"
