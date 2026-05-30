@@ -108,32 +108,31 @@ public class SkillGapsController : ControllerBase
             
             item.CurrentLevel = userSkill?.Level ?? "None";
 
-            if (userLevelValue >= reqLevelValue)
+            if (userSkill != null && userLevelValue >= reqLevelValue)
             {
-                if (userSkill!.IsVerified)
+                if (userSkill.IsVerified)
                 {
                     item.Status = "Matched";
                     item.Recommendation = "Làm tốt lắm! Bạn đã thành thạo và xác thực kỹ năng này.";
-                    totalScore += req.Weight; // Full points
+                    totalScore += req.Weight;
                 }
                 else
                 {
                     item.Status = "NotVerified";
                     item.Recommendation = "Bạn đã đạt cấp độ kỹ năng yêu cầu, nhưng cần phải được xác thực (cung cấp minh chứng).";
-                    totalScore += req.Weight * 0.5m; // Partial points for unverified
+                    totalScore += req.Weight * 0.5m;
                 }
             }
-            else if (userLevelValue > 0)
+            else if (userSkill != null && userLevelValue > 0)
             {
                 item.Status = "Weak";
-                item.Recommendation = $"Bạn cần cải thiện từ cấp độ {userSkill!.Level} lên {req.RequiredLevel}.";
-                totalScore += req.Weight * (decimal)userLevelValue / reqLevelValue; // Partial points
+                item.Recommendation = $"Bạn cần cải thiện từ cấp độ {userSkill.Level} lên {req.RequiredLevel}.";
+                totalScore += req.Weight * (decimal)userLevelValue / reqLevelValue;
             }
             else
             {
                 item.Status = "Missing";
                 item.Recommendation = $"Bạn cần học kỹ năng này đến cấp độ {req.RequiredLevel}.";
-                // 0 points
             }
 
             totalWeight += req.Weight;

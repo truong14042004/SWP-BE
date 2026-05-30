@@ -186,7 +186,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
+            return Ok(new { message = "Cập nhật ảnh đại diện thành công.", avatarUrl = user.AvatarUrl });
         }
 
         return Ok(ToResponse(profile));
