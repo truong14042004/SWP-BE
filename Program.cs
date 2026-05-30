@@ -60,6 +60,7 @@ builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
 // builder.Services.AddScoped<IJobScraper, TopDevScraper>();
 builder.Services.AddScoped<IJobScraper, ITNaviScraper>();
+builder.Services.AddScoped<IJobScraper, VietnamWorksScraper>();
 builder.Services.AddScoped<IMarketPulseRunner, MarketPulseRunner>();
 builder.Services.AddHostedService<MarketPulseScheduler>();
 builder.Services.AddSingleton(serviceProvider =>
