@@ -73,6 +73,70 @@ public sealed class SkillExtractor : ISkillExtractor
             .ToList();
     }
 
+    // IT job-title phrases (matched case-insensitively as substrings). These are
+    // distinctive enough that they don't collide with non-IT roles.
+    private static readonly string[] ItTitlePhrases =
+    [
+        "developer", "programmer", "coder", "software", "software engineer",
+        "lập trình", "lập trình viên", "phần mềm", "kỹ sư phần mềm",
+        "công nghệ thông tin", "devops", "dev ops", "sysops",
+        "backend", "back-end", "back end", "frontend", "front-end", "front end",
+        "fullstack", "full-stack", "full stack",
+        "web developer", "mobile developer", "android developer", "ios developer",
+        "game developer", "unity developer",
+        "data engineer", "data scientist", "data analyst", "data engineering",
+        "big data", "machine learning", "deep learning", "artificial intelligence",
+        "ai engineer", "ml engineer",
+        "tester", "kiểm thử", "automation test", "test engineer",
+        "qa engineer", "qc engineer", "quality assurance",
+        "brse", "comtor",
+        "system engineer", "systems engineer", "network engineer",
+        "cloud engineer", "cloud architect", "devops engineer",
+        "security engineer", "cyber security", "cybersecurity",
+        "an toàn thông tin", "bảo mật",
+        "site reliability", "platform engineer", "infrastructure engineer",
+        "embedded", "embedded software", "iot engineer", "blockchain",
+        "smart contract",
+        "database administrator", "quản trị hệ thống", "quản trị mạng",
+        "quản trị cơ sở dữ liệu",
+        "solution architect", "software architect", "system architect",
+        "technical lead", "tech lead", "technical leader", "engineering manager",
+        "scrum master", "business analyst", "system analyst",
+        "ui/ux", "ux/ui", "ux designer", "ui designer", "product designer",
+    ];
+
+    // Short/ambiguous tokens matched with word boundaries and case sensitivity so
+    // they don't collide with everyday words (e.g. Vietnamese "ai", English "it").
+    private static readonly Regex ItTitleTokens = new(
+        @"(?<![A-Za-z0-9/])(IT|QA|QC|QA/QC|SRE|DBA|BI|CNTT|BrSE|DevOps|\.NET)(?![A-Za-z0-9])",
+        RegexOptions.Compiled);
+
+    public bool LooksLikeItJob(string? title, string? signalText)
+    {
+        // Strong signal: the curated signal text (TopDev "skills") names a known
+        // IT skill from our vocabulary.
+        if (!string.IsNullOrWhiteSpace(signalText) && Extract(signalText).Count > 0)
+        {
+            return true;
+        }
+
+        if (string.IsNullOrWhiteSpace(title))
+        {
+            return false;
+        }
+
+        var lowered = title.ToLowerInvariant();
+        foreach (var phrase in ItTitlePhrases)
+        {
+            if (lowered.Contains(phrase, StringComparison.Ordinal))
+            {
+                return true;
+            }
+        }
+
+        return ItTitleTokens.IsMatch(title);
+    }
+
     private static Regex BuildPattern(string keyword)
     {
         var escaped = Regex.Escape(keyword);

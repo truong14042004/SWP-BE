@@ -91,6 +91,46 @@ public sealed class MarketPulseRunner : IMarketPulseRunner
             .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
     }
 
+    public async Task<int> PurgeNonItJobsAsync(string source, CancellationToken cancellationToken)
+    {
+        var jobs = await _dbContext.JobPosts
+            .Where(post => post.Source == source)
+            .Select(post => new { post.Id, post.Title, post.Description })
+            .ToListAsync(cancellationToken);
+
+        // For already-stored jobs we don't have the original "skills" field, so
+        // use the description as the signal text alongside the title.
+        var nonItIds = jobs
+            .Where(job => !_skillExtractor.LooksLikeItJob(job.Title, job.Description))
+            .Select(job => job.Id)
+            .ToList();
+
+        if (nonItIds.Count == 0)
+        {
+            _logger.LogInformation("PurgeNonItJobs({Source}): no non-IT jobs found.", source);
+            return 0;
+        }
+
+        var mentions = await _dbContext.JobSkillMentions
+            .Where(mention => nonItIds.Contains(mention.JobPostId))
+            .ToListAsync(cancellationToken);
+        if (mentions.Count > 0)
+        {
+            _dbContext.JobSkillMentions.RemoveRange(mentions);
+        }
+
+        var jobsToRemove = await _dbContext.JobPosts
+            .Where(post => nonItIds.Contains(post.Id))
+            .ToListAsync(cancellationToken);
+        _dbContext.JobPosts.RemoveRange(jobsToRemove);
+
+        await _dbContext.SaveChangesAsync(cancellationToken);
+        _logger.LogInformation(
+            "PurgeNonItJobs({Source}): removed {Jobs} non-IT job(s) and {Mentions} mention(s).",
+            source, jobsToRemove.Count, mentions.Count);
+        return jobsToRemove.Count;
+    }
+
     public async Task<MarketPulseRunResult> RunAsync(CancellationToken cancellationToken)
     {
         var result = new MarketPulseRunResult { StartedAt = DateTimeOffset.UtcNow };

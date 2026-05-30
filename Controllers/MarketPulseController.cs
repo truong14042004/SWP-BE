@@ -282,6 +282,43 @@ public sealed class MarketPulseController : ControllerBase
         [FromServices] IOptions<InternalAuthOptions> internalAuthOptions,
         CancellationToken cancellationToken)
     {
+        var authError = ValidateInternalToken(internalAuthOptions);
+        if (authError is not null)
+        {
+            return authError;
+        }
+
+        var result = await _runner.RunAsync(cancellationToken);
+        return Ok(result);
+    }
+
+    [HttpPost("internal/purge-non-it")]
+    [AllowAnonymous]
+    public async Task<IActionResult> InternalPurgeNonIt(
+        [FromServices] IOptions<InternalAuthOptions> internalAuthOptions,
+        [FromQuery] string source,
+        CancellationToken cancellationToken)
+    {
+        var authError = ValidateInternalToken(internalAuthOptions);
+        if (authError is not null)
+        {
+            return authError;
+        }
+
+        if (string.IsNullOrWhiteSpace(source))
+        {
+            return BadRequest(new { message = "Query parameter 'source' is required." });
+        }
+
+        var removed = await _runner.PurgeNonItJobsAsync(source, cancellationToken);
+        return Ok(new { source, removed });
+    }
+
+    // Constant-time comparison of the X-Internal-Token header against the
+    // configured token. Returns an error result when invalid, or null when the
+    // caller is authorized.
+    private IActionResult? ValidateInternalToken(IOptions<InternalAuthOptions> internalAuthOptions)
+    {
         var expected = internalAuthOptions.Value.Token;
         if (string.IsNullOrWhiteSpace(expected))
         {
@@ -301,8 +338,7 @@ public sealed class MarketPulseController : ControllerBase
             return Unauthorized();
         }
 
-        var result = await _runner.RunAsync(cancellationToken);
-        return Ok(result);
+        return null;
     }
 
     [HttpGet("config")]
@@ -318,13 +354,13 @@ public sealed class MarketPulseController : ControllerBase
             trendWindowDays = _options.TrendWindowDays,
             sources = new
             {
-                topCv = new
+                topDev = new
                 {
-                    enabled = _options.TopCv.Enabled,
-                    baseUrl = _options.TopCv.BaseUrl,
-                    listPath = _options.TopCv.ListPath,
-                    maxPages = _options.TopCv.MaxPages,
-                    maxJobsPerRun = _options.TopCv.MaxJobsPerRun,
+                    enabled = _options.TopDev.Enabled,
+                    baseUrl = _options.TopDev.BaseUrl,
+                    sitemapIndexPath = _options.TopDev.SitemapIndexPath,
+                    maxSitemapPages = _options.TopDev.MaxSitemapPages,
+                    maxJobsPerRun = _options.TopDev.MaxJobsPerRun,
                 },
             },
         });
