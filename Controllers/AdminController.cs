@@ -600,6 +600,12 @@ public sealed class AdminController(
             return "Yêu cầu cấp độ là bắt buộc.";
         }
 
+        var allowedLevels = new[] { "Beginner", "Intermediate", "Advanced", "Expert" };
+        if (!allowedLevels.Contains(request.RequiredLevel.Trim(), StringComparer.OrdinalIgnoreCase))
+        {
+            return "Cấp độ kỹ năng phải là một trong các giá trị: Beginner, Intermediate, Advanced, Expert.";
+        }
+
         if (request.Priority is < 1 or > 5)
         {
             return "Độ ưu tiên phải từ 1 đến 5.";

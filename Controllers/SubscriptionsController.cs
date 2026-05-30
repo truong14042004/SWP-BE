@@ -61,9 +61,12 @@ public sealed class SubscriptionsController(
             return NotFound(new { message = "Không tìm thấy gói đăng ký." });
         }
 
+        var utcNow = DateTimeOffset.UtcNow;
         var activeSubscription = await dbContext.Subscriptions
             .Include(s => s.Plan)
-            .Where(s => s.UserId == userId && (s.Status == "Active" || (s.Status == "Cancelled" && s.ExpiredAt > DateTimeOffset.UtcNow)))
+            .Where(s => s.UserId == userId
+                && s.Status == "Active"
+                && (s.ExpiredAt == null || s.ExpiredAt > utcNow))
             .OrderByDescending(s => s.StartedAt ?? s.CreatedAt)
             .FirstOrDefaultAsync(cancellationToken);
 

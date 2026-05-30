@@ -50,12 +50,13 @@ public sealed class ProfileController(
     }
 
     [HttpPost]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType<ProfileResponse>(StatusCodes.Status201Created)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status409Conflict)]
     public async Task<ActionResult<ProfileResponse>> CreateProfile(
-        SaveProfileRequest request,
+        [FromForm] SaveProfileRequest request,
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId(); //lay userId tu token
@@ -86,18 +87,21 @@ public sealed class ProfileController(
         dbContext.StudentProfiles.Add(profile);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await TryApplyCvFileAsync(userId, profile, request.CvFile, cancellationToken);
+
         await dbContext.Entry(profile).Reference(item => item.TargetRole).LoadAsync(cancellationToken); //lay role tuong ung voi profile vi response can targetrolename
 
         return CreatedAtAction(nameof(GetProfile), ToResponse(profile));
     }
 
     [HttpPut]
+    [Consumes("multipart/form-data")]
     [ProducesResponseType<ProfileResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
     public async Task<ActionResult<ProfileResponse>> UpdateProfile(
-        SaveProfileRequest request,
+        [FromForm] SaveProfileRequest request,
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
@@ -120,6 +124,8 @@ public sealed class ProfileController(
         profile.UpdatedAt = DateTimeOffset.UtcNow; //cap nhat thoi gian update
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await TryApplyCvFileAsync(userId, profile, request.CvFile, cancellationToken);
 
         return Ok(ToResponse(profile));
     }
@@ -180,7 +186,7 @@ public sealed class ProfileController(
 
         if (profile is null)
         {
-            return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân." });
+            return Ok(new { message = "Cập nhật ảnh đại diện thành công.", avatarUrl = user.AvatarUrl });
         }
 
         return Ok(ToResponse(profile));
@@ -205,16 +211,6 @@ public sealed class ProfileController(
             return BadRequest(new { message = "Tệp tin là bắt buộc." });
         }
 
-        if (file.Length > storageOpts.MaxUploadBytes)
-        {
-            return BadRequest(new { message = $"Tệp tin quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes." });
-        }
-
-        if (file.ContentType != "application/pdf")
-        {
-            return BadRequest(new { message = "Chỉ hỗ trợ tệp PDF cho CV." });
-        }
-
         var profile = await dbContext.StudentProfiles
             .Include(item => item.TargetRole)
             .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
@@ -224,10 +220,69 @@ public sealed class ProfileController(
             return NotFound(new { message = "Không tìm thấy hồ sơ cá nhân. Vui lòng tạo hồ sơ cá nhân trước." });
         }
 
+        try
+        {
+            var cvResult = await ProcessCvFileAsync(userId, file, cancellationToken);
+            profile.CvUrl = cvResult.ObjectName;
+            profile.CvName = cvResult.FileName;
+            profile.CvParsedText = cvResult.ParsedText;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (InvalidOperationException exception)
+        {
+            return BadRequest(new { message = exception.Message });
+        }
+
+        return Ok(ToResponse(profile));
+    }
+
+    private async Task TryApplyCvFileAsync(
+        Guid userId,
+        StudentProfile profile,
+        IFormFile? cvFile,
+        CancellationToken cancellationToken)
+    {
+        if (cvFile is null || cvFile.Length == 0)
+        {
+            return;
+        }
+
+        try
+        {
+            var cvResult = await ProcessCvFileAsync(userId, cvFile, cancellationToken);
+            profile.CvUrl = cvResult.ObjectName;
+            profile.CvName = cvResult.FileName;
+            profile.CvParsedText = cvResult.ParsedText;
+            profile.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception)
+        {
+            // Ignore CV errors; user can upload separately via POST /api/profile/cv
+        }
+    }
+
+    private async Task<CvFileProcessingResult> ProcessCvFileAsync(
+        Guid userId,
+        IFormFile file,
+        CancellationToken cancellationToken)
+    {
+        if (file.Length > storageOpts.MaxUploadBytes)
+        {
+            throw new InvalidOperationException(
+                $"Tệp tin quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes.");
+        }
+
+        if (file.ContentType != "application/pdf")
+        {
+            throw new InvalidOperationException("Chỉ hỗ trợ tệp PDF cho CV.");
+        }
+
         var objectName = $"users/{userId}/cv/{DateTimeOffset.UtcNow.ToUnixTimeSeconds()}-{Guid.NewGuid()}-{file.FileName}";
         await using var stream = file.OpenReadStream();
-        
-        string? cvParsedText = null;
+
+        string? parsedText = null;
         using var memoryStream = new MemoryStream();
         await stream.CopyToAsync(memoryStream, cancellationToken);
         memoryStream.Position = 0;
@@ -240,8 +295,9 @@ public sealed class ProfileController(
             {
                 textBuilder.AppendLine(page.Text);
             }
+
             var fullText = textBuilder.ToString().Trim();
-            cvParsedText = fullText.Length > 5000 ? fullText[..5000] : fullText;
+            parsedText = fullText.Length > 5000 ? fullText[..5000] : fullText;
         }
         catch (Exception)
         {
@@ -251,14 +307,10 @@ public sealed class ProfileController(
         memoryStream.Position = 0;
         var result = await storageService.UploadAsync(memoryStream, objectName, file.ContentType, cancellationToken);
 
-        profile.CvUrl = result.ObjectName;
-        profile.CvName = file.FileName;
-        profile.CvParsedText = cvParsedText;
-        profile.UpdatedAt = DateTimeOffset.UtcNow;
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(ToResponse(profile));
+        return new CvFileProcessingResult(result.ObjectName, file.FileName, parsedText);
     }
+
+    private sealed record CvFileProcessingResult(string ObjectName, string FileName, string? ParsedText);
 
     private static void ApplyProfileValues(StudentProfile profile, SaveProfileRequest request)
     {
