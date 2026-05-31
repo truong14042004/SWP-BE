@@ -15,6 +15,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<CareerRole> CareerRoles => Set<CareerRole>();
     public DbSet<RoleSkillRequirement> RoleSkillRequirements => Set<RoleSkillRequirement>();
+    public DbSet<SkillPrerequisite> SkillPrerequisites => Set<SkillPrerequisite>();
     public DbSet<SkillGapReport> SkillGapReports => Set<SkillGapReport>();
     public DbSet<SkillGapReportItem> SkillGapReportItems => Set<SkillGapReportItem>();
     public DbSet<Roadmap> Roadmaps => Set<Roadmap>();
@@ -396,6 +397,33 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444138"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.0m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444139"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222107"), RequiredLevel = "Beginner", Priority = 3, Weight = 0.9m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444140"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222118"), RequiredLevel = "Beginner", Priority = 4, Weight = 0.8m, CreatedAt = SeededAt, UpdatedAt = SeededAt });
+        });
+
+        modelBuilder.Entity<SkillPrerequisite>(entity =>
+        {
+            entity.ToTable("skill_prerequisites");
+            entity.HasKey(prerequisite => prerequisite.Id);
+            entity.HasIndex(prerequisite => new { prerequisite.SkillId, prerequisite.PrerequisiteSkillId }).IsUnique();
+            entity.HasIndex(prerequisite => prerequisite.PrerequisiteSkillId);
+            entity.ToTable(t => t.HasCheckConstraint("CK_skill_prerequisites_NoSelfReference", "\"SkillId\" <> \"PrerequisiteSkillId\""));
+            entity.HasOne(prerequisite => prerequisite.Skill)
+                .WithMany()
+                .HasForeignKey(prerequisite => prerequisite.SkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(prerequisite => prerequisite.PrerequisiteSkill)
+                .WithMany()
+                .HasForeignKey(prerequisite => prerequisite.PrerequisiteSkillId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasData(
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555501"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222102"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222113"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555502"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222114"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222113"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555503"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222103"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555504"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222109"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555505"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222108"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222106"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555506"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222112"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555507"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222111"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555508"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222115"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222104"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555509"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222116"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222117"), CreatedAt = SeededAt });
         });
 
         modelBuilder.Entity<SkillGapReport>(entity =>

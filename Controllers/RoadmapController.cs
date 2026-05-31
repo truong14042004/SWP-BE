@@ -84,7 +84,15 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             nodeInputs = GetFallbackNodes(careerRole.Name);
         }
 
-        var hierarchy = BuildHierarchyNodes(roadmap.Id, nodeInputs, now);
+        var prerequisiteSkillIds = nodeInputs
+            .Where(input => input.SkillId is not null)
+            .Select(input => input.SkillId!.Value)
+            .Distinct()
+            .ToArray();
+        var prerequisiteMap = await GetSkillPrerequisiteMapAsync(prerequisiteSkillIds, cancellationToken);
+        nodeInputs = TopologicalOrderInputs(nodeInputs, prerequisiteMap);
+
+        var hierarchy = BuildHierarchyNodes(roadmap.Id, nodeInputs, prerequisiteMap, now);
 
         var nodeResources = hierarchy.ActionNodes
             .SelectMany(pair => pair.Input.LearningResourceIds
@@ -315,24 +323,27 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
     private static RoadmapHierarchy BuildHierarchyNodes(
         Guid roadmapId,
         IReadOnlyList<RoadmapNodeInput> nodeInputs,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> prerequisiteMap,
         DateTimeOffset now)
     {
         var nodes = new List<RoadmapNode>();
         var actionNodes = new List<RoadmapActionNode>();
-        Guid? previousActionNodeId = null;
         var orderIndex = 1;
 
+        // nodeInputs is already topologically ordered; preserve that order via the index
+        // so that prerequisite skills (even in other groups) keep their earlier position.
         var groupedInputs = nodeInputs
             .Select((input, index) => new { Input = input, Index = index })
             .GroupBy(item => NormalizeGroupName(item.Input.GroupName))
-            .OrderBy(group => group.Min(item => item.Input.Priority))
-            .ThenBy(group => group.Min(item => item.Index));
+            .OrderBy(group => group.Min(item => item.Index))
+            .ThenBy(group => group.Key);
+
+        var nodeBySkillId = new Dictionary<Guid, RoadmapNode>();
 
         foreach (var group in groupedInputs)
         {
             var orderedChildren = group
-                .OrderBy(item => item.Input.Priority)
-                .ThenBy(item => item.Index)
+                .OrderBy(item => item.Index)
                 .ToList();
             var groupPriority = Math.Clamp(orderedChildren.Min(item => item.Input.Priority), 1, 5);
             var groupNode = new RoadmapNode
@@ -363,7 +374,7 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                     SkillId = input.SkillId,
                     LearningResourceId = input.LearningResourceIds.Select(resourceId => (Guid?)resourceId).FirstOrDefault(),
                     ParentNodeId = groupNode.Id,
-                    PrerequisiteNodeId = previousActionNodeId,
+                    PrerequisiteNodeId = null,
                     Title = input.Title,
                     Description = input.Description,
                     NodeType = input.NodeType,
@@ -378,7 +389,37 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
                 nodes.Add(node);
                 actionNodes.Add(new RoadmapActionNode(node, input));
-                previousActionNodeId = node.Id;
+                if (input.SkillId is not null)
+                {
+                    nodeBySkillId[input.SkillId.Value] = node;
+                }
+            }
+        }
+
+        // Second pass: wire each node to its nearest semantic prerequisite that is present
+        // in this roadmap and placed earlier (Phase A: a single prerequisite link per node).
+        foreach (var actionNode in actionNodes)
+        {
+            var skillId = actionNode.Input.SkillId;
+            if (skillId is null || !prerequisiteMap.TryGetValue(skillId.Value, out var prerequisiteSkillIds))
+            {
+                continue;
+            }
+
+            RoadmapNode? nearest = null;
+            foreach (var prerequisiteSkillId in prerequisiteSkillIds)
+            {
+                if (nodeBySkillId.TryGetValue(prerequisiteSkillId, out var prerequisiteNode)
+                    && prerequisiteNode.OrderIndex < actionNode.Node.OrderIndex
+                    && (nearest is null || prerequisiteNode.OrderIndex > nearest.OrderIndex))
+                {
+                    nearest = prerequisiteNode;
+                }
+            }
+
+            if (nearest is not null)
+            {
+                actionNode.Node.PrerequisiteNodeId = nearest.Id;
             }
         }
 
@@ -494,6 +535,137 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
                     .ThenBy(resource => resource.Title)
                     .Select(resource => resource.Id)
                     .ToList());
+    }
+
+    private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> GetSkillPrerequisiteMapAsync(
+        IReadOnlyCollection<Guid> skillIds,
+        CancellationToken cancellationToken)
+    {
+        if (skillIds.Count == 0)
+        {
+            return new Dictionary<Guid, IReadOnlyList<Guid>>();
+        }
+
+        var edges = await dbContext.SkillPrerequisites
+            .AsNoTracking()
+            .Where(prerequisite => skillIds.Contains(prerequisite.SkillId)
+                && skillIds.Contains(prerequisite.PrerequisiteSkillId))
+            .Select(prerequisite => new { prerequisite.SkillId, prerequisite.PrerequisiteSkillId })
+            .ToListAsync(cancellationToken);
+
+        return edges
+            .GroupBy(edge => edge.SkillId)
+            .ToDictionary(
+                group => group.Key,
+                group => (IReadOnlyList<Guid>)group
+                    .Select(edge => edge.PrerequisiteSkillId)
+                    .Distinct()
+                    .ToList());
+    }
+
+    private static List<RoadmapNodeInput> TopologicalOrderInputs(
+        IReadOnlyList<RoadmapNodeInput> inputs,
+        IReadOnlyDictionary<Guid, IReadOnlyList<Guid>> prerequisiteMap)
+    {
+        var count = inputs.Count;
+        if (count <= 1)
+        {
+            return inputs.ToList();
+        }
+
+        var indegree = new int[count];
+        var dependents = new List<int>[count];
+        for (var i = 0; i < count; i++)
+        {
+            dependents[i] = [];
+        }
+
+        var indexBySkill = new Dictionary<Guid, int>();
+        for (var i = 0; i < count; i++)
+        {
+            if (inputs[i].SkillId is not null)
+            {
+                indexBySkill[inputs[i].SkillId!.Value] = i;
+            }
+        }
+
+        for (var i = 0; i < count; i++)
+        {
+            var skillId = inputs[i].SkillId;
+            if (skillId is null || !prerequisiteMap.TryGetValue(skillId.Value, out var prerequisiteSkillIds))
+            {
+                continue;
+            }
+
+            foreach (var prerequisiteSkillId in prerequisiteSkillIds)
+            {
+                if (indexBySkill.TryGetValue(prerequisiteSkillId, out var prerequisiteIndex) && prerequisiteIndex != i)
+                {
+                    dependents[prerequisiteIndex].Add(i);
+                    indegree[i]++;
+                }
+            }
+        }
+
+        Comparison<int> byPriorityThenTitle = (left, right) =>
+        {
+            var byPriority = inputs[left].Priority.CompareTo(inputs[right].Priority);
+            return byPriority != 0
+                ? byPriority
+                : string.Compare(inputs[left].Title, inputs[right].Title, StringComparison.OrdinalIgnoreCase);
+        };
+
+        var available = new List<int>();
+        for (var i = 0; i < count; i++)
+        {
+            if (indegree[i] == 0)
+            {
+                available.Add(i);
+            }
+        }
+
+        var ordered = new List<RoadmapNodeInput>(count);
+        var placed = new bool[count];
+
+        while (available.Count > 0)
+        {
+            available.Sort(byPriorityThenTitle);
+            var next = available[0];
+            available.RemoveAt(0);
+            ordered.Add(inputs[next]);
+            placed[next] = true;
+
+            foreach (var dependent in dependents[next])
+            {
+                indegree[dependent]--;
+                if (indegree[dependent] == 0)
+                {
+                    available.Add(dependent);
+                }
+            }
+        }
+
+        // Cycle safety: if a dependency cycle exists, append any unplaced nodes by (Priority, Title)
+        // so generation never fails or drops a skill.
+        if (ordered.Count < count)
+        {
+            var remaining = new List<int>();
+            for (var i = 0; i < count; i++)
+            {
+                if (!placed[i])
+                {
+                    remaining.Add(i);
+                }
+            }
+
+            remaining.Sort(byPriorityThenTitle);
+            foreach (var index in remaining)
+            {
+                ordered.Add(inputs[index]);
+            }
+        }
+
+        return ordered;
     }
 
     private static List<RoadmapNodeInput> GetFallbackNodes(string careerRoleName)
