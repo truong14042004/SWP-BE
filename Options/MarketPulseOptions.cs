@@ -20,7 +20,7 @@ public sealed class TopDevScraperOptions
     public bool Enabled { get; set; } = true;
     public string BaseUrl { get; set; } = "https://topdev.vn";
     public string SitemapIndexPath { get; set; } = "/sitemap-jobs.xml";
-    public int MaxSitemapPages { get; set; } = 1;
+    public int MaxSitemapPages { get; set; } = 100; // Đào sâu
     public int MaxJobsPerRun { get; set; } = 13;
     public int MinRequestDelayMs { get; set; } = 600;
     public int MaxRequestDelayMs { get; set; } = 1500;
@@ -33,7 +33,7 @@ public sealed class TopDevScraperOptions
 public sealed class ITNaviScraperOptions
 {
     public bool Enabled { get; set; } = true;
-    public int MaxSitemapPages { get; set; } = 20;
+    public int MaxSitemapPages { get; set; } = 100; // Đào siêu sâu
     public int MaxJobsPerRun { get; set; } = 13;
     public int DelaySeconds { get; set; } = 1;
 }
@@ -42,7 +42,7 @@ public sealed class VietnamWorksScraperOptions
 {
     public bool Enabled { get; set; } = true;
     public string SitemapUrl { get; set; } = "https://www.vietnamworks.com/sitemap/jobs.xml";
-    public int MaxSitemapJobs { get; set; } = 150; // Quét 150 job mới nhất trong sitemap
+    public int MaxSitemapJobs { get; set; } = 500; // Quét 500 job mới nhất trong sitemap
     public int MaxJobsPerRun { get; set; } = 14;
     public int DelaySeconds { get; set; } = 1;
 }
