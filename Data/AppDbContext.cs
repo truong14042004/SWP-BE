@@ -93,8 +93,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .IsRequired();
 
             entity.HasIndex(user => user.Role);
-            entity.HasCheckConstraint("CK_users_Role",
-                "\"Role\" IN ('Student', 'Admin', 'AcademicCounselor', 'IndustryMentor')");
+            entity.ToTable(t => t.HasCheckConstraint("CK_users_Role", "\"Role\" IN ('Student', 'Admin', 'AcademicCounselor', 'IndustryMentor')"));
 
             entity.Property(user => user.IsActive)
                 .HasDefaultValue(true);
@@ -163,10 +162,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(profile => profile.Gpa).HasPrecision(4, 2);
             entity.Property(profile => profile.GithubUsername).HasMaxLength(100);
             entity.Property(profile => profile.CareerGoal).HasMaxLength(1000);
-            entity.HasCheckConstraint("CK_student_profiles_Year", "\"Year\" IS NULL OR (\"Year\" >= 1 AND \"Year\" <= 8)");
-            entity.HasCheckConstraint("CK_student_profiles_Gpa", "\"Gpa\" IS NULL OR \"Gpa\" >= 0");
-            entity.HasCheckConstraint("CK_student_profiles_PreferredLearningHoursPerWeek",
-                "\"PreferredLearningHoursPerWeek\" IS NULL OR \"PreferredLearningHoursPerWeek\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_student_profiles_Year", "\"Year\" IS NULL OR (\"Year\" >= 1 AND \"Year\" <= 8)"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_student_profiles_Gpa", "\"Gpa\" IS NULL OR \"Gpa\" >= 0"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_student_profiles_PreferredLearningHoursPerWeek", "\"PreferredLearningHoursPerWeek\" IS NULL OR \"PreferredLearningHoursPerWeek\" >= 0"));
             entity.HasOne(profile => profile.User)
                 .WithOne()
                 .HasForeignKey<StudentProfile>(profile => profile.UserId)
@@ -347,9 +345,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(requirement => requirement.Priority);
             entity.Property(requirement => requirement.RequiredLevel).HasMaxLength(30).IsRequired();
             entity.Property(requirement => requirement.Weight).HasPrecision(5, 2).HasDefaultValue(1m);
-            entity.HasCheckConstraint("CK_role_skill_requirements_Priority",
-                "\"Priority\" >= 1 AND \"Priority\" <= 5");
-            entity.HasCheckConstraint("CK_role_skill_requirements_Weight", "\"Weight\" > 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_role_skill_requirements_Priority", "\"Priority\" >= 1 AND \"Priority\" <= 5"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_role_skill_requirements_Weight", "\"Weight\" > 0"));
             entity.HasOne(requirement => requirement.CareerRole)
                 .WithMany()
                 .HasForeignKey(requirement => requirement.CareerRoleId)
@@ -409,8 +406,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(report => report.CareerRoleId);
             entity.Property(report => report.MatchScore).HasPrecision(5, 2);
             entity.Property(report => report.Summary).HasMaxLength(4000);
-            entity.HasCheckConstraint("CK_skill_gap_reports_MatchScore",
-                "\"MatchScore\" >= 0 AND \"MatchScore\" <= 100");
+            entity.ToTable(t => t.HasCheckConstraint("CK_skill_gap_reports_MatchScore", "\"MatchScore\" >= 0 AND \"MatchScore\" <= 100"));
             entity.HasOne(report => report.User)
                 .WithMany()
                 .HasForeignKey(report => report.UserId)
@@ -433,8 +429,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(item => item.RequiredLevel).HasMaxLength(30).IsRequired();
             entity.Property(item => item.Status).HasMaxLength(30).IsRequired();
             entity.Property(item => item.Recommendation).HasMaxLength(2000);
-            entity.HasCheckConstraint("CK_skill_gap_report_items_Priority",
-                "\"Priority\" >= 1 AND \"Priority\" <= 5");
+            entity.ToTable(t => t.HasCheckConstraint("CK_skill_gap_report_items_Priority", "\"Priority\" >= 1 AND \"Priority\" <= 5"));
             entity.HasOne(item => item.SkillGapReport)
                 .WithMany()
                 .HasForeignKey(item => item.SkillGapReportId)
@@ -455,8 +450,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(roadmap => roadmap.Description).HasMaxLength(2000);
             entity.Property(roadmap => roadmap.Status).HasMaxLength(30).HasDefaultValue("Draft").IsRequired();
             entity.Property(roadmap => roadmap.Progress).HasPrecision(5, 2).HasDefaultValue(0m);
-            entity.HasCheckConstraint("CK_roadmaps_Progress",
-                "\"Progress\" >= 0 AND \"Progress\" <= 100");
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmaps_Progress", "\"Progress\" >= 0 AND \"Progress\" <= 100"));
             entity.HasOne(roadmap => roadmap.User)
                 .WithMany()
                 .HasForeignKey(roadmap => roadmap.UserId)
@@ -486,12 +480,9 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(node => node.NodeType).HasMaxLength(30).IsRequired();
             entity.Property(node => node.Status).HasMaxLength(30).HasDefaultValue("NotStarted").IsRequired();
             entity.Property(node => node.Level).HasDefaultValue(0);
-            entity.HasCheckConstraint("CK_roadmap_nodes_EstimatedHours",
-                "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0");
-            entity.HasCheckConstraint("CK_roadmap_nodes_Level",
-                "\"Level\" >= 0 AND \"Level\" <= 8");
-            entity.HasCheckConstraint("CK_roadmap_nodes_Priority",
-                "\"Priority\" >= 1 AND \"Priority\" <= 5");
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_EstimatedHours", "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_Level", "\"Level\" >= 0 AND \"Level\" <= 8"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_Priority", "\"Priority\" >= 1 AND \"Priority\" <= 5"));
             entity.HasOne(node => node.Roadmap)
                 .WithMany()
                 .HasForeignKey(node => node.RoadmapId)
@@ -521,7 +512,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(item => new { item.RoadmapNodeId, item.LearningResourceId }).IsUnique();
             entity.HasIndex(item => item.LearningResourceId);
             entity.HasIndex(item => new { item.RoadmapNodeId, item.OrderIndex });
-            entity.HasCheckConstraint("CK_roadmap_node_resources_OrderIndex", "\"OrderIndex\" >= 1");
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_node_resources_OrderIndex", "\"OrderIndex\" >= 1"));
             entity.HasOne(item => item.RoadmapNode)
                 .WithMany(node => node.Resources)
                 .HasForeignKey(item => item.RoadmapNodeId)
@@ -545,8 +536,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(resource => resource.ResourceType).HasMaxLength(50).IsRequired();
             entity.Property(resource => resource.Difficulty).HasMaxLength(50);
             entity.Property(resource => resource.IsActive).HasDefaultValue(true);
-            entity.HasCheckConstraint("CK_learning_resources_EstimatedHours",
-                "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_learning_resources_EstimatedHours", "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0"));
             entity.HasOne(resource => resource.Skill)
                 .WithMany()
                 .HasForeignKey(resource => resource.SkillId)
@@ -581,8 +571,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(session => session.Answer).HasColumnType("text").IsRequired();
             entity.Property(session => session.ContextJson).HasColumnType("text");
             entity.Property(session => session.Model).HasMaxLength(100);
-            entity.HasCheckConstraint("CK_mentor_sessions_TokensUsed",
-                "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_mentor_sessions_TokensUsed", "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0"));
             entity.HasOne(session => session.User)
                 .WithMany()
                 .HasForeignKey(session => session.UserId)
@@ -605,8 +594,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(repository => repository.AiSummary).HasColumnType("text");
             entity.Property(repository => repository.TechStackJson).HasColumnType("jsonb");
             entity.Property(repository => repository.QualityScore).HasPrecision(5, 2);
-            entity.HasCheckConstraint("CK_github_repositories_QualityScore",
-                "\"QualityScore\" IS NULL OR (\"QualityScore\" >= 0 AND \"QualityScore\" <= 100)");
+            entity.ToTable(t => t.HasCheckConstraint("CK_github_repositories_QualityScore", "\"QualityScore\" IS NULL OR (\"QualityScore\" >= 0 AND \"QualityScore\" <= 100)"));
             entity.HasOne(repository => repository.User)
                 .WithMany()
                 .HasForeignKey(repository => repository.UserId)
@@ -621,8 +609,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(repositorySkill => repositorySkill.SkillId);
             entity.Property(repositorySkill => repositorySkill.ConfidenceScore).HasPrecision(5, 2);
             entity.Property(repositorySkill => repositorySkill.EvidenceText).HasMaxLength(2000);
-            entity.HasCheckConstraint("CK_github_repository_skills_ConfidenceScore",
-                "\"ConfidenceScore\" IS NULL OR (\"ConfidenceScore\" >= 0 AND \"ConfidenceScore\" <= 100)");
+            entity.ToTable(t => t.HasCheckConstraint("CK_github_repository_skills_ConfidenceScore", "\"ConfidenceScore\" IS NULL OR (\"ConfidenceScore\" >= 0 AND \"ConfidenceScore\" <= 100)"));
             entity.HasOne(repositorySkill => repositorySkill.GithubRepository)
                 .WithMany()
                 .HasForeignKey(repositorySkill => repositorySkill.GithubRepositoryId)
@@ -852,8 +839,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(feedback => feedback.PortfolioId);
             entity.HasIndex(feedback => feedback.GithubRepositoryId);
             entity.Property(feedback => feedback.Comment).HasColumnType("text").IsRequired();
-            entity.HasCheckConstraint("CK_mentor_feedbacks_Rating",
-                "\"Rating\" IS NULL OR (\"Rating\" >= 1 AND \"Rating\" <= 5)");
+            entity.ToTable(t => t.HasCheckConstraint("CK_mentor_feedbacks_Rating", "\"Rating\" IS NULL OR (\"Rating\" >= 1 AND \"Rating\" <= 5)"));
             entity.HasOne(feedback => feedback.Mentor)
                 .WithMany()
                 .HasForeignKey(feedback => feedback.MentorId)
@@ -883,8 +869,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(feedback => feedback.FeedbackText).HasColumnType("text").IsRequired();
             entity.Property(feedback => feedback.Recommendations).HasColumnType("text");
             entity.Property(feedback => feedback.PrivateNotes).HasColumnType("text");
-            entity.HasCheckConstraint("CK_counselor_feedbacks_Rating",
-                "\"Rating\" IS NULL OR (\"Rating\" >= 1 AND \"Rating\" <= 5)");
+            entity.ToTable(t => t.HasCheckConstraint("CK_counselor_feedbacks_Rating", "\"Rating\" IS NULL OR (\"Rating\" >= 1 AND \"Rating\" <= 5)"));
             entity.HasOne(feedback => feedback.Counselor)
                 .WithMany()
                 .HasForeignKey(feedback => feedback.CounselorId)
@@ -937,10 +922,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(item => item.EvidenceUrl).HasMaxLength(2048);
             entity.Property(item => item.EvidenceType).HasMaxLength(50);
             entity.Property(item => item.EvidenceFileName).HasMaxLength(255);
-            entity.HasCheckConstraint("CK_roadmap_node_review_requests_Status",
-                "\"Status\" IN ('Pending','Approved','Rejected','Cancelled')");
-            entity.HasCheckConstraint("CK_roadmap_node_review_requests_ReviewerRole",
-                "\"ReviewerRole\" IN ('AcademicCounselor','IndustryMentor')");
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_node_review_requests_Status", "\"Status\" IN ('Pending','Approved','Rejected','Cancelled')"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_node_review_requests_ReviewerRole", "\"ReviewerRole\" IN ('AcademicCounselor','IndustryMentor')"));
             entity.HasOne(item => item.RoadmapNode)
                 .WithMany()
                 .HasForeignKey(item => item.RoadmapNodeId)
@@ -974,8 +957,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(item => item.SuggestedQuestionsJson).HasColumnType("jsonb");
             entity.Property(item => item.SkillMappingJson).HasColumnType("jsonb");
             entity.Property(item => item.OverallSummary).HasColumnType("text");
-            entity.HasCheckConstraint("CK_ai_review_summaries_TokensUsed",
-                "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_ai_review_summaries_TokensUsed", "\"TokensUsed\" IS NULL OR \"TokensUsed\" >= 0"));
             entity.HasOne(item => item.GeneratedByUser)
                 .WithMany()
                 .HasForeignKey(item => item.GeneratedByUserId)
@@ -1047,7 +1029,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(mention => mention.Keyword);
             entity.HasIndex(mention => mention.SkillId);
             entity.Property(mention => mention.Keyword).HasMaxLength(100).IsRequired();
-            entity.HasCheckConstraint("CK_job_skill_mentions_MentionCount", "\"MentionCount\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_job_skill_mentions_MentionCount", "\"MentionCount\" >= 0"));
             entity.HasOne(mention => mention.JobPost)
                 .WithMany()
                 .HasForeignKey(mention => mention.JobPostId)
@@ -1066,8 +1048,8 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(snapshot => snapshot.SnapshotDate);
             entity.HasIndex(snapshot => snapshot.SkillId);
             entity.Property(snapshot => snapshot.Keyword).HasMaxLength(100).IsRequired();
-            entity.HasCheckConstraint("CK_keyword_trend_snapshots_JobCount", "\"JobCount\" >= 0");
-            entity.HasCheckConstraint("CK_keyword_trend_snapshots_TotalMentions", "\"TotalMentions\" >= 0");
+            entity.ToTable(t => t.HasCheckConstraint("CK_keyword_trend_snapshots_JobCount", "\"JobCount\" >= 0"));
+            entity.ToTable(t => t.HasCheckConstraint("CK_keyword_trend_snapshots_TotalMentions", "\"TotalMentions\" >= 0"));
             entity.HasOne(snapshot => snapshot.Skill)
                 .WithMany()
                 .HasForeignKey(snapshot => snapshot.SkillId)
