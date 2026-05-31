@@ -64,3 +64,8 @@ TestResult.xml
 nunit-*.xml
 
 .fake
+
+# Local scratch / debug files
+git_history.txt
+*.log
+backend_debug*.log
