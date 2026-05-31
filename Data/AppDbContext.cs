@@ -205,7 +205,19 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222115"), Name = "Test Automation", Category = "QA", Description = "Automating API, UI, and regression tests with repeatable reporting.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222116"), Name = "AI API Integration", Category = "AI", Description = "Calling AI providers with prompts, structured outputs, retries, and result persistence.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222117"), Name = "Prompt Engineering", Category = "AI", Description = "Designing prompts, evaluation criteria, and guardrails for AI-assisted features.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
-                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222118"), Name = "GitHub Portfolio", Category = "Career", Description = "Presenting repositories with README, screenshots, demo links, and clear project evidence.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt });
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222118"), Name = "GitHub Portfolio", Category = "Career", Description = "Presenting repositories with README, screenshots, demo links, and clear project evidence.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222119"), Name = "Git & Version Control", Category = "Engineering", Description = "Tracking changes with branches, merges, pull requests, and collaborative workflows.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222120"), Name = "HTML & CSS", Category = "Frontend", Description = "Structuring web content and styling layouts, typography, and visual presentation.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222121"), Name = "JavaScript Fundamentals", Category = "Frontend", Description = "Core language features, DOM manipulation, async patterns, and ES modules.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222122"), Name = "Data Structures & Algorithms", Category = "Engineering", Description = "Core data structures, complexity analysis, and problem-solving techniques.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222123"), Name = "System Design", Category = "Backend", Description = "Designing scalable systems with caching, load balancing, and data partitioning.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222124"), Name = "Kubernetes", Category = "DevOps", Description = "Orchestrating containers with deployments, services, scaling, and config management.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222125"), Name = "NoSQL Databases", Category = "Data", Description = "Modeling and querying document, key-value, and wide-column data stores.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222126"), Name = "GraphQL", Category = "Backend", Description = "Building schema-driven APIs with queries, mutations, and resolvers.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222127"), Name = "Microservices", Category = "Backend", Description = "Decomposing systems into independently deployable services with messaging.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222128"), Name = "Linux & Shell", Category = "DevOps", Description = "Operating Linux systems, shell scripting, permissions, and process management.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222129"), Name = "Monitoring & Observability", Category = "DevOps", Description = "Instrumenting metrics, logs, traces, and alerts for production systems.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new Skill { Id = Guid.Parse("22222222-2222-2222-2222-222222222130"), Name = "Machine Learning Fundamentals", Category = "AI", Description = "Supervised learning, model evaluation, feature engineering, and training workflows.", IsActive = true, CreatedAt = SeededAt, UpdatedAt = SeededAt });
         });
 
         modelBuilder.Entity<UserSkill>(entity =>
@@ -334,6 +346,36 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                     IsActive = true,
                     CreatedAt = SeededAt,
                     UpdatedAt = SeededAt
+                },
+                new CareerRole
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111110"),
+                    Name = "Security Engineer",
+                    Description = "Secures applications and infrastructure through authentication, access control, hardening, and vulnerability management.",
+                    Level = "Fresher",
+                    IsActive = true,
+                    CreatedAt = SeededAt,
+                    UpdatedAt = SeededAt
+                },
+                new CareerRole
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+                    Name = "Machine Learning Engineer",
+                    Description = "Builds, trains, and deploys machine learning models and data-driven prediction services.",
+                    Level = "Fresher",
+                    IsActive = true,
+                    CreatedAt = SeededAt,
+                    UpdatedAt = SeededAt
+                },
+                new CareerRole
+                {
+                    Id = Guid.Parse("11111111-1111-1111-1111-111111111112"),
+                    Name = "Site Reliability Engineer",
+                    Description = "Ensures system reliability, observability, scaling, and incident response for production services.",
+                    Level = "Fresher",
+                    IsActive = true,
+                    CreatedAt = SeededAt,
+                    UpdatedAt = SeededAt
                 });
         });
 
@@ -396,7 +438,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444137"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222117"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.3m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444138"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.0m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
                 new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444139"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222107"), RequiredLevel = "Beginner", Priority = 3, Weight = 0.9m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
-                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444140"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222118"), RequiredLevel = "Beginner", Priority = 4, Weight = 0.8m, CreatedAt = SeededAt, UpdatedAt = SeededAt });
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444140"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111109"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222118"), RequiredLevel = "Beginner", Priority = 4, Weight = 0.8m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444141"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111110"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222103"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.5m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444142"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111110"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222128"), RequiredLevel = "Intermediate", Priority = 2, Weight = 1.2m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444143"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111110"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.1m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444144"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111110"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222104"), RequiredLevel = "Beginner", Priority = 3, Weight = 1.0m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444145"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111111"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222130"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.5m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444146"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111111"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222113"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.3m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444147"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111111"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222114"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.2m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444148"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111111"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222116"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.1m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444149"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111111"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222117"), RequiredLevel = "Beginner", Priority = 3, Weight = 0.9m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444150"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111112"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222128"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.4m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444151"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111112"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222129"), RequiredLevel = "Intermediate", Priority = 1, Weight = 1.4m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444152"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111112"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222124"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.2m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444153"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111112"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), RequiredLevel = "Beginner", Priority = 2, Weight = 1.1m, CreatedAt = SeededAt, UpdatedAt = SeededAt },
+                new RoleSkillRequirement { Id = Guid.Parse("44444444-4444-4444-4444-444444444154"), CareerRoleId = Guid.Parse("11111111-1111-1111-1111-111111111112"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222111"), RequiredLevel = "Beginner", Priority = 3, Weight = 1.0m, CreatedAt = SeededAt, UpdatedAt = SeededAt });
         });
 
         modelBuilder.Entity<SkillPrerequisite>(entity =>
@@ -423,7 +479,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555506"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222112"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
                 new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555507"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222111"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
                 new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555508"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222115"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222104"), CreatedAt = SeededAt },
-                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555509"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222116"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222117"), CreatedAt = SeededAt });
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555509"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222116"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222117"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555510"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222121"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222120"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555511"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222106"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222121"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555512"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222106"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222120"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555513"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222107"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222121"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555514"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222108"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222120"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555515"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222124"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555516"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222127"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555517"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222127"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222105"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555518"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222126"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555519"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222123"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222102"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555520"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222123"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222101"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555521"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222125"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222102"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555522"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222129"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222112"), CreatedAt = SeededAt },
+                new SkillPrerequisite { Id = Guid.Parse("55555555-5555-5555-5555-555555555523"), SkillId = Guid.Parse("22222222-2222-2222-2222-222222222130"), PrerequisiteSkillId = Guid.Parse("22222222-2222-2222-2222-222222222113"), CreatedAt = SeededAt });
         });
 
         modelBuilder.Entity<SkillGapReport>(entity =>
