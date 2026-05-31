@@ -317,6 +317,27 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
             ? 0
             : Math.Round(completedCount * 100m / progressNodes.Count, 2);
         node.Roadmap.UpdatedAt = DateTimeOffset.UtcNow;
+
+        var isFullyCompleted = progressNodes.Count > 0 && completedCount == progressNodes.Count;
+        if (isFullyCompleted && node.Roadmap.Status != "Completed")
+        {
+            node.Roadmap.Status = "Completed";
+            dbContext.Notifications.Add(new Notification
+            {
+                Id = Guid.NewGuid(),
+                UserId = node.Roadmap.UserId,
+                Type = "RoadmapCompleted",
+                Title = "Chúc mừng! Bạn đã hoàn thành lộ trình",
+                Message = $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
+                LinkUrl = "#roadmap",
+                IsRead = false,
+                CreatedAt = DateTimeOffset.UtcNow
+            });
+        }
+        else if (!isFullyCompleted && node.Roadmap.Status == "Completed")
+        {
+            node.Roadmap.Status = "Active";
+        }
     }
 
 
