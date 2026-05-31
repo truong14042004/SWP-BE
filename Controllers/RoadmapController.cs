@@ -4,12 +4,15 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize]
-public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
+public sealed class RoadmapController(
+    AppDbContext dbContext,
+    IUserSkillSyncService userSkillSyncService) : ControllerBase
 {
     [HttpPost("api/roadmap/generate")]
     public async Task<ActionResult<RoadmapResponse>> Generate(
@@ -294,6 +297,16 @@ public sealed class RoadmapController(AppDbContext dbContext) : ControllerBase
 
         node.Status = "Verified";
         node.UpdatedAt = DateTimeOffset.UtcNow;
+
+        if (node.SkillId is not null)
+        {
+            await userSkillSyncService.SyncVerifiedSkillAsync(
+                node.Roadmap.UserId,
+                node.SkillId.Value,
+                node.Roadmap.CareerRoleId,
+                GetCurrentUserId(),
+                cancellationToken);
+        }
 
         await RecalculateRoadmapProgressAsync(node, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);

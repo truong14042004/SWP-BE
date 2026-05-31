@@ -17,6 +17,7 @@ public sealed class RoadmapReviewController(
     IEmailSender emailSender,
     IStudentReviewQuotaService quotaService,
     IAiReviewSummaryService aiReviewSummaryService,
+    IUserSkillSyncService userSkillSyncService,
     ILogger<RoadmapReviewController> logger) : ControllerBase
 {
     private const long MaxEvidenceFileSize = 25 * 1024 * 1024; // 25 MB
@@ -490,6 +491,16 @@ public sealed class RoadmapReviewController(
         node.Status = "Verified";
         node.UpdatedAt = now;
 
+        if (node.SkillId is not null)
+        {
+            await userSkillSyncService.SyncVerifiedSkillAsync(
+                node.Roadmap.UserId,
+                node.SkillId.Value,
+                node.Roadmap.CareerRoleId,
+                reviewerId,
+                cancellationToken);
+        }
+
         // Group review: cascade verify all non-group descendants that are
         // Completed (so progress reflects the group sign-off).
         if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
@@ -504,6 +515,16 @@ public sealed class RoadmapReviewController(
             {
                 child.Status = "Verified";
                 child.UpdatedAt = now;
+
+                if (child.SkillId is not null)
+                {
+                    await userSkillSyncService.SyncVerifiedSkillAsync(
+                        node.Roadmap.UserId,
+                        child.SkillId.Value,
+                        node.Roadmap.CareerRoleId,
+                        reviewerId,
+                        cancellationToken);
+                }
             }
         }
 
