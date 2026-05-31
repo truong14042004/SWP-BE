@@ -500,6 +500,175 @@ public sealed class AdminController(
         return NoContent();
     }
 
+    [HttpGet("skill-prerequisites")]
+    public async Task<ActionResult<IReadOnlyList<SkillPrerequisiteResponse>>> GetSkillPrerequisites(
+        CancellationToken cancellationToken)
+    {
+        var prerequisites = await dbContext.SkillPrerequisites
+            .AsNoTracking()
+            .Include(item => item.Skill)
+            .Include(item => item.PrerequisiteSkill)
+            .OrderBy(item => item.Skill.Name)
+            .ThenBy(item => item.PrerequisiteSkill.Name)
+            .Select(item => ToResponse(item))
+            .ToListAsync(cancellationToken);
+
+        return Ok(prerequisites);
+    }
+
+    [HttpGet("skill-prerequisites/{id:guid}")]
+    public async Task<ActionResult<SkillPrerequisiteResponse>> GetSkillPrerequisite(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var prerequisite = await dbContext.SkillPrerequisites
+            .AsNoTracking()
+            .Include(item => item.Skill)
+            .Include(item => item.PrerequisiteSkill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        return prerequisite is null
+            ? NotFound(new { message = "Không tìm thấy quan hệ tiên quyết." })
+            : Ok(ToResponse(prerequisite));
+    }
+
+    [HttpPost("skill-prerequisites")]
+    public async Task<ActionResult<SkillPrerequisiteResponse>> CreateSkillPrerequisite(
+        SaveSkillPrerequisiteRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validationError = await ValidateSkillPrerequisiteRequest(request, cancellationToken);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
+        }
+
+        var prerequisite = new SkillPrerequisite
+        {
+            Id = Guid.NewGuid(),
+            SkillId = request.SkillId,
+            PrerequisiteSkillId = request.PrerequisiteSkillId,
+            CreatedAt = DateTimeOffset.UtcNow
+        };
+
+        dbContext.SkillPrerequisites.Add(prerequisite);
+        await dbContext.SaveChangesAsync(cancellationToken);
+        await dbContext.Entry(prerequisite).Reference(item => item.Skill).LoadAsync(cancellationToken);
+        await dbContext.Entry(prerequisite).Reference(item => item.PrerequisiteSkill).LoadAsync(cancellationToken);
+
+        return CreatedAtAction(nameof(GetSkillPrerequisite), new { id = prerequisite.Id }, ToResponse(prerequisite));
+    }
+
+    [HttpDelete("skill-prerequisites/{id:guid}")]
+    public async Task<IActionResult> DeleteSkillPrerequisite(Guid id, CancellationToken cancellationToken)
+    {
+        var prerequisite = await dbContext.SkillPrerequisites.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (prerequisite is null)
+        {
+            return NotFound(new { message = "Không tìm thấy quan hệ tiên quyết." });
+        }
+
+        dbContext.SkillPrerequisites.Remove(prerequisite);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
+    private async Task<string?> ValidateSkillPrerequisiteRequest(
+        SaveSkillPrerequisiteRequest request,
+        CancellationToken cancellationToken)
+    {
+        if (request.SkillId == Guid.Empty)
+        {
+            return "Kỹ năng là bắt buộc.";
+        }
+
+        if (request.PrerequisiteSkillId == Guid.Empty)
+        {
+            return "Kỹ năng tiên quyết là bắt buộc.";
+        }
+
+        if (request.SkillId == request.PrerequisiteSkillId)
+        {
+            return "Một kỹ năng không thể là tiên quyết của chính nó.";
+        }
+
+        var skillExists = await dbContext.Skills.AnyAsync(
+            skill => skill.Id == request.SkillId && skill.IsActive,
+            cancellationToken);
+        if (!skillExists)
+        {
+            return "Không tìm thấy kỹ năng đang hoạt động.";
+        }
+
+        var prerequisiteSkillExists = await dbContext.Skills.AnyAsync(
+            skill => skill.Id == request.PrerequisiteSkillId && skill.IsActive,
+            cancellationToken);
+        if (!prerequisiteSkillExists)
+        {
+            return "Không tìm thấy kỹ năng tiên quyết đang hoạt động.";
+        }
+
+        var duplicate = await dbContext.SkillPrerequisites.AnyAsync(
+            item => item.SkillId == request.SkillId && item.PrerequisiteSkillId == request.PrerequisiteSkillId,
+            cancellationToken);
+        if (duplicate)
+        {
+            return "Quan hệ tiên quyết này đã tồn tại.";
+        }
+
+        // Cycle guard: adding "SkillId requires PrerequisiteSkillId" must not create a loop.
+        // A cycle exists if PrerequisiteSkillId can already reach SkillId by following
+        // existing prerequisite edges (skill -> prerequisite).
+        var edges = await dbContext.SkillPrerequisites
+            .AsNoTracking()
+            .Select(item => new { item.SkillId, item.PrerequisiteSkillId })
+            .ToListAsync(cancellationToken);
+
+        var adjacency = edges
+            .GroupBy(edge => edge.SkillId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.Select(edge => edge.PrerequisiteSkillId).ToList());
+
+        var visited = new HashSet<Guid>();
+        var queue = new Queue<Guid>();
+        queue.Enqueue(request.PrerequisiteSkillId);
+
+        while (queue.Count > 0)
+        {
+            var current = queue.Dequeue();
+            if (current == request.SkillId)
+            {
+                return "Không thể tạo quan hệ này vì sẽ tạo thành vòng lặp tiên quyết.";
+            }
+
+            if (!visited.Add(current))
+            {
+                continue;
+            }
+
+            if (adjacency.TryGetValue(current, out var next))
+            {
+                foreach (var skillId in next)
+                {
+                    queue.Enqueue(skillId);
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private static SkillPrerequisiteResponse ToResponse(SkillPrerequisite prerequisite) =>
+        new(
+            prerequisite.Id,
+            prerequisite.SkillId,
+            prerequisite.Skill.Name,
+            prerequisite.PrerequisiteSkillId,
+            prerequisite.PrerequisiteSkill.Name,
+            prerequisite.CreatedAt);
+
     private static string? ValidateSkillRequest(SaveSkillRequest request)
     {
         if (string.IsNullOrWhiteSpace(request.Name))
@@ -798,3 +967,15 @@ public sealed record RoleSkillRequirementResponse(
     decimal Weight,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+public sealed record SaveSkillPrerequisiteRequest(
+    Guid SkillId,
+    Guid PrerequisiteSkillId);
+
+public sealed record SkillPrerequisiteResponse(
+    Guid Id,
+    Guid SkillId,
+    string SkillName,
+    Guid PrerequisiteSkillId,
+    string PrerequisiteSkillName,
+    DateTimeOffset CreatedAt);
