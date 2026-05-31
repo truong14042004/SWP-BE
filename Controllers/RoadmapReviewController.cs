@@ -413,7 +413,7 @@ public sealed class RoadmapReviewController(
         var objectName = $"users/{userId}/roadmap-evidence/{timestamp}-{safeName}{extension}";
 
         await using var stream = request.File.OpenReadStream();
-        var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
+        var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType ?? "application/octet-stream", cancellationToken);
 
         var evidenceType = extension switch
         {

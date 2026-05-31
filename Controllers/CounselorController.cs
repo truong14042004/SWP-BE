@@ -785,7 +785,7 @@ public sealed record CounselorSkillGapReportItemResponse(
     Guid SkillId,
     string SkillName,
     string SkillCategory,
-    string CurrentLevel,
+    string? CurrentLevel,
     string RequiredLevel,
     string Status,
     int Priority,
