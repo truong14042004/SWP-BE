@@ -13,6 +13,18 @@ public sealed class MarketPulseOptions
     public TopDevScraperOptions TopDev { get; set; } = new();
     public ITNaviScraperOptions ITNavi { get; set; } = new();
     public VietnamWorksScraperOptions VietnamWorks { get; set; } = new();
+    public TopCVScraperOptions TopCV { get; set; } = new();
+}
+
+public sealed class TopCVScraperOptions
+{
+    public bool Enabled { get; set; } = true;
+    public string BaseUrl { get; set; } = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257";
+    public string ApiKey { get; set; } = "";
+    public int MaxPages { get; set; } = 5; // Cho phép cào sâu hơn nếu chưa đủ job
+    public int MaxJobsPerRun { get; set; } = 50; // Giới hạn số lượng job MỚI mỗi lần chạy
+    public bool JsRender { get; set; } = true;
+    public bool PremiumProxy { get; set; } = true;
 }
 
 public sealed class TopDevScraperOptions
@@ -21,7 +33,7 @@ public sealed class TopDevScraperOptions
     public string BaseUrl { get; set; } = "https://topdev.vn";
     public string SitemapIndexPath { get; set; } = "/sitemap-jobs.xml";
     public int MaxSitemapPages { get; set; } = 100; // Đào sâu
-    public int MaxJobsPerRun { get; set; } = 13;
+    public int MaxJobsPerRun { get; set; } = 60;
     public int MinRequestDelayMs { get; set; } = 600;
     public int MaxRequestDelayMs { get; set; } = 1500;
     public int RequestTimeoutSeconds { get; set; } = 30;
