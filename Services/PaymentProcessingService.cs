@@ -129,6 +129,45 @@ public sealed class PaymentProcessingService(AppDbContext dbContext) : IPaymentP
                 CreatedAt = paidAt
             });
         }
+
+        // Tự động gán Cố vấn Học tập ngẫu nhiên nếu sinh viên chưa có
+        if (payment.Subscription is not null)
+        {
+            var hasActiveAssignment = await dbContext.CounselorAssignments
+                .AnyAsync(ca => ca.StudentId == payment.UserId && ca.Status == "Active", cancellationToken);
+
+            if (!hasActiveAssignment)
+            {
+                var randomCounselorId = await dbContext.Users
+                    .Where(u => u.Role == UserRoles.AcademicCounselor && u.IsActive)
+                    .Select(u => u.Id)
+                    .OrderBy(id => Guid.NewGuid())
+                    .FirstOrDefaultAsync(cancellationToken);
+
+                if (randomCounselorId != Guid.Empty)
+                {
+                    var adminId = await dbContext.Users
+                        .Where(u => u.Role == UserRoles.Admin && u.IsActive)
+                        .Select(u => u.Id)
+                        .FirstOrDefaultAsync(cancellationToken);
+
+                    if (adminId != Guid.Empty)
+                    {
+                        dbContext.CounselorAssignments.Add(new CounselorAssignment
+                        {
+                            Id = Guid.NewGuid(),
+                            StudentId = payment.UserId,
+                            CounselorId = randomCounselorId,
+                            AssignedByAdminId = adminId,
+                            Status = "Active",
+                            Note = "Hệ thống tự động phân công ngẫu nhiên sau khi kích hoạt gói cước.",
+                            CreatedAt = paidAt,
+                            UpdatedAt = paidAt
+                        });
+                    }
+                }
+            }
+        }
     }
 
     public void MarkFailed(PaymentTransaction payment, DateTimeOffset failedAt)
