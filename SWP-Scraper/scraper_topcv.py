@@ -8,16 +8,39 @@ FastAPI để có thể chạy trực tiếp (``python scraper_topcv.py``) khi c
 """
 from __future__ import annotations
 
+import os
 import re
 import sys
 from typing import Iterable
 
-from scrapling.fetchers import Fetcher
+from scrapling.fetchers import Fetcher, StealthyFetcher
 
 
 def _log(*values) -> None:
     """In thông tin chẩn đoán ra stderr, giữ stdout sạch để xuất JSON."""
     print(*values, file=sys.stderr)
+
+
+# Bật trình duyệt tàng hình (camoufox) để vượt anti-bot/Cloudflare khi Fetcher
+# (HTTP thuần) bị chặn 403 — ví dụ khi chạy từ IP datacenter Cloud Run.
+# Mặc định BẬT; đặt TOPCV_USE_STEALTH=0 để quay lại Fetcher nhanh (vd test local
+# từ IP Việt Nam vốn không bị chặn, không cần tải browser).
+USE_STEALTH = os.environ.get("TOPCV_USE_STEALTH", "1").strip().lower() in (
+    "1", "true", "yes", "on",
+)
+
+
+def _fetch_page(url: str, timeout: int):
+    """Tải 1 trang: StealthyFetcher (trình duyệt) hoặc Fetcher (HTTP) tuỳ cấu hình."""
+    if USE_STEALTH:
+        # timeout của trình duyệt tính bằng mili-giây.
+        return StealthyFetcher.fetch(
+            url,
+            headless=True,
+            network_idle=True,
+            timeout=timeout * 1000,
+        )
+    return Fetcher.get(url, timeout=timeout)
 
 # Trang việc làm Công nghệ thông tin của TopCV.
 BASE_URL = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257"
@@ -185,7 +208,7 @@ def scrape_topcv(
         url = f"{base_url}{sep}page={page}"
 
         try:
-            response = Fetcher.get(url, timeout=timeout)
+            response = _fetch_page(url, timeout)
         except Exception as exc:  # noqa: BLE001 - cào thất bại thì dừng an toàn
             _log(f"[scrape_topcv] Lỗi tải trang {page}: {exc!r}")
             break
