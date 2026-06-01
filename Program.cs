@@ -62,7 +62,9 @@ builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
 builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
 builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
-builder.Services.AddScoped<IJobScraper, TopCVScraper>();
+// TopCV được cào qua microservice Python (Scrapling) thay vì ZenRows trả phí.
+// Đăng ký dạng typed HttpClient để tự cấu hình HttpClient cho scraper này.
+builder.Services.AddHttpClient<IJobScraper, ScraplingApiScraper>();
 builder.Services.AddScoped<IJobScraper, TopDevScraper>();
 builder.Services.AddScoped<IJobScraper, ITNaviScraper>();
 builder.Services.AddScoped<IJobScraper, VietnamWorksScraper>();

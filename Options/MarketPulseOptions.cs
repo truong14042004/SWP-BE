@@ -14,6 +14,21 @@ public sealed class MarketPulseOptions
     public ITNaviScraperOptions ITNavi { get; set; } = new();
     public VietnamWorksScraperOptions VietnamWorks { get; set; } = new();
     public TopCVScraperOptions TopCV { get; set; } = new();
+    public ScraplingApiOptions ScraplingApi { get; set; } = new();
+}
+
+public sealed class ScraplingApiOptions
+{
+    // Bật/tắt việc cào TopCV qua microservice Python (Scrapling).
+    public bool Enabled { get; set; } = true;
+    // URL gốc của service Python, ví dụ https://swp-scraper-xxxx.a.run.app.
+    public string BaseUrl { get; set; } = "";
+    // Token nội bộ gửi qua header X-Internal-Token. Nên đặt qua biến môi
+    // trường/secret, KHÔNG hardcode trong appsettings.json.
+    public string Token { get; set; } = "";
+    public int TimeoutSeconds { get; set; } = 60;
+    public int MaxJobsPerRun { get; set; } = 50;
+    public int MaxPages { get; set; } = 5;
 }
 
 public sealed class TopCVScraperOptions

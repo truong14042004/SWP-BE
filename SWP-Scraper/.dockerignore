@@ -1,0 +1,7 @@
+__pycache__/
+*.pyc
+topcv_sample.json
+topcv_jobs.json
+.venv/
+venv/
+.env
