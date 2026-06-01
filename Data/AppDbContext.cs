@@ -45,6 +45,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<JobPost> JobPosts => Set<JobPost>();
     public DbSet<JobSkillMention> JobSkillMentions => Set<JobSkillMention>();
     public DbSet<KeywordTrendSnapshot> KeywordTrendSnapshots => Set<KeywordTrendSnapshot>();
+    public DbSet<RoleSkillUpdateProposal> RoleSkillUpdateProposals => Set<RoleSkillUpdateProposal>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -1212,6 +1213,23 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(snapshot => snapshot.SkillId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+        modelBuilder.Entity<RoleSkillUpdateProposal>(entity =>
+        {
+            entity.HasKey(e => e.Id);
+            entity.HasIndex(e => e.CareerRoleId);
+            entity.HasIndex(e => e.SkillId);
+            entity.HasIndex(e => e.Status);
+
+            entity.HasOne(e => e.CareerRole)
+                .WithMany()
+                .HasForeignKey(e => e.CareerRoleId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            entity.HasOne(e => e.Skill)
+                .WithMany()
+                .HasForeignKey(e => e.SkillId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
     }
 }
