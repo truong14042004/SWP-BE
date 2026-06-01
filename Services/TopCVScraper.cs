@@ -54,7 +54,9 @@ public class TopCVScraper : IJobScraper
         {
             if (cancellationToken.IsCancellationRequested) break;
 
-            var targetUrl = $"{_options.BaseUrl}?page={pageNum}";
+            var targetUrl = _options.BaseUrl.Contains('?') 
+                ? $"{_options.BaseUrl}&page={pageNum}" 
+                : $"{_options.BaseUrl}?page={pageNum}";
             var encodedTarget = Uri.EscapeDataString(targetUrl);
             var zenRowsUrl = $"https://api.zenrows.com/v1/?apikey={apiKey}&url={encodedTarget}" +
                              $"&js_render={_options.JsRender.ToString().ToLower()}" +
