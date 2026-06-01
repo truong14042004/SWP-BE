@@ -27,7 +27,7 @@ public sealed class ScraplingOptions
     // Đường dẫn tới scraper_topcv.py. Tuyệt đối (ví dụ /scraper/scraper_topcv.py
     // trong container) hoặc tương đối theo thư mục làm việc hiện tại.
     public string ScriptPath { get; set; } = "SWP-Scraper/scraper_topcv.py";
-    public int TimeoutSeconds { get; set; } = 180;
+    public int TimeoutSeconds { get; set; } = 120;
     public int MaxJobsPerRun { get; set; } = 50;
     public int MaxPages { get; set; } = 5;
 }
