@@ -59,6 +59,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
 builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
+builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
+builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
 builder.Services.AddScoped<IJobScraper, TopCVScraper>();
 builder.Services.AddScoped<IJobScraper, TopDevScraper>();

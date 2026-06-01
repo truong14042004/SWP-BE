@@ -46,6 +46,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<JobSkillMention> JobSkillMentions => Set<JobSkillMention>();
     public DbSet<KeywordTrendSnapshot> KeywordTrendSnapshots => Set<KeywordTrendSnapshot>();
     public DbSet<RoleSkillUpdateProposal> RoleSkillUpdateProposals => Set<RoleSkillUpdateProposal>();
+    public DbSet<StudentTalentProfile> StudentTalentProfiles => Set<StudentTalentProfile>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
