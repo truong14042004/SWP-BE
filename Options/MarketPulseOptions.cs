@@ -14,19 +14,20 @@ public sealed class MarketPulseOptions
     public ITNaviScraperOptions ITNavi { get; set; } = new();
     public VietnamWorksScraperOptions VietnamWorks { get; set; } = new();
     public TopCVScraperOptions TopCV { get; set; } = new();
-    public ScraplingApiOptions ScraplingApi { get; set; } = new();
+    public ScraplingOptions Scrapling { get; set; } = new();
 }
 
-public sealed class ScraplingApiOptions
+public sealed class ScraplingOptions
 {
-    // Bật/tắt việc cào TopCV qua microservice Python (Scrapling).
+    // Bật/tắt việc cào TopCV qua script Python (Scrapling) chạy như tiến trình con.
     public bool Enabled { get; set; } = true;
-    // URL gốc của service Python, ví dụ https://swp-scraper-xxxx.a.run.app.
-    public string BaseUrl { get; set; } = "";
-    // Token nội bộ gửi qua header X-Internal-Token. Nên đặt qua biến môi
-    // trường/secret, KHÔNG hardcode trong appsettings.json.
-    public string Token { get; set; } = "";
-    public int TimeoutSeconds { get; set; } = 60;
+    // Lệnh chạy Python. Trong container Linux thường là "python3"; trên Windows
+    // dùng "python". Đặt qua env MarketPulse__Scrapling__PythonExecutable nếu khác.
+    public string PythonExecutable { get; set; } = "python3";
+    // Đường dẫn tới scraper_topcv.py. Tuyệt đối (ví dụ /scraper/scraper_topcv.py
+    // trong container) hoặc tương đối theo thư mục làm việc hiện tại.
+    public string ScriptPath { get; set; } = "SWP-Scraper/scraper_topcv.py";
+    public int TimeoutSeconds { get; set; } = 120;
     public int MaxJobsPerRun { get; set; } = 50;
     public int MaxPages { get; set; } = 5;
 }

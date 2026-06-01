@@ -9,9 +9,15 @@ FastAPI để có thể chạy trực tiếp (``python scraper_topcv.py``) khi c
 from __future__ import annotations
 
 import re
+import sys
 from typing import Iterable
 
 from scrapling.fetchers import Fetcher
+
+
+def _log(*values) -> None:
+    """In thông tin chẩn đoán ra stderr, giữ stdout sạch để xuất JSON."""
+    print(*values, file=sys.stderr)
 
 # Trang việc làm Công nghệ thông tin của TopCV.
 BASE_URL = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257"
@@ -181,16 +187,16 @@ def scrape_topcv(
         try:
             response = Fetcher.get(url, timeout=timeout)
         except Exception as exc:  # noqa: BLE001 - cào thất bại thì dừng an toàn
-            print(f"[scrape_topcv] Lỗi tải trang {page}: {exc!r}")
+            _log(f"[scrape_topcv] Lỗi tải trang {page}: {exc!r}")
             break
 
         if response.status != 200:
-            print(f"[scrape_topcv] Trang {page} trả về status {response.status}, dừng.")
+            _log(f"[scrape_topcv] Trang {page} trả về status {response.status}, dừng.")
             break
 
         cards = response.css(SEL_CARD)
         if not cards:
-            print(f"[scrape_topcv] Trang {page} không có job card, dừng.")
+            _log(f"[scrape_topcv] Trang {page} không có job card, dừng.")
             break
 
         for card in cards:
@@ -209,20 +215,37 @@ def scrape_topcv(
 
 
 if __name__ == "__main__":
+    import argparse
     import json
-    import sys
 
     try:
         sys.stdout.reconfigure(encoding="utf-8")
+        sys.stderr.reconfigure(encoding="utf-8")
     except Exception:
         pass
 
-    results = scrape_topcv(max_jobs=50, max_pages=5)
-    print(f"\nĐã cào {len(results)} job từ TopCV.\n" + "=" * 90)
-    for i, j in enumerate(results[:15], 1):
-        print(f"{i:>2}. {j['title'][:48]:48} | {(j['companyName'] or '')[:24]:24} | {j['salaryText'] or ''}")
-    print("=" * 90)
+    parser = argparse.ArgumentParser(description="Cào việc làm IT từ TopCV.")
+    parser.add_argument(
+        "--json", action="store_true",
+        help="Xuất JSON ra stdout (dùng khi backend gọi subprocess).",
+    )
+    parser.add_argument("--max-jobs", type=int, default=50)
+    parser.add_argument("--max-pages", type=int, default=5)
+    args = parser.parse_args()
 
-    with open("topcv_sample.json", "w", encoding="utf-8") as f:
-        json.dump(results, f, ensure_ascii=False, indent=2)
-    print(f"Đã lưu {len(results)} job vào topcv_sample.json")
+    results = scrape_topcv(max_jobs=args.max_jobs, max_pages=args.max_pages)
+
+    if args.json:
+        # CHỈ in JSON ra stdout; mọi log khác đã đẩy sang stderr để C# parse sạch.
+        json.dump(
+            {"source": "TopCV", "count": len(results), "jobs": results},
+            sys.stdout, ensure_ascii=False,
+        )
+    else:
+        _log(f"\nĐã cào {len(results)} job từ TopCV.\n" + "=" * 90)
+        for i, j in enumerate(results[:15], 1):
+            _log(f"{i:>2}. {j['title'][:48]:48} | {(j['companyName'] or '')[:24]:24} | {j['salaryText'] or ''}")
+        _log("=" * 90)
+        with open("topcv_sample.json", "w", encoding="utf-8") as f:
+            json.dump(results, f, ensure_ascii=False, indent=2)
+        _log(f"Đã lưu {len(results)} job vào topcv_sample.json")
