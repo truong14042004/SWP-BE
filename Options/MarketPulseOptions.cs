@@ -28,7 +28,7 @@ public sealed class ScraplingOptions
     // trong container) hoặc tương đối theo thư mục làm việc hiện tại.
     public string ScriptPath { get; set; } = "SWP-Scraper/scraper_topcv.py";
     public int TimeoutSeconds { get; set; } = 120;
-    public int MaxJobsPerRun { get; set; } = 50;
+    public int MaxJobsPerRun { get; set; } = 60;
     public int MaxPages { get; set; } = 5;
 }
 
@@ -45,7 +45,7 @@ public sealed class TopCVScraperOptions
 
 public sealed class TopDevScraperOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public string BaseUrl { get; set; } = "https://topdev.vn";
     public string SitemapIndexPath { get; set; } = "/sitemap-jobs.xml";
     public int MaxSitemapPages { get; set; } = 100; // Đào sâu
@@ -60,7 +60,7 @@ public sealed class TopDevScraperOptions
 
 public sealed class ITNaviScraperOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public int MaxSitemapPages { get; set; } = 100; // Đào siêu sâu
     public int MaxJobsPerRun { get; set; } = 13;
     public int DelaySeconds { get; set; } = 1;
@@ -68,7 +68,7 @@ public sealed class ITNaviScraperOptions
 
 public sealed class VietnamWorksScraperOptions
 {
-    public bool Enabled { get; set; } = true;
+    public bool Enabled { get; set; } = false;
     public string SitemapUrl { get; set; } = "https://www.vietnamworks.com/sitemap/jobs.xml";
     public int MaxSitemapJobs { get; set; } = 500; // Quét 500 job mới nhất trong sitemap
     public int MaxJobsPerRun { get; set; } = 14;
