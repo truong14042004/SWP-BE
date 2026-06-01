@@ -19,8 +19,10 @@ def _log(*values) -> None:
     """In thông tin chẩn đoán ra stderr, giữ stdout sạch để xuất JSON."""
     print(*values, file=sys.stderr)
 
+import os
+
 # Trang việc làm Công nghệ thông tin của TopCV.
-BASE_URL = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257"
+BASE_URL = os.environ.get("TOPCV_BASE_URL", "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257")
 
 # Tỉ giá quy đổi USD -> VND xấp xỉ, chỉ dùng khi lương niêm yết bằng USD.
 USD_TO_VND = 25_000
