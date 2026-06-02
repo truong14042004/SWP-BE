@@ -872,7 +872,7 @@ public sealed class GithubController(
     {
         var client = CreateGithubClient(accessToken);
         var response = await client.GetAsync(
-            $"https://api.github.com/repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repo)}/commits?per_page=30",
+            $"https://api.github.com/repos/{Uri.EscapeDataString(owner)}/{Uri.EscapeDataString(repo)}/commits?per_page=20",
             cancellationToken);
 
         if (!response.IsSuccessStatusCode)
