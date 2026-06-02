@@ -426,6 +426,8 @@ public sealed class GithubController(
                 Use Vietnamese for all human-readable values.
                 Do not claim you inspected files that are not present in the snapshot.
                 portfolioReadinessScore must be an integer from 0 to 100.
+                Assess the author's logical thinking, system architecture, and visual design skills based on the codebase complexity, UI references, and technical choices.
+                talentProfile scores must be out of 10.
                 JSON schema:
                 {
                   "projectPurpose": "string",
@@ -449,6 +451,12 @@ public sealed class GithubController(
                   "evidence": {
                     "filesReviewed": ["string"],
                     "importantFindings": ["string"]
+                  },
+                  "talentProfile": {
+                    "logicalThinkingScore": 0,
+                    "systemArchitectureScore": 0,
+                    "visualDesignScore": 0,
+                    "aiFeedback": "string"
                   }
                 }
                 """,
@@ -506,6 +514,36 @@ public sealed class GithubController(
         repository.QualityScore = CalculateRepositoryScore(readme, snapshot);
         repository.AiSummary = NormalizeAiJson(aiResult.Text);
         repository.UpdatedAt = DateTimeOffset.UtcNow;
+
+        try
+        {
+            using var summaryDoc = System.Text.Json.JsonDocument.Parse(repository.AiSummary);
+            if (summaryDoc.RootElement.TryGetProperty("talentProfile", out var talentProp) &&
+                talentProp.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                int logical = talentProp.TryGetProperty("logicalThinkingScore", out var p1) && p1.ValueKind == System.Text.Json.JsonValueKind.Number ? p1.GetInt32() : 5;
+                int system = talentProp.TryGetProperty("systemArchitectureScore", out var p2) && p2.ValueKind == System.Text.Json.JsonValueKind.Number ? p2.GetInt32() : 5;
+                int visual = talentProp.TryGetProperty("visualDesignScore", out var p3) && p3.ValueKind == System.Text.Json.JsonValueKind.Number ? p3.GetInt32() : 5;
+                string feedback = talentProp.TryGetProperty("aiFeedback", out var p4) ? p4.GetString() ?? "" : "";
+
+                var newTalent = new StudentTalentProfile
+                {
+                    Id = Guid.NewGuid(),
+                    StudentId = userId,
+                    AnalyzedRepoUrl = repository.RepoUrl,
+                    LogicalThinkingScore = logical,
+                    SystemArchitectureScore = system,
+                    VisualDesignScore = visual,
+                    AiFeedback = feedback,
+                    AnalyzedAt = DateTimeOffset.UtcNow
+                };
+                dbContext.StudentTalentProfiles.Add(newTalent);
+            }
+        }
+        catch (Exception)
+        {
+            // Ignore parse errors, proceed saving the main summary
+        }
 
         await MapRepositorySkills(repository.Id, technologies, aiResult.Text, cancellationToken);
 
