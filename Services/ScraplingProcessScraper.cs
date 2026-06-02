@@ -22,6 +22,7 @@ public sealed class ScraplingProcessScraper : IJobScraper
     public string SourceName => "TopCV";
 
     private readonly ScraplingOptions _options;
+    private readonly TopCVScraperOptions _topCVOptions;
     private readonly ILogger<ScraplingProcessScraper> _logger;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -34,6 +35,7 @@ public sealed class ScraplingProcessScraper : IJobScraper
         ILogger<ScraplingProcessScraper> logger)
     {
         _options = options.Value.Scrapling;
+        _topCVOptions = options.Value.TopCV;
         _logger = logger;
     }
 
@@ -101,12 +103,18 @@ public sealed class ScraplingProcessScraper : IJobScraper
             psi.ArgumentList.Add(_options.MaxJobsPerRun.ToString());
             psi.ArgumentList.Add("--max-pages");
             psi.ArgumentList.Add(_options.MaxPages.ToString());
+            
+            if (!string.IsNullOrWhiteSpace(_topCVOptions.BaseUrl))
+            {
+                psi.ArgumentList.Add("--base-url");
+                psi.ArgumentList.Add(_topCVOptions.BaseUrl);
+            }
 
             using var process = new Process { StartInfo = psi };
 
             _logger.LogInformation(
-                "Khởi chạy scraper Python: {Exe} {Script} --json --max-jobs {Jobs} --max-pages {Pages}",
-                _options.PythonExecutable, scriptPath, _options.MaxJobsPerRun, _options.MaxPages);
+                "Khởi chạy scraper Python: {Exe} {Script} --json --max-jobs {Jobs} --max-pages {Pages} --base-url {BaseUrl}",
+                _options.PythonExecutable, scriptPath, _options.MaxJobsPerRun, _options.MaxPages, _topCVOptions.BaseUrl);
 
             process.Start();
 

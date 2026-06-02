@@ -29,7 +29,7 @@ public sealed class ScraplingOptions
     public string ScriptPath { get; set; } = "SWP-Scraper/scraper_topcv.py";
     public int TimeoutSeconds { get; set; } = 120;
     public int MaxJobsPerRun { get; set; } = 60;
-    public int MaxPages { get; set; } = 5;
+    public int MaxPages { get; set; } = 10;
 }
 
 public sealed class TopCVScraperOptions
@@ -37,7 +37,7 @@ public sealed class TopCVScraperOptions
     public bool Enabled { get; set; } = true;
     public string BaseUrl { get; set; } = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257";
     public string ApiKey { get; set; } = "";
-    public int MaxPages { get; set; } = 5; // Cho phép cào sâu hơn nếu chưa đủ job
+    public int MaxPages { get; set; } = 10; // Cho phép cào sâu hơn nếu chưa đủ job
     public int MaxJobsPerRun { get; set; } = 50; // Giới hạn số lượng job MỚI mỗi lần chạy
     public bool JsRender { get; set; } = true;
     public bool PremiumProxy { get; set; } = true;

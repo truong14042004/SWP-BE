@@ -22,7 +22,7 @@ def _log(*values) -> None:
 import os
 
 # Trang việc làm Công nghệ thông tin của TopCV.
-BASE_URL = os.environ.get("TOPCV_BASE_URL", "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257")
+BASE_URL = "https://www.topcv.vn/tim-viec-lam-cong-nghe-thong-tin-cr257"
 
 # Tỉ giá quy đổi USD -> VND xấp xỉ, chỉ dùng khi lương niêm yết bằng USD.
 USD_TO_VND = 25_000
@@ -233,9 +233,10 @@ if __name__ == "__main__":
     )
     parser.add_argument("--max-jobs", type=int, default=50)
     parser.add_argument("--max-pages", type=int, default=5)
+    parser.add_argument("--base-url", type=str, default=BASE_URL)
     args = parser.parse_args()
 
-    results = scrape_topcv(max_jobs=args.max_jobs, max_pages=args.max_pages)
+    results = scrape_topcv(max_jobs=args.max_jobs, max_pages=args.max_pages, base_url=args.base_url)
 
     if args.json:
         # CHỈ in JSON ra stdout; mọi log khác đã đẩy sang stderr để C# parse sạch.
