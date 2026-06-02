@@ -930,8 +930,28 @@ public sealed class RoadmapReviewController(
             .Where(p => studentIds.Contains(p.UserId))
             .ToDictionaryAsync(p => p.UserId, cancellationToken);
 
+        var talentProfilesList = await dbContext.StudentTalentProfiles
+            .AsNoTracking()
+            .Where(p => studentIds.Contains(p.StudentId))
+            .ToListAsync(cancellationToken);
+
+        var latestTalentProfiles = talentProfilesList
+            .GroupBy(p => p.StudentId)
+            .ToDictionary(
+                g => g.Key, 
+                g => g.OrderByDescending(p => p.AnalyzedAt).First()
+            );
+
         return items.Select(item => {
             profiles.TryGetValue(item.StudentId, out var profile);
+            latestTalentProfiles.TryGetValue(item.StudentId, out var talent);
+            
+            var talentDto = talent is null ? null : new StudentTalentProfileDto(
+                talent.LogicalThinkingScore,
+                talent.SystemArchitectureScore,
+                talent.VisualDesignScore,
+                talent.AiFeedback
+            );
             return new ReviewerQueueItemResponse(
                 item.Id,
                 item.Status,
@@ -948,7 +968,8 @@ public sealed class RoadmapReviewController(
                     item.Student.Email,
                     item.Student.AvatarUrl,
                     profile?.CvUrl,
-                    profile?.CvName),
+                    profile?.CvName,
+                    talentDto),
                 new ReviewerQueueNodeInfo(
                     item.RoadmapNode.Id,
                     item.RoadmapNode.Title,
@@ -1140,6 +1161,12 @@ public sealed class RoadmapReviewController(
 
 // ===== DTOs =====
 
+public sealed record StudentTalentProfileDto(
+    int LogicalThinkingScore,
+    int SystemArchitectureScore,
+    int VisualDesignScore,
+    string? AiFeedback);
+
 public sealed record AvailableReviewerInfo(
     Guid UserId,
     string FullName,
@@ -1203,8 +1230,9 @@ public sealed record ReviewerQueueStudentInfo(
     string FullName,
     string Email,
     string? AvatarUrl,
-    string? CvUrl = null,
-    string? CvName = null);
+    string? CvUrl,
+    string? CvName,
+    StudentTalentProfileDto? TalentProfile = null);
 
 public sealed record ReviewerQueueNodeInfo(
     Guid NodeId,
