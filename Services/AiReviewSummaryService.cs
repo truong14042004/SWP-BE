@@ -68,8 +68,13 @@ public sealed class AiReviewSummaryService(
 
         var repoFacts = await FetchRepoFactsAsync(owner, repo, studentToken, cancellationToken);
 
+        var talentProfile = await dbContext.Set<StudentTalentProfile>()
+            .Where(t => t.StudentId == request.StudentId)
+            .OrderByDescending(t => t.AnalyzedAt)
+            .FirstOrDefaultAsync(cancellationToken);
+
         var systemInstruction = BuildSystemInstruction();
-        var userPrompt = BuildUserPrompt(request, owner, repo, repoFacts);
+        var userPrompt = BuildUserPrompt(request, owner, repo, repoFacts, talentProfile);
 
         AiTextResult aiResult;
         try
@@ -226,7 +231,8 @@ public sealed class AiReviewSummaryService(
         RoadmapNodeReviewRequest request,
         string owner,
         string repo,
-        GithubRepoFacts facts)
+        GithubRepoFacts facts,
+        StudentTalentProfile? talentProfile)
     {
         var node = request.RoadmapNode;
         var nodeSkill = node.Skill?.Name ?? "(chua gan skill cu the)";
@@ -244,6 +250,10 @@ public sealed class AiReviewSummaryService(
             ? "(khong co README hoac khong doc duoc)"
             : facts.ReadmeText.Trim();
 
+        var talentSection = talentProfile is null
+            ? "(Chua co ho so tai nang truoc do)"
+            : $"- Tu duy logic: {talentProfile.LogicalThinkingScore}/10\n- Kien truc he thong: {talentProfile.SystemArchitectureScore}/10\n- Thiet ke (Visual): {talentProfile.VisualDesignScore}/10\n- Nhan xet gan nhat: {talentProfile.AiFeedback}";
+
         return $$"""
         ## BOI CANH NODE LO TRINH
         - Career role muc tieu: {{careerRole}}
@@ -254,6 +264,9 @@ public sealed class AiReviewSummaryService(
         ## SINH VIEN
         - Ten: {{studentName}}
         - Ghi chu kem theo evidence: {{studentNote}}
+
+        ## HO SO TAI NANG (TALENT PROFILE)
+        {{talentSection}}
 
         ## REPOSITORY (GitHub)
         - URL: https://github.com/{{owner}}/{{repo}}
@@ -287,7 +300,7 @@ public sealed class AiReviewSummaryService(
         - suggestedQuestions: dung 3 cau hoi mentor co the hoi sinh vien.
         - skillMapping.matchesNode: true neu evidence thuc su demo duoc skill cua node, nguoc lai false.
         - skillMapping.missingAspects: cac khia canh node yeu cau ma evidence chua the hien.
-        - overallSummary: 1-2 cau tong ket.
+        - overallSummary: 1-2 cau tong ket (hay lien he/danh gia su phu hop voi HO SO TAI NANG cua sinh vien).
         """;
     }
 
