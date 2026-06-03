@@ -11,6 +11,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<PendingRegistration> PendingRegistrations => Set<PendingRegistration>();
     public DbSet<RefreshToken> RefreshTokens => Set<RefreshToken>();
     public DbSet<StudentProfile> StudentProfiles => Set<StudentProfile>();
+    public DbSet<MentorProfile> MentorProfiles => Set<MentorProfile>();
     public DbSet<Skill> Skills => Set<Skill>();
     public DbSet<UserSkill> UserSkills => Set<UserSkill>();
     public DbSet<CareerRole> CareerRoles => Set<CareerRole>();
@@ -176,6 +177,21 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(profile => profile.TargetRoleId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<MentorProfile>(entity =>
+        {
+            entity.ToTable("mentor_profiles");
+            entity.HasKey(profile => profile.Id);
+            entity.HasIndex(profile => profile.UserId).IsUnique();
+            entity.Property(profile => profile.Company).HasMaxLength(200);
+            entity.Property(profile => profile.JobTitle).HasMaxLength(200);
+            entity.Property(profile => profile.Bio).HasMaxLength(2000);
+            entity.Property(profile => profile.LinkedInUrl).HasMaxLength(500);
+            entity.HasOne(profile => profile.User)
+                .WithOne()
+                .HasForeignKey<MentorProfile>(profile => profile.UserId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.Entity<Skill>(entity =>

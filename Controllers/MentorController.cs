@@ -237,8 +237,146 @@ public sealed class MentorController(
     }
 
     // ============================================================
+    //  MENTOR / COUNSELOR PROFILES
+    // ============================================================
+
+    [HttpGet("/api/mentors")]
+    [ProducesResponseType<IReadOnlyList<MentorResponse>>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<IReadOnlyList<MentorResponse>>> GetMentors(
+        [FromQuery] string? role,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(role)
+            && role != UserRoles.IndustryMentor
+            && role != UserRoles.AcademicCounselor)
+        {
+            return BadRequest(new { message = "Vai trò phải là IndustryMentor hoặc AcademicCounselor." });
+        }
+
+        var query = dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.IsActive && MentorRoles.Contains(user.Role));
+
+        if (!string.IsNullOrWhiteSpace(role))
+        {
+            query = query.Where(user => user.Role == role);
+        }
+
+        var mentors = await query
+            .OrderBy(user => user.FullName)
+            .ToListAsync(cancellationToken);
+
+        if (mentors.Count == 0)
+        {
+            return Ok(Array.Empty<MentorResponse>());
+        }
+
+        var mentorIds = mentors.Select(user => user.Id).ToList();
+        var profiles = await dbContext.MentorProfiles
+            .AsNoTracking()
+            .Where(profile => mentorIds.Contains(profile.UserId))
+            .ToDictionaryAsync(profile => profile.UserId, cancellationToken);
+
+        var statsByUserId = await BuildMentorStatsLookupAsync(mentors, cancellationToken);
+
+        var responses = mentors
+            .Select(user => ToMentorResponse(
+                user,
+                profiles.GetValueOrDefault(user.Id),
+                statsByUserId.GetValueOrDefault(user.Id, EmptyMentorStats)))
+            .ToList();
+
+        return Ok(responses);
+    }
+
+    [HttpGet("/api/mentors/{id:guid}")]
+    [ProducesResponseType<MentorResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<MentorResponse>> GetMentorById(Guid id, CancellationToken cancellationToken)
+    {
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (user is null || !MentorRoles.Contains(user.Role))
+        {
+            return NotFound(new { message = "Không tìm thấy cố vấn hoặc mentor." });
+        }
+
+        var profile = await dbContext.MentorProfiles
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.UserId == id, cancellationToken);
+
+        var stats = await GetMentorStatsForUserAsync(user.Id, user.Role, cancellationToken);
+
+        return Ok(ToMentorResponse(user, profile, stats));
+    }
+
+    [HttpPut("/api/mentors/my-profile")]
+    [Authorize(Roles = $"{UserRoles.IndustryMentor},{UserRoles.AcademicCounselor}")]
+    [ProducesResponseType<MentorResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<ActionResult<MentorResponse>> UpdateMyMentorProfile(
+        UpdateMentorProfileRequest request,
+        CancellationToken cancellationToken)
+    {
+        var validationError = ValidateMentorProfileRequest(request);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
+        }
+
+        var userId = GetCurrentUserId();
+        var user = await dbContext.Users
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == userId, cancellationToken);
+
+        if (user is null || !MentorRoles.Contains(user.Role))
+        {
+            return BadRequest(new { message = "Chỉ cố vấn hoặc mentor mới có thể cập nhật hồ sơ chuyên môn." });
+        }
+
+        var profile = await dbContext.MentorProfiles
+            .SingleOrDefaultAsync(item => item.UserId == userId, cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        if (profile is null)
+        {
+            profile = new MentorProfile
+            {
+                Id = Guid.NewGuid(),
+                UserId = userId,
+                CreatedAt = now,
+                UpdatedAt = now
+            };
+            dbContext.MentorProfiles.Add(profile);
+        }
+
+        profile.Company = request.Company?.Trim();
+        profile.JobTitle = request.JobTitle?.Trim();
+        profile.Bio = request.Bio?.Trim();
+        profile.YearsOfExperience = request.YearsOfExperience;
+        profile.LinkedInUrl = request.LinkedInUrl?.Trim();
+        profile.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var stats = await GetMentorStatsForUserAsync(user.Id, user.Role, cancellationToken);
+        return Ok(ToMentorResponse(user, profile, stats));
+    }
+
+    // ============================================================
     //  HELPERS
     // ============================================================
+
+    private static readonly string[] MentorRoles =
+    [
+        UserRoles.IndustryMentor,
+        UserRoles.AcademicCounselor
+    ];
+
+    private static MentorStatsResponse EmptyMentorStats => new(0, 0d);
 
     private Guid GetCurrentUserId()
     {
@@ -987,6 +1125,154 @@ public sealed class MentorController(
         // Default to Monthly
         return months;
     }
+
+    private async Task<Dictionary<Guid, MentorStatsResponse>> BuildMentorStatsLookupAsync(
+        IReadOnlyList<User> mentors,
+        CancellationToken cancellationToken)
+    {
+        var statsByUserId = new Dictionary<Guid, MentorStatsResponse>();
+        var industryMentorIds = mentors
+            .Where(user => user.Role == UserRoles.IndustryMentor)
+            .Select(user => user.Id)
+            .ToList();
+        var counselorIds = mentors
+            .Where(user => user.Role == UserRoles.AcademicCounselor)
+            .Select(user => user.Id)
+            .ToList();
+
+        if (industryMentorIds.Count > 0)
+        {
+            var mentorStats = await dbContext.MentorFeedbacks
+                .AsNoTracking()
+                .Where(feedback => industryMentorIds.Contains(feedback.MentorId))
+                .GroupBy(feedback => feedback.MentorId)
+                .Select(group => new
+                {
+                    UserId = group.Key,
+                    TotalFeedbacksGiven = group.Count(),
+                    AverageRating = group.Where(feedback => feedback.Rating != null)
+                        .Average(feedback => (double?)feedback.Rating) ?? 0d
+                })
+                .ToListAsync(cancellationToken);
+
+            foreach (var stat in mentorStats)
+            {
+                statsByUserId[stat.UserId] = new MentorStatsResponse(stat.TotalFeedbacksGiven, stat.AverageRating);
+            }
+        }
+
+        if (counselorIds.Count > 0)
+        {
+            var counselorStats = await dbContext.CounselorFeedbacks
+                .AsNoTracking()
+                .Where(feedback => counselorIds.Contains(feedback.CounselorId))
+                .GroupBy(feedback => feedback.CounselorId)
+                .Select(group => new
+                {
+                    UserId = group.Key,
+                    TotalFeedbacksGiven = group.Count(),
+                    AverageRating = group.Where(feedback => feedback.Rating != null)
+                        .Average(feedback => (double?)feedback.Rating) ?? 0d
+                })
+                .ToListAsync(cancellationToken);
+
+            foreach (var stat in counselorStats)
+            {
+                statsByUserId[stat.UserId] = new MentorStatsResponse(stat.TotalFeedbacksGiven, stat.AverageRating);
+            }
+        }
+
+        return statsByUserId;
+    }
+
+    private async Task<MentorStatsResponse> GetMentorStatsForUserAsync(
+        Guid userId,
+        string role,
+        CancellationToken cancellationToken)
+    {
+        if (role == UserRoles.IndustryMentor)
+        {
+            var feedbacks = await dbContext.MentorFeedbacks
+                .AsNoTracking()
+                .Where(feedback => feedback.MentorId == userId)
+                .Select(feedback => feedback.Rating)
+                .ToListAsync(cancellationToken);
+
+            return BuildMentorStats(feedbacks);
+        }
+
+        if (role == UserRoles.AcademicCounselor)
+        {
+            var feedbacks = await dbContext.CounselorFeedbacks
+                .AsNoTracking()
+                .Where(feedback => feedback.CounselorId == userId)
+                .Select(feedback => feedback.Rating)
+                .ToListAsync(cancellationToken);
+
+            return BuildMentorStats(feedbacks);
+        }
+
+        return EmptyMentorStats;
+    }
+
+    private static MentorStatsResponse BuildMentorStats(IReadOnlyList<int?> ratings)
+    {
+        var ratedValues = ratings.Where(rating => rating is not null).Select(rating => rating!.Value).ToList();
+        return new MentorStatsResponse(
+            ratings.Count,
+            ratedValues.Count == 0 ? 0d : ratedValues.Average());
+    }
+
+    private static MentorResponse ToMentorResponse(User user, MentorProfile? profile, MentorStatsResponse stats) =>
+        new(
+            user.Id,
+            user.FullName,
+            user.Email,
+            user.Username,
+            user.AvatarUrl,
+            user.Role,
+            profile is null
+                ? null
+                : new MentorProfileDetailsResponse(
+                    profile.Id,
+                    profile.Company,
+                    profile.JobTitle,
+                    profile.Bio,
+                    profile.YearsOfExperience,
+                    profile.LinkedInUrl,
+                    profile.CreatedAt,
+                    profile.UpdatedAt),
+            stats);
+
+    private static string? ValidateMentorProfileRequest(UpdateMentorProfileRequest request)
+    {
+        if (request.Company is { Length: > 200 })
+        {
+            return "Công ty phải có tối đa 200 ký tự.";
+        }
+
+        if (request.JobTitle is { Length: > 200 })
+        {
+            return "Chức danh phải có tối đa 200 ký tự.";
+        }
+
+        if (request.Bio is { Length: > 2000 })
+        {
+            return "Tiểu sử phải có tối đa 2000 ký tự.";
+        }
+
+        if (request.LinkedInUrl is { Length: > 500 })
+        {
+            return "Liên kết LinkedIn phải có tối đa 500 ký tự.";
+        }
+
+        if (request.YearsOfExperience is < 0)
+        {
+            return "Số năm kinh nghiệm phải lớn hơn hoặc bằng 0.";
+        }
+
+        return null;
+    }
 }
 
 public sealed record MentorChatRequest(string Question, string? ContextJson, Guid? SessionId);
@@ -1020,3 +1306,34 @@ public sealed record AiChatQuotaResponse(
     int Used,
     int Remaining,
     DateTimeOffset Since);
+
+public sealed record UpdateMentorProfileRequest(
+    string? Company,
+    string? JobTitle,
+    string? Bio,
+    int? YearsOfExperience,
+    string? LinkedInUrl);
+
+public sealed record MentorResponse(
+    Guid Id,
+    string FullName,
+    string Email,
+    string? Username,
+    string? AvatarUrl,
+    string Role,
+    MentorProfileDetailsResponse? Profile,
+    MentorStatsResponse Stats);
+
+public sealed record MentorProfileDetailsResponse(
+    Guid Id,
+    string? Company,
+    string? JobTitle,
+    string? Bio,
+    int? YearsOfExperience,
+    string? LinkedInUrl,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
+
+public sealed record MentorStatsResponse(
+    int TotalFeedbacksGiven,
+    double AverageRating);
