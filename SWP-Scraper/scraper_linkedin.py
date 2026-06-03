@@ -95,7 +95,7 @@ def main():
             "count": len(jobs_data),
             "jobs": jobs_data
         }
-        print(json.dumps(out_dict, ensure_ascii=False, indent=2))
+        print(json.dumps(out_dict, ensure_ascii=True, indent=2))
     else:
         _log(f"Đã cào thành công {len(jobs_data)} jobs từ LinkedIn.")
 
