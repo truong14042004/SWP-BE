@@ -15,6 +15,14 @@ public sealed class MarketPulseOptions
     public VietnamWorksScraperOptions VietnamWorks { get; set; } = new();
     public TopCVScraperOptions TopCV { get; set; } = new();
     public ScraplingOptions Scrapling { get; set; } = new();
+    public LinkedinScraperOptions Linkedin { get; set; } = new();
+}
+
+public sealed class LinkedinScraperOptions
+{
+    public bool Enabled { get; set; } = true;
+    public string BaseUrl { get; set; } = "https://www.linkedin.com/jobs-guest/jobs/api/seeMoreJobPostings/search?keywords=IT&location=Vietnam";
+    public string ScriptPath { get; set; } = "SWP-Scraper/scraper_linkedin.py";
 }
 
 public sealed class ScraplingOptions

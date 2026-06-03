@@ -65,6 +65,7 @@ builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
 // TopCV được cào bằng script Python (Scrapling) chạy như tiến trình con ngay
 // trong cùng container — không cần service riêng, không HTTP, không token.
 builder.Services.AddScoped<IJobScraper, ScraplingProcessScraper>();
+builder.Services.AddScoped<IJobScraper, ScraplingLinkedinScraper>();
 builder.Services.AddScoped<IJobScraper, TopDevScraper>();
 builder.Services.AddScoped<IJobScraper, ITNaviScraper>();
 builder.Services.AddScoped<IJobScraper, VietnamWorksScraper>();
