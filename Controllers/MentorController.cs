@@ -240,6 +240,7 @@ public sealed class MentorController(
     //  MENTOR / COUNSELOR PROFILES
     // ============================================================
 
+    [AllowAnonymous]
     [HttpGet("/api/mentors")]
     [ProducesResponseType<IReadOnlyList<MentorResponse>>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -290,6 +291,7 @@ public sealed class MentorController(
         return Ok(responses);
     }
 
+    [AllowAnonymous]
     [HttpGet("/api/mentors/{id:guid}")]
     [ProducesResponseType<MentorResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
