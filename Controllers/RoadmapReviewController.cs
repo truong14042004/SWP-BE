@@ -18,7 +18,8 @@ public sealed class RoadmapReviewController(
     IStudentReviewQuotaService quotaService,
     IAiReviewSummaryService aiReviewSummaryService,
     IUserSkillSyncService userSkillSyncService,
-    ILogger<RoadmapReviewController> logger) : ControllerBase
+    ILogger<RoadmapReviewController> logger,
+    INotificationService notificationService) : ControllerBase
 {
     private const long MaxEvidenceFileSize = 25 * 1024 * 1024; // 25 MB
     private static readonly string[] AllowedEvidenceContentTypes =
@@ -278,19 +279,16 @@ public sealed class RoadmapReviewController(
             .Select(user => new { user.FullName })
             .SingleOrDefaultAsync(cancellationToken);
 
-        dbContext.Notifications.Add(new Notification
-        {
-            Id = Guid.NewGuid(),
-            UserId = reviewer.Id,
-            Type = "RoadmapReviewRequested",
-            Title = "Có yêu cầu review mới",
-            Message = $"{student?.FullName ?? "Sinh viên"} đã gửi yêu cầu review cho module \"{node.Title}\".",
-            LinkUrl = "#roadmap-reviews",
-            CreatedAt = now,
-            IsRead = false
-        });
-
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await notificationService.SendNotificationAsync(
+            reviewer.Id,
+            "RoadmapReviewRequested",
+            "Có yêu cầu review mới",
+            $"{student?.FullName ?? "Sinh viên"} đã gửi yêu cầu review cho module \"{node.Title}\".",
+            "#roadmap-reviews",
+            null,
+            cancellationToken);
 
         // Send email (fire-and-forget; do not break the flow if SMTP fails)
         _ = SendReviewEmailSafelyAsync(
@@ -537,19 +535,16 @@ public sealed class RoadmapReviewController(
             .Select(user => user.FullName)
             .SingleOrDefaultAsync(cancellationToken);
 
-        dbContext.Notifications.Add(new Notification
-        {
-            Id = Guid.NewGuid(),
-            UserId = reviewRequest.StudentId,
-            Type = "RoadmapReviewApproved",
-            Title = "Yêu cầu review đã được duyệt",
-            Message = $"{reviewerName ?? "Mentor"} đã verify module \"{node.Title}\".",
-            LinkUrl = "#roadmap",
-            CreatedAt = now,
-            IsRead = false
-        });
-
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await notificationService.SendNotificationAsync(
+            reviewRequest.StudentId,
+            "RoadmapReviewApproved",
+            "Yêu cầu review đã được duyệt",
+            $"{reviewerName ?? "Mentor"} đã verify module \"{node.Title}\".",
+            "#roadmap",
+            null,
+            cancellationToken);
 
         // Email student about approval
         var studentEmail = await dbContext.Users
@@ -625,19 +620,16 @@ public sealed class RoadmapReviewController(
             .Select(user => user.FullName)
             .SingleOrDefaultAsync(cancellationToken);
 
-        dbContext.Notifications.Add(new Notification
-        {
-            Id = Guid.NewGuid(),
-            UserId = reviewRequest.StudentId,
-            Type = "RoadmapReviewRejected",
-            Title = "Yêu cầu review bị từ chối",
-            Message = $"{reviewerName ?? "Mentor"} đã từ chối module \"{node.Title}\". Lý do: {reviewRequest.ReviewerNote}",
-            LinkUrl = "#roadmap",
-            CreatedAt = now,
-            IsRead = false
-        });
-
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await notificationService.SendNotificationAsync(
+            reviewRequest.StudentId,
+            "RoadmapReviewRejected",
+            "Yêu cầu review bị từ chối",
+            $"{reviewerName ?? "Mentor"} đã từ chối module \"{node.Title}\". Lý do: {reviewRequest.ReviewerNote}",
+            "#roadmap",
+            null,
+            cancellationToken);
 
         // Email student about rejection
         var studentEmail = await dbContext.Users
@@ -1003,17 +995,16 @@ public sealed class RoadmapReviewController(
         if (isFullyCompleted && node.Roadmap.Status != "Completed")
         {
             node.Roadmap.Status = "Completed";
-            dbContext.Notifications.Add(new Notification
-            {
-                Id = Guid.NewGuid(),
-                UserId = node.Roadmap.UserId,
-                Type = "RoadmapCompleted",
-                Title = "Chúc mừng! Bạn đã hoàn thành lộ trình",
-                Message = $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
-                LinkUrl = "#roadmap",
-                IsRead = false,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await notificationService.SendNotificationAsync(
+                node.Roadmap.UserId,
+                "RoadmapCompleted",
+                "Chúc mừng! Bạn đã hoàn thành lộ trình",
+                $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
+                "#roadmap",
+                null,
+                cancellationToken);
         }
         else if (!isFullyCompleted && node.Roadmap.Status == "Completed")
         {

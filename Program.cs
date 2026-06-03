@@ -59,6 +59,7 @@ builder.Services.AddHttpClient();
 builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationService>();
 builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
+builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
 builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
@@ -81,6 +82,7 @@ builder.Services.AddSingleton(serviceProvider =>
 });
 
 builder.Services.AddControllers();
+builder.Services.AddSignalR();
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddSwaggerGen(options =>
 {
@@ -163,6 +165,19 @@ builder.Services
             IssuerSigningKey = signingKey,
             ClockSkew = TimeSpan.FromMinutes(1)
         };
+        options.Events = new JwtBearerEvents
+        {
+            OnMessageReceived = context =>
+            {
+                var accessToken = context.Request.Query["access_token"];
+                var path = context.HttpContext.Request.Path;
+                if (!string.IsNullOrEmpty(accessToken) && path.StartsWithSegments("/hubs"))
+                {
+                    context.Token = accessToken;
+                }
+                return Task.CompletedTask;
+            }
+        };
     });
 builder.Services.AddAuthorization();
 
@@ -244,6 +259,8 @@ app.UseCors("Frontend");
 
 app.UseAuthentication();
 app.UseAuthorization();
+
+app.MapHub<SWP_BE.Hubs.NotificationHub>("/hubs/notification");
 
 app.MapGet("/", () => Results.Ok(new { status = "ok", service = "SWP-BE" }));
 app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));

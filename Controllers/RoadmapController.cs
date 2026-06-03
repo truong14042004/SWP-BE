@@ -12,7 +12,8 @@ namespace SWP_BE.Controllers;
 [Authorize]
 public sealed class RoadmapController(
     AppDbContext dbContext,
-    IUserSkillSyncService userSkillSyncService) : ControllerBase
+    IUserSkillSyncService userSkillSyncService,
+    INotificationService notificationService) : ControllerBase
 {
     [HttpPost("api/roadmap/generate")]
     public async Task<ActionResult<RoadmapResponse>> Generate(
@@ -335,17 +336,16 @@ public sealed class RoadmapController(
         if (isFullyCompleted && node.Roadmap.Status != "Completed")
         {
             node.Roadmap.Status = "Completed";
-            dbContext.Notifications.Add(new Notification
-            {
-                Id = Guid.NewGuid(),
-                UserId = node.Roadmap.UserId,
-                Type = "RoadmapCompleted",
-                Title = "Chúc mừng! Bạn đã hoàn thành lộ trình",
-                Message = $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
-                LinkUrl = "#roadmap",
-                IsRead = false,
-                CreatedAt = DateTimeOffset.UtcNow
-            });
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await notificationService.SendNotificationAsync(
+                node.Roadmap.UserId,
+                "RoadmapCompleted",
+                "Chúc mừng! Bạn đã hoàn thành lộ trình",
+                $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
+                "#roadmap",
+                null,
+                cancellationToken);
         }
         else if (!isFullyCompleted && node.Roadmap.Status == "Completed")
         {
