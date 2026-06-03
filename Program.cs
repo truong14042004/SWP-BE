@@ -142,7 +142,8 @@ builder.Services.AddCors(options =>
         policy
             .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
-            .AllowAnyMethod();
+            .AllowAnyMethod()
+            .AllowCredentials();
     });
 });
 
@@ -205,6 +206,7 @@ app.Use(async (context, next) =>
         context.Response.Headers.Vary = "Origin";
         context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
         context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
+        context.Response.Headers.AccessControlAllowCredentials = "true";
     }
 
     if (HttpMethods.IsOptions(context.Request.Method))
