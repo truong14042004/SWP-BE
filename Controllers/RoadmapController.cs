@@ -127,7 +127,7 @@ public sealed class RoadmapController(
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, responseNodes));
+        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, responseNodes, false));
     }
 
     [HttpGet("api/roadmap")]
@@ -140,6 +140,20 @@ public sealed class RoadmapController(
             .Where(roadmap => roadmap.UserId == userId)
             .OrderByDescending(roadmap => roadmap.CreatedAt)
             .ToListAsync(cancellationToken);
+
+        var careerRoleIds = roadmaps.Select(r => r.CareerRoleId).Distinct().ToList();
+
+        var requirementsLatestUpdates = await dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(req => careerRoleIds.Contains(req.CareerRoleId))
+            .GroupBy(req => req.CareerRoleId)
+            .Select(g => new { CareerRoleId = g.Key, LatestUpdate = g.Max(req => req.UpdatedAt) })
+            .ToDictionaryAsync(item => item.CareerRoleId, item => item.LatestUpdate, cancellationToken);
+
+        var rolesLatestUpdates = await dbContext.CareerRoles
+            .AsNoTracking()
+            .Where(role => careerRoleIds.Contains(role.Id))
+            .ToDictionaryAsync(role => role.Id, role => role.UpdatedAt, cancellationToken);
 
         var roadmapIds = roadmaps.Select(roadmap => roadmap.Id).ToArray();
         var nodes = await dbContext.RoadmapNodes
@@ -157,10 +171,20 @@ public sealed class RoadmapController(
             .GroupBy(node => node.RoadmapId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<RoadmapNode>)group.ToList());
 
-        return Ok(roadmaps.Select(roadmap => ToResponse(
-            roadmap,
-            roadmap.CareerRole.Name,
-            nodesByRoadmap.GetValueOrDefault(roadmap.Id) ?? [])).ToList());
+        var responseList = roadmaps.Select(roadmap => {
+            var reqUpdate = requirementsLatestUpdates.GetValueOrDefault(roadmap.CareerRoleId, DateTimeOffset.MinValue);
+            var roleUpdate = rolesLatestUpdates.GetValueOrDefault(roadmap.CareerRoleId, DateTimeOffset.MinValue);
+            var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
+            bool isOutdated = roadmap.CreatedAt < latestUpdate;
+
+            return ToResponse(
+                roadmap,
+                roadmap.CareerRole.Name,
+                nodesByRoadmap.GetValueOrDefault(roadmap.Id) ?? [],
+                isOutdated);
+        }).ToList();
+
+        return Ok(responseList);
     }
 
     [HttpGet("api/roadmap/{id:guid}")]
@@ -177,6 +201,16 @@ public sealed class RoadmapController(
             return NotFound(new { message = "Không tìm thấy lộ trình học tập." });
         }
 
+        var reqUpdate = await dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(req => req.CareerRoleId == roadmap.CareerRoleId)
+            .Select(req => (DateTimeOffset?)req.UpdatedAt)
+            .MaxAsync(cancellationToken) ?? DateTimeOffset.MinValue;
+
+        var roleUpdate = roadmap.CareerRole.UpdatedAt;
+        var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
+        bool isOutdated = roadmap.CreatedAt < latestUpdate;
+
         var nodes = await dbContext.RoadmapNodes
             .AsNoTracking()
             .Include(node => node.LearningResource)
@@ -188,7 +222,230 @@ public sealed class RoadmapController(
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return Ok(ToResponse(roadmap, roadmap.CareerRole.Name, nodes));
+        return Ok(ToResponse(roadmap, roadmap.CareerRole.Name, nodes, isOutdated));
+    }
+
+    [HttpPost("api/roadmap/{id:guid}/regenerate")]
+    public async Task<ActionResult<RoadmapResponse>> Regenerate(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+        var now = DateTimeOffset.UtcNow;
+
+        var existingRoadmap = await dbContext.Roadmaps
+            .Include(r => r.CareerRole)
+            .SingleOrDefaultAsync(r => r.Id == id && r.UserId == userId, cancellationToken);
+
+        if (existingRoadmap is null)
+        {
+            return NotFound(new { message = "Không tìm thấy lộ trình học tập để cập nhật." });
+        }
+
+        var careerRoleId = existingRoadmap.CareerRoleId;
+        var careerRole = existingRoadmap.CareerRole;
+
+        var skillGapReportId = existingRoadmap.SkillGapReportId
+            ?? await dbContext.SkillGapReports
+                .Where(report => report.UserId == userId && report.CareerRoleId == careerRoleId)
+                .OrderByDescending(report => report.CreatedAt)
+                .Select(report => (Guid?)report.Id)
+                .FirstOrDefaultAsync(cancellationToken);
+
+        // Load existing nodes to preserve completed/verified status
+        var existingNodes = await dbContext.RoadmapNodes
+            .AsNoTracking()
+            .Where(node => node.RoadmapId == id)
+            .ToListAsync(cancellationToken);
+
+        var existingSkillStatus = existingNodes
+            .Where(n => n.SkillId is not null)
+            .GroupBy(n => n.SkillId!.Value)
+            .ToDictionary(g => g.Key, g => g.First().Status);
+
+        var existingTitleStatus = existingNodes
+            .Where(n => n.SkillId is null)
+            .GroupBy(n => n.Title)
+            .ToDictionary(g => g.Key, g => g.First().Status);
+
+        var nodeInputs = skillGapReportId is not null
+            ? await GetNodesFromSkillGapAsync(skillGapReportId.Value, cancellationToken)
+            : await GetNodesFromRoleRequirementsAsync(careerRole.Id, cancellationToken);
+
+        if (nodeInputs.Count == 0)
+        {
+            nodeInputs = GetFallbackNodes(careerRole.Name);
+        }
+
+        var prerequisiteSkillIds = nodeInputs
+            .Where(input => input.SkillId is not null)
+            .Select(input => input.SkillId!.Value)
+            .Distinct()
+            .ToArray();
+        var prerequisiteMap = await GetSkillPrerequisiteMapAsync(prerequisiteSkillIds, cancellationToken);
+        nodeInputs = TopologicalOrderInputs(nodeInputs, prerequisiteMap);
+
+        // Load and keep review requests & lesson progress
+        var oldNodeIds = existingNodes.Select(n => n.Id).ToList();
+        var reviewRequests = await dbContext.RoadmapNodeReviewRequests
+            .Where(r => oldNodeIds.Contains(r.RoadmapNodeId))
+            .ToListAsync(cancellationToken);
+
+        var lessonProgresses = await dbContext.LessonProgresses
+            .Where(lp => oldNodeIds.Contains(lp.RoadmapNodeId))
+            .ToListAsync(cancellationToken);
+
+        // Create new hierarchy
+        var hierarchy = BuildHierarchyNodes(id, nodeInputs, prerequisiteMap, now);
+
+        // Map matching old node IDs to new node IDs
+        var newNodeMap = new Dictionary<string, Guid>();
+        foreach (var node in hierarchy.Nodes)
+        {
+            if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase)) continue;
+            if (node.SkillId is not null)
+            {
+                newNodeMap[$"skill_{node.SkillId.Value}"] = node.Id;
+            }
+            else
+            {
+                newNodeMap[$"title_{node.Title}"] = node.Id;
+            }
+        }
+
+        // Restore status for matching nodes in the new hierarchy
+        foreach (var node in hierarchy.Nodes)
+        {
+            if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase)) continue;
+
+            if (node.SkillId is not null && existingSkillStatus.TryGetValue(node.SkillId.Value, out var skillStatus))
+            {
+                node.Status = skillStatus;
+            }
+            else if (node.SkillId is null && existingTitleStatus.TryGetValue(node.Title, out var titleStatus))
+            {
+                node.Status = titleStatus;
+            }
+        }
+
+        // Redirect review requests
+        var requestsToDelete = new List<RoadmapNodeReviewRequest>();
+        foreach (var request in reviewRequests)
+        {
+            var oldNode = existingNodes.FirstOrDefault(n => n.Id == request.RoadmapNodeId);
+            if (oldNode is null)
+            {
+                requestsToDelete.Add(request);
+                continue;
+            }
+
+            string key = oldNode.SkillId is not null ? $"skill_{oldNode.SkillId.Value}" : $"title_{oldNode.Title}";
+            if (newNodeMap.TryGetValue(key, out var newNodeId))
+            {
+                request.RoadmapNodeId = newNodeId;
+            }
+            else
+            {
+                requestsToDelete.Add(request);
+            }
+        }
+
+        // Redirect lesson progress
+        var progressToDelete = new List<LessonProgress>();
+        var seenProgress = new HashSet<(Guid UserId, Guid NodeId, Guid ResourceId)>();
+        foreach (var progressItem in lessonProgresses)
+        {
+            var oldNode = existingNodes.FirstOrDefault(n => n.Id == progressItem.RoadmapNodeId);
+            if (oldNode is null)
+            {
+                progressToDelete.Add(progressItem);
+                continue;
+            }
+
+            string key = oldNode.SkillId is not null ? $"skill_{oldNode.SkillId.Value}" : $"title_{oldNode.Title}";
+            if (newNodeMap.TryGetValue(key, out var newNodeId))
+            {
+                var compositeKey = (progressItem.UserId, newNodeId, progressItem.LearningResourceId);
+                if (seenProgress.Contains(compositeKey))
+                {
+                    progressToDelete.Add(progressItem);
+                }
+                else
+                {
+                    progressItem.RoadmapNodeId = newNodeId;
+                    seenProgress.Add(compositeKey);
+                }
+            }
+            else
+            {
+                progressToDelete.Add(progressItem);
+            }
+        }
+
+        // Delete old resources and nodes
+        var oldNodeResources = await dbContext.RoadmapNodeResources
+            .Where(r => oldNodeIds.Contains(r.RoadmapNodeId))
+            .ToListAsync(cancellationToken);
+
+        dbContext.RoadmapNodeResources.RemoveRange(oldNodeResources);
+        dbContext.RoadmapNodes.RemoveRange(existingNodes);
+
+        dbContext.RoadmapNodeReviewRequests.RemoveRange(requestsToDelete);
+        dbContext.LessonProgresses.RemoveRange(progressToDelete);
+
+        // Add new nodes and their resources
+        dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
+
+        var nodeResources = hierarchy.ActionNodes
+            .SelectMany(pair => pair.Input.LearningResourceIds
+                .Distinct()
+                .Select((resourceId, resourceIndex) => new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = pair.Node.Id,
+                    LearningResourceId = resourceId,
+                    OrderIndex = resourceIndex + 1,
+                    CreatedAt = now
+                }))
+            .ToList();
+        dbContext.RoadmapNodeResources.AddRange(nodeResources);
+
+        // Update existing roadmap properties
+        existingRoadmap.UpdatedAt = now;
+        existingRoadmap.SkillGapReportId = skillGapReportId;
+
+        // Recalculate progress based on restored node statuses
+        var progressNodes = hierarchy.Nodes
+            .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        var completedCount = progressNodes.Count(item => item.Status is "Completed" or "Verified");
+        existingRoadmap.Progress = progressNodes.Count == 0
+            ? 0
+            : Math.Round(completedCount * 100m / progressNodes.Count, 2);
+
+        if (progressNodes.Count > 0 && completedCount == progressNodes.Count)
+        {
+            existingRoadmap.Status = "Completed";
+        }
+        else
+        {
+            existingRoadmap.Status = "Active";
+        }
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var responseNodes = await dbContext.RoadmapNodes
+            .AsNoTracking()
+            .Include(node => node.LearningResource)
+            .ThenInclude(resource => resource!.Skill)
+            .Include(node => node.Resources)
+            .ThenInclude(item => item.LearningResource)
+            .ThenInclude(resource => resource.Skill)
+            .Where(node => node.RoadmapId == id)
+            .OrderBy(node => node.OrderIndex)
+            .ToListAsync(cancellationToken);
+
+        return Ok(ToResponse(existingRoadmap, careerRole.Name, responseNodes, false));
     }
 
     [HttpPut("api/roadmap-node/{id:guid}/status")]
@@ -827,7 +1084,7 @@ public sealed class RoadmapController(
     private static string BuildGroupDescription(string groupName) =>
         $"Hoàn thành các module {groupName.ToLowerInvariant()} theo thứ tự ưu tiên trước khi chuyển sang phần học tiếp theo.";
 
-    private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes) =>
+    private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
         new(
             roadmap.Id,
             roadmap.CareerRoleId,
@@ -840,7 +1097,8 @@ public sealed class RoadmapController(
             roadmap.CreatedAt,
             roadmap.UpdatedAt,
             nodes.OrderBy(node => node.OrderIndex).Select(node => ToNodeResponse(node)).ToList(),
-            BuildNodeTree(nodes));
+            BuildNodeTree(nodes),
+            isOutdated);
 
     private static IReadOnlyList<RoadmapNodeResponse> BuildNodeTree(IReadOnlyList<RoadmapNode> nodes)
     {
@@ -949,7 +1207,8 @@ public sealed record RoadmapResponse(
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
     IReadOnlyList<RoadmapNodeResponse> Nodes,
-    IReadOnlyList<RoadmapNodeResponse> NodeTree);
+    IReadOnlyList<RoadmapNodeResponse> NodeTree,
+    bool IsOutdated);
 
 public sealed record RoadmapNodeResponse(
     Guid Id,

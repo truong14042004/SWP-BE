@@ -384,7 +384,17 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, nodes));
+        var reqUpdate = await dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(req => req.CareerRoleId == roadmap.CareerRoleId)
+            .Select(req => (DateTimeOffset?)req.UpdatedAt)
+            .MaxAsync(cancellationToken) ?? DateTimeOffset.MinValue;
+
+        var roleUpdate = roadmap.CareerRole.UpdatedAt;
+        var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
+        bool isOutdated = roadmap.CreatedAt < latestUpdate;
+
+        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, nodes, isOutdated));
     }
 
     // POST /api/counselor/feedback
@@ -596,7 +606,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
     // ── Mappers for RoadmapResponse ──────────────────────────────────────────
 
-    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes) =>
+    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
         new(
             roadmap.Id,
             roadmap.CareerRoleId,
@@ -609,7 +619,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             roadmap.CreatedAt,
             roadmap.UpdatedAt,
             nodes.OrderBy(node => node.OrderIndex).Select(node => ToNodeResponse(node)).ToList(),
-            BuildNodeTree(nodes));
+            BuildNodeTree(nodes),
+            isOutdated);
 
     private static IReadOnlyList<RoadmapNodeResponse> BuildNodeTree(IReadOnlyList<RoadmapNode> nodes)
     {
