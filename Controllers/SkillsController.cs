@@ -1,4 +1,3 @@
-using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
@@ -22,7 +21,7 @@ public class SkillsController : ControllerBase
     {
         var query = _context.Skills.AsQueryable();
 
-        if (!User.IsInRole("Admin"))
+        if (!User.IsInRole(UserRoles.IndustryMentor))
         {
             query = query.Where(s => s.IsActive);
         }
@@ -41,125 +40,5 @@ public class SkillsController : ControllerBase
             .ToListAsync();
 
         return Ok(skills);
-    }
-
-    public class CreateSkillRequest
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Category { get; set; } = string.Empty;
-        public string? Description { get; set; }
-    }
-
-    [HttpPost]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> CreateSkill([FromBody] CreateSkillRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
-        {
-            return BadRequest(new { message = "Tên và danh mục là bắt buộc." });
-        }
-
-        // Kiểm tra xem skill đã tồn tại chưa (kết hợp Name và Category là unique trong DB)
-        var exists = await _context.Skills.AnyAsync(s => s.Name == request.Name && s.Category == request.Category);
-        if (exists)
-        {
-            return Conflict(new { message = "Kỹ năng với tên và danh mục này đã tồn tại." });
-        }
-
-        var skill = new Skill
-        {
-            Id = Guid.NewGuid(),
-            Name = request.Name,
-            Category = request.Category,
-            Description = request.Description,
-            IsActive = true,
-            CreatedAt = DateTime.UtcNow,
-            UpdatedAt = DateTime.UtcNow
-        };
-
-        _context.Skills.Add(skill);
-        await _context.SaveChangesAsync();
-
-        return Ok(new
-        {
-            skill.Id,
-            skill.Name,
-            skill.Category,
-            skill.Description,
-            skill.IsActive,
-            skill.CreatedAt,
-            skill.UpdatedAt
-        });
-    }
-
-    public class UpdateSkillRequest
-    {
-        public string Name { get; set; } = string.Empty;
-        public string Category { get; set; } = string.Empty;
-        public string? Description { get; set; }
-        public bool IsActive { get; set; }
-    }
-
-    [HttpPut("{id}")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> UpdateSkill(Guid id, [FromBody] UpdateSkillRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.Name) || string.IsNullOrWhiteSpace(request.Category))
-        {
-            return BadRequest(new { message = "Tên và danh mục là bắt buộc." });
-        }
-
-        var skill = await _context.Skills.FindAsync(id);
-        if (skill == null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng." });
-        }
-
-        var exists = await _context.Skills.AnyAsync(s => s.Name == request.Name && s.Category == request.Category && s.Id != id);
-        if (exists)
-        {
-            return Conflict(new { message = "Một kỹ năng khác có tên và danh mục này đã tồn tại." });
-        }
-
-        skill.Name = request.Name;
-        skill.Category = request.Category;
-        skill.Description = request.Description;
-        skill.IsActive = request.IsActive;
-        skill.UpdatedAt = DateTime.UtcNow;
-
-        await _context.SaveChangesAsync();
-
-        return Ok(new
-        {
-            skill.Id,
-            skill.Name,
-            skill.Category,
-            skill.Description,
-            skill.IsActive,
-            skill.CreatedAt,
-            skill.UpdatedAt
-        });
-    }
-
-    [HttpDelete("{id}")]
-    [Authorize(Roles = "Admin")]
-    public async Task<IActionResult> DeleteSkill(Guid id)
-    {
-        var skill = await _context.Skills.FindAsync(id);
-        if (skill == null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng." });
-        }
-
-        try
-        {
-            _context.Skills.Remove(skill);
-            await _context.SaveChangesAsync();
-            return NoContent();
-        }
-        catch (DbUpdateException)
-        {
-            return BadRequest(new { message = "Không thể xóa kỹ năng này vì nó đang được tham chiếu bởi các bản ghi khác." });
-        }
     }
 }
