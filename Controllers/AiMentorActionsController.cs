@@ -16,7 +16,7 @@ public sealed class AiMentorActionsController(
     ILogger<AiMentorActionsController> logger) : ControllerBase
 {
     [HttpPost("apply-roadmap")]
-    public async Task<ActionResult<ApplyAiRoadmapResponse>> ApplyRoadmap(
+    public async Task<ActionResult> ApplyRoadmap(
         ApplyAiRoadmapRequest request,
         CancellationToken cancellationToken)
     {
@@ -27,85 +27,19 @@ public sealed class AiMentorActionsController(
 
         var userId = GetCurrentUserId();
 
-        // Find a career role to attach: prefer the role the AI hinted at, else student profile target role,
-        // else fall back to any active role.
-        Guid? targetRoleId = null;
-
-        if (!string.IsNullOrWhiteSpace(request.Roadmap.CareerRoleHint))
-        {
-            var hint = request.Roadmap.CareerRoleHint.Trim().ToLowerInvariant();
-            targetRoleId = await dbContext.CareerRoles
-                .AsNoTracking()
-                .Where(role => role.IsActive && role.Name.ToLower().Contains(hint))
-                .Select(role => (Guid?)role.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        if (!targetRoleId.HasValue)
-        {
-            var profile = await dbContext.StudentProfiles
-                .AsNoTracking()
-                .Where(item => item.UserId == userId)
-                .Select(item => new { item.TargetRoleId })
-                .SingleOrDefaultAsync(cancellationToken);
-
-            if (profile?.TargetRoleId is Guid roleId)
-            {
-                targetRoleId = roleId;
-            }
-        }
-
-        if (!targetRoleId.HasValue)
-        {
-            targetRoleId = await dbContext.CareerRoles
-                .AsNoTracking()
-                .Where(role => role.IsActive)
-                .OrderBy(role => role.Name)
-                .Select(role => (Guid?)role.Id)
-                .FirstOrDefaultAsync(cancellationToken);
-        }
-
-        if (!targetRoleId.HasValue)
-        {
-            return BadRequest(new { message = "Không có định hướng nghề nghiệp nào đang hoạt động để liên kết với lộ trình." });
-        }
-
-        var title = string.IsNullOrWhiteSpace(request.Roadmap.Title)
-            ? "Roadmap đề xuất bởi AI Mentor"
-            : request.Roadmap.Title.Trim();
-
-        var titleLower = title.ToLowerInvariant();
-        var existingRoadmap = await dbContext.Roadmaps
+        // Check if student has an active counselor assigned
+        var counselorId = await dbContext.CounselorAssignments
             .AsNoTracking()
-            .FirstOrDefaultAsync(r => r.UserId == userId && r.Title.ToLower() == titleLower, cancellationToken);
+            .Where(a => a.StudentId == userId && a.Status == "Active")
+            .Select(a => (Guid?)a.CounselorId)
+            .FirstOrDefaultAsync(cancellationToken);
 
-        if (existingRoadmap is not null)
+        if (!counselorId.HasValue)
         {
-            var existingNodeCount = await dbContext.RoadmapNodes
-                .CountAsync(n => n.RoadmapId == existingRoadmap.Id, cancellationToken);
-
-            return Ok(new ApplyAiRoadmapResponse(
-                existingRoadmap.Id,
-                existingRoadmap.Title,
-                existingNodeCount,
-                true));
+            return BadRequest(new { message = "Bạn chưa được phân công cố vấn học tập để gửi đề xuất phê duyệt lộ trình. Vui lòng liên hệ quản trị viên." });
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var roadmap = new Roadmap
-        {
-            Id = Guid.NewGuid(),
-            UserId = userId,
-            CareerRoleId = targetRoleId.Value,
-            Title = title,
-            Description = request.Roadmap.Description?.Trim(),
-            Status = "Active",
-            Progress = 0m,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        dbContext.Roadmaps.Add(roadmap);
-
+        // Validate that roadmap is not empty/invalid
         var skills = await dbContext.Skills
             .AsNoTracking()
             .Where(item => item.IsActive)
@@ -120,81 +54,78 @@ public sealed class AiMentorActionsController(
         var resources = await dbContext.LearningResources
             .AsNoTracking()
             .Where(item => item.IsActive)
-            .Select(item => new
-            {
-                item.Id,
-                item.SkillId,
-                item.Title,
-                item.Difficulty,
-                item.StorageObjectName,
-                item.LessonNumber
-            })
+            .Select(item => new { item.Title })
             .ToListAsync(cancellationToken);
         var resourceIdsByTitle = resources
             .GroupBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
-            .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
-        var resourceIdsBySkill = resources
-            .Where(item => item.SkillId is not null)
-            .GroupBy(item => item.SkillId!.Value)
-            .ToDictionary(
-                group => group.Key,
-                group => (IReadOnlyList<Guid>)group
-                    .OrderBy(item => item.LessonNumber)
-                    .ThenBy(item => DifficultyRank(item.Difficulty))
-                    .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
-                    .ThenBy(item => item.Title)
-                    .Select(item => item.Id)
-                    .ToList());
+            .ToDictionary(group => group.Key, group => group.First().Title, StringComparer.OrdinalIgnoreCase);
 
         var allowedModuleTitles = skillIdsByTitle.Keys
             .Concat(resourceIdsByTitle.Keys)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
-        var sanitizedNodes = SanitizeRoadmapCategories(request.Roadmap.Nodes, categorySet, allowedModuleTitles);
 
-        var nodes = new List<RoadmapNode>();
-        var nodeResources = new List<RoadmapNodeResource>();
-        var globalOrder = 0;
-        FlattenNodes(
-            sanitizedNodes,
-            roadmap.Id,
-            parentId: null,
-            level: 0,
-            ref globalOrder,
-            now,
-            nodes,
-            nodeResources,
-            skillIdsByTitle,
-            resourceIdsByTitle,
-            resourceIdsBySkill);
-
-        if (nodes.Count == 0)
+        var sanitizedNodes = Services.RoadmapMaterializer.SanitizeRoadmapCategories(request.Roadmap.Nodes, categorySet, allowedModuleTitles);
+        if (sanitizedNodes.Count == 0)
         {
-            return BadRequest(new { message = "Lộ trình phải chứa ít nhất một module." });
+            return BadRequest(new { message = "Lộ trình phải chứa ít nhất một module hợp lệ." });
         }
 
-        try
+        var now = DateTimeOffset.UtcNow;
+        var approvalRequest = new RoadmapApprovalRequest
         {
-            dbContext.RoadmapNodes.AddRange(nodes);
-            dbContext.RoadmapNodeResources.AddRange(nodeResources);
-            await dbContext.SaveChangesAsync(cancellationToken);
-        }
-        catch (DbUpdateException dbEx)
+            Id = Guid.NewGuid(),
+            StudentId = userId,
+            CounselorId = counselorId.Value,
+            Status = "Pending",
+            PayloadJson = JsonSerializer.Serialize(request.Roadmap),
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+
+        dbContext.RoadmapApprovalRequests.Add(approvalRequest);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(new { requestId = approvalRequest.Id });
+    }
+
+    [HttpGet("roadmap-approval-requests")]
+    public async Task<ActionResult<IReadOnlyList<StudentRoadmapApprovalRequestResponse>>> GetStudentRoadmapApprovalRequests(
+        CancellationToken cancellationToken)
+    {
+        var userId = GetCurrentUserId();
+
+        var requests = await dbContext.RoadmapApprovalRequests
+            .AsNoTracking()
+            .Include(r => r.MaterializedRoadmap)
+            .Where(r => r.StudentId == userId)
+            .OrderByDescending(r => r.CreatedAt)
+            .ToListAsync(cancellationToken);
+
+        var response = requests.Select(r =>
         {
-            var inner = dbEx.InnerException?.Message ?? dbEx.Message;
-            logger.LogError(dbEx, "Failed to apply AI roadmap for user {UserId}. Inner: {Inner}", userId, inner);
-            return StatusCode(StatusCodes.Status500InternalServerError, new
+            string? title = null;
+            try
             {
-                message = "Không tạo được roadmap từ gợi ý AI.",
-                detail = inner,
-                type = "DbUpdateException"
-            });
-        }
+                using var doc = JsonDocument.Parse(r.PayloadJson);
+                if (doc.RootElement.TryGetProperty("Title", out var titleProp))
+                {
+                    title = titleProp.GetString();
+                }
+            }
+            catch { /* ignore parsing */ }
 
-        return Ok(new ApplyAiRoadmapResponse(
-            roadmap.Id,
-            roadmap.Title,
-            nodes.Count,
-            false));
+            return new StudentRoadmapApprovalRequestResponse(
+                r.Id,
+                r.Status,
+                title ?? "Lộ trình đề xuất",
+                r.RejectionReason,
+                r.MaterializedRoadmapId,
+                r.MaterializedRoadmap?.Title,
+                r.CreatedAt,
+                r.UpdatedAt);
+        }).ToList();
+
+        return Ok(response);
     }
 
     private static IReadOnlyList<AiRoadmapNodeDto> SanitizeRoadmapCategories(
@@ -366,6 +297,16 @@ public sealed class AiMentorActionsController(
             : throw new UnauthorizedAccessException("Token người dùng không hợp lệ.");
     }
 }
+
+public sealed record StudentRoadmapApprovalRequestResponse(
+    Guid Id,
+    string Status,
+    string ProposedTitle,
+    string? RejectionReason,
+    Guid? MaterializedRoadmapId,
+    string? MaterializedRoadmapTitle,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset UpdatedAt);
 
 public sealed record ApplyAiRoadmapRequest(AiRoadmapDto Roadmap);
 

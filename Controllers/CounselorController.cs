@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.AspNetCore.Authorization;
@@ -10,6 +11,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -691,6 +693,227 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             resource.Difficulty,
             resource.EstimatedHours,
             resource.LessonNumber);
+
+    // GET /api/counselor/roadmap-approval-queue
+    // Hàng đợi duyệt khung roadmap
+    [HttpGet("roadmap-approval-queue")]
+    [ProducesResponseType<IReadOnlyList<RoadmapApprovalQueueItemResponse>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<RoadmapApprovalQueueItemResponse>>> GetRoadmapApprovalQueue(
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+
+        var requests = await dbContext.RoadmapApprovalRequests
+            .AsNoTracking()
+            .Include(r => r.Student)
+            .Where(r => r.CounselorId == counselorId && r.Status == "Pending")
+            .OrderByDescending(r => r.CreatedAt)
+            .Select(r => new RoadmapApprovalQueueItemResponse(
+                r.Id,
+                r.StudentId,
+                r.Student.FullName,
+                r.Student.Email,
+                r.Student.AvatarUrl,
+                r.CreatedAt))
+            .ToListAsync(cancellationToken);
+
+        return Ok(requests);
+    }
+
+    // GET /api/counselor/roadmap-approval-requests/{id}
+    // Xem preview khung roadmap
+    [HttpGet("roadmap-approval-requests/{id:guid}")]
+    [ProducesResponseType<RoadmapApprovalRequestDetailsResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    public async Task<ActionResult<RoadmapApprovalRequestDetailsResponse>> GetRoadmapApprovalRequestDetails(
+        Guid id,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+
+        var request = await dbContext.RoadmapApprovalRequests
+            .Include(r => r.Student)
+            .SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (request is null)
+        {
+            return NotFound(new { message = "Không tìm thấy yêu cầu duyệt lộ trình." });
+        }
+
+        if (request.CounselorId != counselorId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
+        }
+
+        AiRoadmapDto? payload = null;
+        try
+        {
+            payload = JsonSerializer.Deserialize<AiRoadmapDto>(request.PayloadJson);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Lỗi khi đọc dữ liệu payload của yêu cầu.", detail = ex.Message });
+        }
+
+        if (payload is null)
+        {
+            return BadRequest(new { message = "Payload của yêu cầu không hợp lệ." });
+        }
+
+        return Ok(new RoadmapApprovalRequestDetailsResponse(
+            request.Id,
+            request.StudentId,
+            request.Student.FullName,
+            request.Student.Email,
+            request.Student.AvatarUrl,
+            request.Status,
+            payload,
+            request.RejectionReason,
+            request.CreatedAt));
+    }
+
+    // POST /api/counselor/roadmap-approval-requests/{id}/approve
+    // Duyệt đề xuất roadmap AI
+    [HttpPost("roadmap-approval-requests/{id:guid}/approve")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> ApproveRoadmapRequest(
+        Guid id,
+        [FromServices] IRoadmapMaterializer roadmapMaterializer,
+        [FromServices] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+
+        var request = await dbContext.RoadmapApprovalRequests
+            .Include(r => r.Student)
+            .SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (request is null)
+        {
+            return NotFound(new { message = "Không tìm thấy yêu cầu duyệt lộ trình." });
+        }
+
+        if (request.CounselorId != counselorId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
+        }
+
+        if (request.Status != "Pending")
+        {
+            return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
+        }
+
+        AiRoadmapDto? payload = null;
+        try
+        {
+            payload = JsonSerializer.Deserialize<AiRoadmapDto>(request.PayloadJson);
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Lỗi khi đọc dữ liệu payload của yêu cầu.", detail = ex.Message });
+        }
+
+        if (payload is null)
+        {
+            return BadRequest(new { message = "Payload của yêu cầu không hợp lệ." });
+        }
+
+        using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
+        {
+            var result = await roadmapMaterializer.MaterializeRoadmapAsync(request.StudentId, payload, cancellationToken);
+
+            request.Status = "Approved";
+            request.MaterializedRoadmapId = result.RoadmapId;
+            request.UpdatedAt = DateTimeOffset.UtcNow;
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+
+            var counselor = await dbContext.Users.FindAsync(new object[] { counselorId }, cancellationToken);
+            var counselorName = counselor?.FullName ?? "Cố vấn học tập";
+
+            // Send notification to the student
+            await notificationService.SendNotificationAsync(
+                userId: request.StudentId,
+                type: "RoadmapApprovalApproved",
+                title: "Đề xuất lộ trình đã được duyệt",
+                message: $"Cố vấn {counselorName} đã duyệt đề xuất lộ trình của bạn: {result.Title}",
+                linkUrl: "#roadmap",
+                cancellationToken: cancellationToken);
+
+            return Ok(new { message = "Lộ trình đã được phê duyệt và khởi tạo thành công.", roadmapId = result.RoadmapId });
+        }
+        catch (Exception ex)
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            return StatusCode(StatusCodes.Status500InternalServerError, new { message = "Lỗi khi phê duyệt và khởi tạo lộ trình.", detail = ex.Message });
+        }
+    }
+
+    // POST /api/counselor/roadmap-approval-requests/{id}/reject
+    // Từ chối đề xuất roadmap AI
+    [HttpPost("roadmap-approval-requests/{id:guid}/reject")]
+    [ProducesResponseType(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    public async Task<IActionResult> RejectRoadmapRequest(
+        Guid id,
+        RejectRoadmapApprovalRequest requestBody,
+        [FromServices] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(requestBody.RejectionReason))
+        {
+            return BadRequest(new { message = "Lý do từ chối là bắt buộc." });
+        }
+
+        var counselorId = GetCurrentUserId();
+
+        var request = await dbContext.RoadmapApprovalRequests
+            .Include(r => r.Student)
+            .SingleOrDefaultAsync(r => r.Id == id, cancellationToken);
+
+        if (request is null)
+        {
+            return NotFound(new { message = "Không tìm thấy yêu cầu duyệt lộ trình." });
+        }
+
+        if (request.CounselorId != counselorId)
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
+        }
+
+        if (request.Status != "Pending")
+        {
+            return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
+        }
+
+        request.Status = "Rejected";
+        request.RejectionReason = requestBody.RejectionReason.Trim();
+        request.UpdatedAt = DateTimeOffset.UtcNow;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var counselor = await dbContext.Users.FindAsync(new object[] { counselorId }, cancellationToken);
+        var counselorName = counselor?.FullName ?? "Cố vấn học tập";
+
+        // Send notification to the student
+        await notificationService.SendNotificationAsync(
+            userId: request.StudentId,
+            type: "RoadmapApprovalRejected",
+            title: "Đề xuất lộ trình bị từ chối",
+            message: $"Đề xuất lộ trình của bạn đã bị từ chối bởi cố vấn {counselorName}. Lý do: {request.RejectionReason}",
+            linkUrl: "#roadmap-requests",
+            cancellationToken: cancellationToken);
+
+        return Ok(new { message = "Đã từ chối đề xuất lộ trình." });
+    }
 }
 
 // ── Request DTOs ─────────────────────────────────────────────────────────────
@@ -801,3 +1024,25 @@ public sealed record CounselorSkillGapReportItemResponse(
     string Status,
     int Priority,
     string? Recommendation);
+
+public sealed record RoadmapApprovalQueueItemResponse(
+    Guid Id,
+    Guid StudentId,
+    string StudentFullName,
+    string StudentEmail,
+    string? StudentAvatarUrl,
+    DateTimeOffset CreatedAt);
+
+public sealed record RoadmapApprovalRequestDetailsResponse(
+    Guid Id,
+    Guid StudentId,
+    string StudentFullName,
+    string StudentEmail,
+    string? StudentAvatarUrl,
+    string Status,
+    AiRoadmapDto Payload,
+    string? RejectionReason,
+    DateTimeOffset CreatedAt);
+
+public sealed record RejectRoadmapApprovalRequest(
+    string RejectionReason);
