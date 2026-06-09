@@ -6,6 +6,7 @@ public sealed class SkillGapReport
     public Guid UserId { get; set; }
     public Guid CareerRoleId { get; set; }
     public decimal MatchScore { get; set; }
+    public decimal? VerifiedMatchScore { get; set; }
     public string? Summary { get; set; }
     public DateTimeOffset CreatedAt { get; set; }
     public DateTimeOffset UpdatedAt { get; set; }

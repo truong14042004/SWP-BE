@@ -48,6 +48,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<KeywordTrendSnapshot> KeywordTrendSnapshots => Set<KeywordTrendSnapshot>();
     public DbSet<RoleSkillUpdateProposal> RoleSkillUpdateProposals => Set<RoleSkillUpdateProposal>();
     public DbSet<StudentTalentProfile> StudentTalentProfiles => Set<StudentTalentProfile>();
+    public DbSet<RoadmapApprovalRequest> RoadmapApprovalRequests => Set<RoadmapApprovalRequest>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -581,8 +582,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(report => new { report.UserId, report.CreatedAt }).IsDescending(false, true);
             entity.HasIndex(report => report.CareerRoleId);
             entity.Property(report => report.MatchScore).HasPrecision(5, 2);
+            entity.Property(report => report.VerifiedMatchScore).HasPrecision(5, 2);
             entity.Property(report => report.Summary).HasMaxLength(4000);
-            entity.ToTable(t => t.HasCheckConstraint("CK_skill_gap_reports_MatchScore", "\"MatchScore\" >= 0 AND \"MatchScore\" <= 100"));
+            entity.ToTable(t =>
+            {
+                t.HasCheckConstraint("CK_skill_gap_reports_MatchScore", "\"MatchScore\" >= 0 AND \"MatchScore\" <= 100");
+                t.HasCheckConstraint("CK_skill_gap_reports_VerifiedMatchScore", "\"VerifiedMatchScore\" IS NULL OR (\"VerifiedMatchScore\" >= 0 AND \"VerifiedMatchScore\" <= 100)");
+            });
             entity.HasOne(report => report.User)
                 .WithMany()
                 .HasForeignKey(report => report.UserId)
@@ -1247,6 +1253,30 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(e => e.SkillId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<RoadmapApprovalRequest>(entity =>
+        {
+            entity.ToTable("roadmap_approval_requests");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => new { item.StudentId, item.Status });
+            entity.HasIndex(item => new { item.CounselorId, item.Status });
+            entity.Property(item => item.Status).HasMaxLength(30).IsRequired().HasDefaultValue("Pending");
+            entity.Property(item => item.PayloadJson).HasColumnType("jsonb").IsRequired();
+            entity.Property(item => item.RejectionReason).HasMaxLength(2000);
+            entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_approval_requests_Status", "\"Status\" IN ('Pending','Approved','Rejected')"));
+            entity.HasOne(item => item.Student)
+                .WithMany()
+                .HasForeignKey(item => item.StudentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.Counselor)
+                .WithMany()
+                .HasForeignKey(item => item.CounselorId)
+                .OnDelete(DeleteBehavior.Restrict);
+            entity.HasOne(item => item.MaterializedRoadmap)
+                .WithMany()
+                .HasForeignKey(item => item.MaterializedRoadmapId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
     }
 }
