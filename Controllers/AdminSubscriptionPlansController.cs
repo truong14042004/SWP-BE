@@ -131,9 +131,14 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             return "Giá gói đăng ký không được âm.";
         }
 
-        if (request.MentorReviewLimit < 0)
+        if (request.MentorReviewLimit < -1)
         {
-            return "Giới hạn lượt review của mentor không được âm.";
+            return "Giới hạn lượt review của mentor không hợp lệ.";
+        }
+
+        if (request.AiChatLimit < -1)
+        {
+            return "Giới hạn lượt AI chat không hợp lệ.";
         }
 
         if (string.IsNullOrWhiteSpace(request.Currency))
@@ -165,6 +170,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
         plan.BillingCycle = request.BillingCycle.Trim();
         plan.FeaturesJson = JsonSerializer.Serialize(new SubscriptionPlanFeatures(
             request.MentorReviewLimit,
+            request.AiChatLimit,
             request.Features ?? []));
         plan.IsActive = request.IsActive;
         plan.UpdatedAt = now;
@@ -181,6 +187,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             plan.Currency,
             plan.BillingCycle,
             features.MentorReviewLimit,
+            features.AiChatLimit,
             features.Features,
             plan.IsActive,
             plan.CreatedAt,
@@ -191,7 +198,7 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
     {
         if (string.IsNullOrWhiteSpace(featuresJson))
         {
-            return new SubscriptionPlanFeatures(0, []);
+            return new SubscriptionPlanFeatures(0, 0, []);
         }
 
         try
@@ -199,11 +206,11 @@ public sealed class AdminSubscriptionPlansController(AppDbContext dbContext) : C
             return JsonSerializer.Deserialize<SubscriptionPlanFeatures>(
                 featuresJson,
                 new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                ?? new SubscriptionPlanFeatures(0, []);
+                ?? new SubscriptionPlanFeatures(0, 0, []);
         }
         catch (JsonException)
         {
-            return new SubscriptionPlanFeatures(0, []);
+            return new SubscriptionPlanFeatures(0, 0, []);
         }
     }
 }
@@ -215,6 +222,7 @@ public sealed record SaveSubscriptionPlanRequest(
     string Currency,
     string BillingCycle,
     int MentorReviewLimit,
+    int AiChatLimit,
     IReadOnlyList<string>? Features,
     bool IsActive);
 
@@ -226,6 +234,7 @@ public sealed record AdminSubscriptionPlanResponse(
     string Currency,
     string BillingCycle,
     int MentorReviewLimit,
+    int AiChatLimit,
     IReadOnlyList<string> Features,
     bool IsActive,
     DateTimeOffset CreatedAt,
@@ -233,4 +242,5 @@ public sealed record AdminSubscriptionPlanResponse(
 
 public sealed record SubscriptionPlanFeatures(
     int MentorReviewLimit,
+    int AiChatLimit,
     IReadOnlyList<string> Features);
