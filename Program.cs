@@ -62,6 +62,7 @@ builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
 builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
 builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
+builder.Services.AddScoped<IRoadmapMaterializer, RoadmapMaterializer>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
 // TopCV được cào bằng script Python (Scrapling) chạy như tiến trình con ngay
 // trong cùng container — không cần service riêng, không HTTP, không token.
