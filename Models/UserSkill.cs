@@ -6,6 +6,7 @@ public sealed class UserSkill
     public Guid UserId { get; set; }
     public Guid SkillId { get; set; }
     public string Level { get; set; } = string.Empty;
+    public string? VerifiedLevel { get; set; }
     public string? EvidenceUrl { get; set; }
     public string? EvidenceType { get; set; }
     public bool IsVerified { get; set; }

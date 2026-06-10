@@ -187,27 +187,45 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     [HttpPost("{id:guid}/verify")]
     [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
     [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(
+        Guid id,
+        VerifyUserSkillRequest request,
+        CancellationToken cancellationToken)
     {
-        var verifierId = GetCurrentUserId(); //lay id cua nguoi xac nhan
+        var levelError = ValidateLevel(request.VerifiedLevel);
+        if (levelError is not null)
+        {
+            return BadRequest(new { message = levelError });
+        }
+
+        var verifierId = GetCurrentUserId();
         var userSkill = await dbContext.UserSkills
             .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken); //tim ky nang co id khop voi id trong request
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         if (userSkill is null)
         {
             return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && !await IsStudentAssignedToCounselorAsync(userSkill.UserId, verifierId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
+        }
+
         var now = DateTimeOffset.UtcNow;
         userSkill.IsVerified = true;
-        userSkill.VerifiedByUserId = verifierId; //gan id cua nguoi xac nhan vao
+        userSkill.VerifiedLevel = NormalizeLevel(request.VerifiedLevel);
+        userSkill.VerifiedByUserId = verifierId;
         userSkill.VerifiedAt = now;
         userSkill.UpdatedAt = now;
 
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
 
         return Ok(ToResponse(userSkill));
     }
@@ -260,6 +278,17 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
     private static string NormalizeLevel(string level) =>
         AllowedLevels.Single(value => value.Equals(level.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private async Task<bool> IsStudentAssignedToCounselorAsync(
+        Guid studentId,
+        Guid counselorId,
+        CancellationToken cancellationToken) =>
+        await dbContext.CounselorAssignments
+            .AnyAsync(
+                assignment => assignment.CounselorId == counselorId
+                    && assignment.StudentId == studentId
+                    && assignment.Status == "Active",
+                cancellationToken);
 
     private static UserSkillResponse ToResponse(UserSkill userSkill) =>
         new(
