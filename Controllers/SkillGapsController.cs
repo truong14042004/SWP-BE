@@ -87,7 +87,8 @@ public class SkillGapsController : ControllerBase
         };
 
         var reportItems = new List<SkillGapReportItem>();
-        decimal totalScore = 0;
+        decimal selfReportedScore = 0;
+        decimal verifiedScore = 0;
         decimal totalWeight = 0;
 
         foreach (var req in requiredSkills)
@@ -105,34 +106,42 @@ public class SkillGapsController : ControllerBase
 
             int reqLevelValue = ParseLevel(req.RequiredLevel);
             int userLevelValue = userSkill != null ? ParseLevel(userSkill.Level) : 0;
-            
+            int verifiedLevelValue = userSkill is { IsVerified: true }
+                ? ParseLevel(string.IsNullOrWhiteSpace(userSkill.VerifiedLevel) ? userSkill.Level : userSkill.VerifiedLevel)
+                : 0;
+
             item.CurrentLevel = userSkill?.Level ?? "None";
 
             if (userSkill != null && userLevelValue >= reqLevelValue)
             {
+                selfReportedScore += req.Weight;
+
                 if (userSkill.IsVerified)
                 {
                     item.Status = "Matched";
                     item.Recommendation = "Làm tốt lắm! Bạn đã thành thạo và xác thực kỹ năng này.";
-                    totalScore += req.Weight;
                 }
                 else
                 {
                     item.Status = "NotVerified";
                     item.Recommendation = "Bạn đã đạt cấp độ kỹ năng yêu cầu, nhưng cần phải được xác thực (cung cấp minh chứng).";
-                    totalScore += req.Weight * 0.5m;
                 }
             }
             else if (userSkill != null && userLevelValue > 0)
             {
                 item.Status = "Weak";
                 item.Recommendation = $"Bạn cần cải thiện từ cấp độ {userSkill.Level} lên {req.RequiredLevel}.";
-                totalScore += req.Weight * (decimal)userLevelValue / reqLevelValue;
+                selfReportedScore += req.Weight * (decimal)userLevelValue / reqLevelValue;
             }
             else
             {
                 item.Status = "Missing";
                 item.Recommendation = $"Bạn cần học kỹ năng này đến cấp độ {req.RequiredLevel}.";
+            }
+
+            if (userSkill is { IsVerified: true } && verifiedLevelValue >= reqLevelValue)
+            {
+                verifiedScore += req.Weight;
             }
 
             totalWeight += req.Weight;
@@ -141,14 +150,16 @@ public class SkillGapsController : ControllerBase
 
         if (totalWeight > 0)
         {
-            report.MatchScore = Math.Round((totalScore / totalWeight) * 100, 2);
+            report.MatchScore = Math.Round((selfReportedScore / totalWeight) * 100, 2);
+            report.VerifiedMatchScore = Math.Round((verifiedScore / totalWeight) * 100, 2);
         }
         else
         {
             report.MatchScore = 0;
+            report.VerifiedMatchScore = 0;
         }
 
-        report.Summary = $"Mức độ phù hợp của bạn với vai trò nghề nghiệp này là {report.MatchScore}%.";
+        report.Summary = $"Mức độ phù hợp đã xác thực của bạn với vai trò nghề nghiệp này là {report.VerifiedMatchScore}%. Mức độ tự đánh giá: {report.MatchScore}%.";
 
         // Delete previous reports for the same user and role
         var previousReports = await _context.SkillGapReports
@@ -176,7 +187,9 @@ public class SkillGapsController : ControllerBase
             report.Id,
             report.UserId,
             report.CareerRoleId,
+            SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
+            report.VerifiedMatchScore,
             report.Summary,
             report.CreatedAt,
             Items = reportItems.Select(i => new
@@ -238,7 +251,9 @@ public class SkillGapsController : ControllerBase
             report.UserId,
             report.CareerRoleId,
             CareerRoleName = report.CareerRole.Name,
+            SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
+            report.VerifiedMatchScore,
             report.Summary,
             report.CreatedAt,
             Items = items.Select(i => new
@@ -288,7 +303,9 @@ public class SkillGapsController : ControllerBase
             report.UserId,
             report.CareerRoleId,
             CareerRoleName = report.CareerRole.Name,
+            SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
+            report.VerifiedMatchScore,
             report.Summary,
             report.CreatedAt,
             Items = items.Select(i => new
