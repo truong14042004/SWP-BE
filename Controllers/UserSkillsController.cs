@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SWP_BE.Contracts.UserSkills;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -226,6 +227,64 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         userSkill.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToResponse(userSkill));
+    }
+
+    [HttpPost("{id:guid}/unverify")]
+    [Authorize(Roles = UserRoles.AcademicCounselor)]
+    [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserSkillResponse>> UnverifyUserSkill(
+        Guid id,
+        [FromServices] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
+        }
+
+        if (!await IsStudentAssignedToCounselorAsync(userSkill.UserId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
+        }
+
+        if (!userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Kỹ năng hiện chưa được xác minh." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = false;
+        userSkill.VerifiedByUserId = null;
+        userSkill.VerifiedLevel = null;
+        userSkill.VerifiedAt = null;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var counselorName = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == counselorId)
+            .Select(user => user.FullName)
+            .SingleOrDefaultAsync(cancellationToken) ?? "Cố vấn học tập";
+
+        await notificationService.SendNotificationAsync(
+            userId: userSkill.UserId,
+            type: "SkillVerificationRevoked",
+            title: "Xác minh kỹ năng đã bị thu hồi",
+            message: $"Cố vấn {counselorName} đã thu hồi xác minh kỹ năng {userSkill.Skill.Name} của bạn.",
+            linkUrl: "#skills",
+            cancellationToken: cancellationToken);
 
         return Ok(ToResponse(userSkill));
     }
