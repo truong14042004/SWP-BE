@@ -694,6 +694,42 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             resource.EstimatedHours,
             resource.LessonNumber);
 
+    // GET /api/counselor/skill-verification-queue
+    // Hàng đợi duyệt minh chứng kỹ năng
+    [HttpGet("skill-verification-queue")]
+    [ProducesResponseType<IReadOnlyList<SkillVerificationQueueItemResponse>>(StatusCodes.Status200OK)]
+    public async Task<ActionResult<IReadOnlyList<SkillVerificationQueueItemResponse>>> GetSkillVerificationQueue(
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+
+        var items = await dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.VerificationStatus == UserSkillVerificationStatus.PendingVerification
+                && dbContext.CounselorAssignments.Any(a =>
+                    a.CounselorId == counselorId
+                    && a.StudentId == us.UserId
+                    && a.Status == "Active"))
+            .OrderByDescending(us => us.UpdatedAt)
+            .Select(us => new SkillVerificationQueueItemResponse(
+                us.Id,
+                us.UserId,
+                us.User.FullName,
+                us.User.Email,
+                us.User.AvatarUrl,
+                us.SkillId,
+                us.Skill.Name,
+                us.Skill.Category,
+                us.Level,
+                us.EvidenceUrl,
+                us.EvidenceType,
+                us.VerificationStatus,
+                us.UpdatedAt))
+            .ToListAsync(cancellationToken);
+
+        return Ok(items);
+    }
+
     // GET /api/counselor/roadmap-approval-queue
     // Hàng đợi duyệt khung roadmap
     [HttpGet("roadmap-approval-queue")]
@@ -1024,6 +1060,21 @@ public sealed record CounselorSkillGapReportItemResponse(
     string Status,
     int Priority,
     string? Recommendation);
+
+public sealed record SkillVerificationQueueItemResponse(
+    Guid UserSkillId,
+    Guid StudentId,
+    string StudentFullName,
+    string StudentEmail,
+    string? StudentAvatarUrl,
+    Guid SkillId,
+    string SkillName,
+    string SkillCategory,
+    string Level,
+    string? EvidenceUrl,
+    string? EvidenceType,
+    string VerificationStatus,
+    DateTimeOffset SubmittedAt);
 
 public sealed record RoadmapApprovalQueueItemResponse(
     Guid Id,

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SWP_BE.Data;
@@ -11,9 +12,11 @@ using SWP_BE.Data;
 namespace SWP_BE.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260610100629_AddVerifiedLevelToUserSkill")]
+    partial class AddVerifiedLevelToUserSkill
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -4075,13 +4078,6 @@ namespace SWP_BE.Migrations
                     b.Property<Guid>("UserId")
                         .HasColumnType("uuid");
 
-                    b.Property<string>("VerificationStatus")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasMaxLength(30)
-                        .HasColumnType("character varying(30)")
-                        .HasDefaultValue("SelfDeclared");
-
                     b.Property<DateTimeOffset?>("VerifiedAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -4105,10 +4101,7 @@ namespace SWP_BE.Migrations
                     b.HasIndex("UserId", "SkillId")
                         .IsUnique();
 
-                    b.ToTable("user_skills", null, t =>
-                        {
-                            t.HasCheckConstraint("CK_user_skills_VerificationStatus", "\"VerificationStatus\" IN ('SelfDeclared','PendingVerification','Verified','Unverified')");
-                        });
+                    b.ToTable("user_skills", (string)null);
                 });
 
             modelBuilder.Entity("SWP_BE.Models.AiReviewSummary", b =>

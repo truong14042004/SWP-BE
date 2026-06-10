@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using SWP_BE.Contracts.UserSkills;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -82,6 +83,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             Level = NormalizeLevel(request.Level), //chuan hoa chu hoa/thuong
             EvidenceUrl = request.EvidenceUrl?.Trim(),
             EvidenceType = request.EvidenceType?.Trim(),
+            VerificationStatus = UserSkillVerificationStatus.SelfDeclared,
             IsVerified = false,
             CreatedAt = now,
             UpdatedAt = now
@@ -156,6 +158,49 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         return Ok(ToResponse(userSkill));
     }
 
+    [HttpPost("{id:guid}/submit-evidence")]
+    [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserSkillResponse>> SubmitUserSkillEvidence(
+        Guid id,
+        SubmitUserSkillEvidenceRequest request,
+        CancellationToken cancellationToken)
+    {
+        var evidenceError = ValidateSubmitEvidenceRequest(request.EvidenceUrl, request.EvidenceType);
+        if (evidenceError is not null)
+        {
+            return BadRequest(new { message = evidenceError });
+        }
+
+        var userId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id && item.UserId == userId, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
+        }
+
+        if (userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Kỹ năng đã được xác minh, không thể nộp minh chứng mới." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.EvidenceUrl = request.EvidenceUrl.Trim();
+        userSkill.EvidenceType = request.EvidenceType.Trim();
+        userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToResponse(userSkill));
+    }
+
     [HttpDelete("{id:guid}")]
     [ProducesResponseType(StatusCodes.Status204NoContent)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
@@ -187,27 +232,105 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     [HttpPost("{id:guid}/verify")]
     [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
     [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
     [ProducesResponseType(StatusCodes.Status404NotFound)]
-    public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(Guid id, CancellationToken cancellationToken)
+    public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(
+        Guid id,
+        VerifyUserSkillRequest request,
+        CancellationToken cancellationToken)
     {
-        var verifierId = GetCurrentUserId(); //lay id cua nguoi xac nhan
+        var levelError = ValidateLevel(request.VerifiedLevel);
+        if (levelError is not null)
+        {
+            return BadRequest(new { message = levelError });
+        }
+
+        var verifierId = GetCurrentUserId();
         var userSkill = await dbContext.UserSkills
             .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken); //tim ky nang co id khop voi id trong request
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
 
         if (userSkill is null)
         {
             return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && !await IsStudentAssignedToCounselorAsync(userSkill.UserId, verifierId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
+        }
+
         var now = DateTimeOffset.UtcNow;
         userSkill.IsVerified = true;
-        userSkill.VerifiedByUserId = verifierId; //gan id cua nguoi xac nhan vao
+        userSkill.VerifiedLevel = NormalizeLevel(request.VerifiedLevel);
+        userSkill.VerifiedByUserId = verifierId;
         userSkill.VerifiedAt = now;
+        userSkill.VerificationStatus = UserSkillVerificationStatus.Verified;
         userSkill.UpdatedAt = now;
 
-        await dbContext.SaveChangesAsync();
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return Ok(ToResponse(userSkill));
+    }
+
+    [HttpPost("{id:guid}/unverify")]
+    [Authorize(Roles = UserRoles.AcademicCounselor)]
+    [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserSkillResponse>> UnverifyUserSkill(
+        Guid id,
+        [FromServices] INotificationService notificationService,
+        CancellationToken cancellationToken)
+    {
+        var counselorId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
+        }
+
+        if (!await IsStudentAssignedToCounselorAsync(userSkill.UserId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
+        }
+
+        if (!userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Kỹ năng hiện chưa được xác minh." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = false;
+        userSkill.VerifiedByUserId = null;
+        userSkill.VerifiedLevel = null;
+        userSkill.VerifiedAt = null;
+        userSkill.VerificationStatus = UserSkillVerificationStatus.Unverified;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var counselorName = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == counselorId)
+            .Select(user => user.FullName)
+            .SingleOrDefaultAsync(cancellationToken) ?? "Cố vấn học tập";
+
+        await notificationService.SendNotificationAsync(
+            userId: userSkill.UserId,
+            type: "SkillVerificationRevoked",
+            title: "Xác minh kỹ năng đã bị thu hồi",
+            message: $"Cố vấn {counselorName} đã thu hồi xác minh kỹ năng {userSkill.Skill.Name} của bạn.",
+            linkUrl: "#skills",
+            cancellationToken: cancellationToken);
 
         return Ok(ToResponse(userSkill));
     }
@@ -243,6 +366,21 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         return null;
     }
 
+    private static string? ValidateSubmitEvidenceRequest(string? evidenceUrl, string? evidenceType)
+    {
+        if (string.IsNullOrWhiteSpace(evidenceUrl))
+        {
+            return "Đường dẫn minh chứng là bắt buộc.";
+        }
+
+        if (string.IsNullOrWhiteSpace(evidenceType))
+        {
+            return "Loại minh chứng là bắt buộc.";
+        }
+
+        return ValidateEvidenceFields(evidenceUrl, evidenceType);
+    }
+
     private static string? ValidateLevel(string? level)
     {
         if (string.IsNullOrWhiteSpace(level))
@@ -260,6 +398,17 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
     private static string NormalizeLevel(string level) =>
         AllowedLevels.Single(value => value.Equals(level.Trim(), StringComparison.OrdinalIgnoreCase));
+
+    private async Task<bool> IsStudentAssignedToCounselorAsync(
+        Guid studentId,
+        Guid counselorId,
+        CancellationToken cancellationToken) =>
+        await dbContext.CounselorAssignments
+            .AnyAsync(
+                assignment => assignment.CounselorId == counselorId
+                    && assignment.StudentId == studentId
+                    && assignment.Status == "Active",
+                cancellationToken);
 
     private static UserSkillResponse ToResponse(UserSkill userSkill) =>
         new(

@@ -252,8 +252,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasIndex(userSkill => userSkill.Level);
             entity.HasIndex(userSkill => userSkill.IsVerified);
             entity.Property(userSkill => userSkill.Level).HasMaxLength(30).IsRequired();
+            entity.Property(userSkill => userSkill.VerifiedLevel).HasMaxLength(30);
             entity.Property(userSkill => userSkill.EvidenceUrl).HasMaxLength(1024);
             entity.Property(userSkill => userSkill.EvidenceType).HasMaxLength(50);
+            entity.Property(userSkill => userSkill.VerificationStatus).HasMaxLength(30).IsRequired().HasDefaultValue(UserSkillVerificationStatus.SelfDeclared);
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_user_skills_VerificationStatus",
+                "\"VerificationStatus\" IN ('SelfDeclared','PendingVerification','Verified','Unverified')"));
             entity.Property(userSkill => userSkill.IsVerified).HasDefaultValue(false);
             entity.HasOne(userSkill => userSkill.User)
                 .WithMany()
