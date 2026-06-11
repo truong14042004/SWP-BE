@@ -883,23 +883,28 @@ public sealed class RoadmapController(
                         var (min, max) = bounds;
                         bool Unknown(string? d) => string.IsNullOrWhiteSpace(d);
 
-                        // Ưu tiên: tài liệu nằm trong khoảng (level đã đạt, mức yêu cầu].
-                        // Bỏ qua tài liệu thấp hơn/bằng mức đã verify (đã thành thạo)
-                        // và không vượt mức yêu cầu của node. Tài liệu không gắn độ
-                        // khó luôn được giữ lại.
+                        // Mỗi roadmap chỉ học MỘT level: level đang cần học là mức
+                        // ngay trên mức đã được xác minh (min + 1), không vượt mức
+                        // yêu cầu của node. Học xong & verify level này thì roadmap
+                        // sau mới hiển thị level cao hơn.
+                        var targetRank = min + 1;
+                        if (max > 0 && targetRank > max)
+                        {
+                            targetRank = max;
+                        }
+
+                        // Ưu tiên: tài liệu đúng level đang học (+ tài liệu không gắn độ khó).
                         var primary = ordered
-                            .Where(r => Unknown(r.Difficulty)
-                                || (DifficultyRank(r.Difficulty) > min
-                                    && (max <= 0 || DifficultyRank(r.Difficulty) <= max)))
+                            .Where(r => Unknown(r.Difficulty) || DifficultyRank(r.Difficulty) == targetRank)
                             .ToList();
 
-                        // Fallback 1: chỉ áp cận trên (mức yêu cầu).
+                        // Fallback 1: cả dải (mức đã đạt, mức yêu cầu].
                         var chosen = primary.Count > 0
                             ? primary
                             : ordered
                                 .Where(r => Unknown(r.Difficulty)
-                                    || max <= 0
-                                    || DifficultyRank(r.Difficulty) <= max)
+                                    || (DifficultyRank(r.Difficulty) > min
+                                        && (max <= 0 || DifficultyRank(r.Difficulty) <= max)))
                                 .ToList();
 
                         // Fallback 2: giữ nguyên danh sách gốc để node không rỗng.
