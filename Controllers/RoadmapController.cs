@@ -743,7 +743,10 @@ public sealed class RoadmapController(
             .ToListAsync(cancellationToken);
 
         var skillIds = reportItems.Select(item => item.SkillId).Distinct().ToArray();
-        var resourcesBySkill = await GetActiveResourcesBySkillAsync(skillIds, cancellationToken);
+        var maxLevelBySkill = reportItems
+            .GroupBy(item => item.SkillId)
+            .ToDictionary(group => group.Key, group => group.Max(item => LevelRank(item.RequiredLevel)));
+        var resourcesBySkill = await GetActiveResourcesBySkillAsync(skillIds, cancellationToken, maxLevelBySkill);
 
         return reportItems
             .Where(item => !string.Equals(item.Status, "Matched", StringComparison.OrdinalIgnoreCase))
@@ -777,7 +780,10 @@ public sealed class RoadmapController(
             .ToListAsync(cancellationToken);
 
         var requirementSkillIds = requirements.Select(requirement => requirement.SkillId).Distinct().ToArray();
-        var resourcesBySkill = await GetActiveResourcesBySkillAsync(requirementSkillIds, cancellationToken);
+        var maxLevelBySkill = requirements
+            .GroupBy(requirement => requirement.SkillId)
+            .ToDictionary(group => group.Key, group => group.Max(requirement => LevelRank(requirement.RequiredLevel)));
+        var resourcesBySkill = await GetActiveResourcesBySkillAsync(requirementSkillIds, cancellationToken, maxLevelBySkill);
 
         return requirements
             .Where(requirement => !userSkills.TryGetValue(requirement.SkillId, out var userSkill)
@@ -806,7 +812,8 @@ public sealed class RoadmapController(
 
     private async Task<Dictionary<Guid, IReadOnlyList<Guid>>> GetActiveResourcesBySkillAsync(
         IReadOnlyCollection<Guid> skillIds,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyDictionary<Guid, int>? maxLevelBySkill = null)
     {
         if (skillIds.Count == 0)
         {
@@ -833,13 +840,39 @@ public sealed class RoadmapController(
             .GroupBy(resource => resource.SkillId)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyList<Guid>)group
-                    .OrderBy(resource => resource.LessonNumber)
-                    .ThenBy(resource => DifficultyRank(resource.Difficulty))
-                    .ThenBy(resource => resource.StorageObjectName == null ? 0 : 1)
-                    .ThenBy(resource => resource.Title)
-                    .Select(resource => resource.Id)
-                    .ToList());
+                group =>
+                {
+                    // Sắp xếp theo level (độ khó) như một lộ trình tăng dần,
+                    // rồi tới số bài học để giữ thứ tự bài trong cùng mức.
+                    var ordered = group
+                        .OrderBy(resource => DifficultyRank(resource.Difficulty))
+                        .ThenBy(resource => resource.LessonNumber)
+                        .ThenBy(resource => resource.StorageObjectName == null ? 0 : 1)
+                        .ThenBy(resource => resource.Title)
+                        .ToList();
+
+                    // Lọc theo level: không hiển thị tài liệu vượt quá mức yêu cầu
+                    // của node. Tài liệu không gắn độ khó luôn được giữ lại.
+                    if (maxLevelBySkill is not null
+                        && maxLevelBySkill.TryGetValue(group.Key, out var maxRank)
+                        && maxRank > 0)
+                    {
+                        var filtered = ordered
+                            .Where(resource => string.IsNullOrWhiteSpace(resource.Difficulty)
+                                || DifficultyRank(resource.Difficulty) <= maxRank)
+                            .ToList();
+
+                        // Fallback: nếu lọc làm rỗng, giữ nguyên danh sách gốc.
+                        if (filtered.Count > 0)
+                        {
+                            ordered = filtered;
+                        }
+                    }
+
+                    return (IReadOnlyList<Guid>)ordered
+                        .Select(resource => resource.Id)
+                        .ToList();
+                });
     }
 
     private async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> GetSkillPrerequisiteMapAsync(
