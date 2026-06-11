@@ -743,10 +743,26 @@ public sealed class RoadmapController(
             .ToListAsync(cancellationToken);
 
         var skillIds = reportItems.Select(item => item.SkillId).Distinct().ToArray();
-        var maxLevelBySkill = reportItems
+
+        // Mức đã xác minh của sinh viên cho từng skill (cận dưới khi lọc tài liệu).
+        var verifiedLevelBySkill = await dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.UserId == GetCurrentUserId() && us.IsVerified && skillIds.Contains(us.SkillId))
+            .Select(us => new { us.SkillId, us.VerifiedLevel, us.Level })
+            .ToDictionaryAsync(
+                us => us.SkillId,
+                us => LevelRank(string.IsNullOrWhiteSpace(us.VerifiedLevel) ? us.Level : us.VerifiedLevel),
+                cancellationToken);
+
+        var levelBoundsBySkill = reportItems
             .GroupBy(item => item.SkillId)
-            .ToDictionary(group => group.Key, group => group.Max(item => LevelRank(item.RequiredLevel)));
-        var resourcesBySkill = await GetActiveResourcesBySkillAsync(skillIds, cancellationToken, maxLevelBySkill);
+            .ToDictionary(
+                group => group.Key,
+                group => (
+                    Min: verifiedLevelBySkill.GetValueOrDefault(group.Key, 0),
+                    Max: group.Max(item => LevelRank(item.RequiredLevel))));
+
+        var resourcesBySkill = await GetActiveResourcesBySkillAsync(skillIds, cancellationToken, levelBoundsBySkill);
 
         return reportItems
             .Where(item => !string.Equals(item.Status, "Matched", StringComparison.OrdinalIgnoreCase))
@@ -780,10 +796,20 @@ public sealed class RoadmapController(
             .ToListAsync(cancellationToken);
 
         var requirementSkillIds = requirements.Select(requirement => requirement.SkillId).Distinct().ToArray();
-        var maxLevelBySkill = requirements
+        var levelBoundsBySkill = requirements
             .GroupBy(requirement => requirement.SkillId)
-            .ToDictionary(group => group.Key, group => group.Max(requirement => LevelRank(requirement.RequiredLevel)));
-        var resourcesBySkill = await GetActiveResourcesBySkillAsync(requirementSkillIds, cancellationToken, maxLevelBySkill);
+            .ToDictionary(
+                group => group.Key,
+                group =>
+                {
+                    var max = group.Max(requirement => LevelRank(requirement.RequiredLevel));
+                    // Cận dưới = mức đã được xác minh của sinh viên (đã thành thạo).
+                    var min = userSkills.TryGetValue(group.Key, out var us) && us.IsVerified
+                        ? LevelRank(string.IsNullOrWhiteSpace(us.VerifiedLevel) ? us.Level : us.VerifiedLevel)
+                        : 0;
+                    return (Min: min, Max: max);
+                });
+        var resourcesBySkill = await GetActiveResourcesBySkillAsync(requirementSkillIds, cancellationToken, levelBoundsBySkill);
 
         return requirements
             .Where(requirement => !userSkills.TryGetValue(requirement.SkillId, out var userSkill)
@@ -813,7 +839,7 @@ public sealed class RoadmapController(
     private async Task<Dictionary<Guid, IReadOnlyList<Guid>>> GetActiveResourcesBySkillAsync(
         IReadOnlyCollection<Guid> skillIds,
         CancellationToken cancellationToken,
-        IReadOnlyDictionary<Guid, int>? maxLevelBySkill = null)
+        IReadOnlyDictionary<Guid, (int Min, int Max)>? levelBoundsBySkill = null)
     {
         if (skillIds.Count == 0)
         {
@@ -851,22 +877,33 @@ public sealed class RoadmapController(
                         .ThenBy(resource => resource.Title)
                         .ToList();
 
-                    // Lọc theo level: không hiển thị tài liệu vượt quá mức yêu cầu
-                    // của node. Tài liệu không gắn độ khó luôn được giữ lại.
-                    if (maxLevelBySkill is not null
-                        && maxLevelBySkill.TryGetValue(group.Key, out var maxRank)
-                        && maxRank > 0)
+                    if (levelBoundsBySkill is not null
+                        && levelBoundsBySkill.TryGetValue(group.Key, out var bounds))
                     {
-                        var filtered = ordered
-                            .Where(resource => string.IsNullOrWhiteSpace(resource.Difficulty)
-                                || DifficultyRank(resource.Difficulty) <= maxRank)
+                        var (min, max) = bounds;
+                        bool Unknown(string? d) => string.IsNullOrWhiteSpace(d);
+
+                        // Ưu tiên: tài liệu nằm trong khoảng (level đã đạt, mức yêu cầu].
+                        // Bỏ qua tài liệu thấp hơn/bằng mức đã verify (đã thành thạo)
+                        // và không vượt mức yêu cầu của node. Tài liệu không gắn độ
+                        // khó luôn được giữ lại.
+                        var primary = ordered
+                            .Where(r => Unknown(r.Difficulty)
+                                || (DifficultyRank(r.Difficulty) > min
+                                    && (max <= 0 || DifficultyRank(r.Difficulty) <= max)))
                             .ToList();
 
-                        // Fallback: nếu lọc làm rỗng, giữ nguyên danh sách gốc.
-                        if (filtered.Count > 0)
-                        {
-                            ordered = filtered;
-                        }
+                        // Fallback 1: chỉ áp cận trên (mức yêu cầu).
+                        var chosen = primary.Count > 0
+                            ? primary
+                            : ordered
+                                .Where(r => Unknown(r.Difficulty)
+                                    || max <= 0
+                                    || DifficultyRank(r.Difficulty) <= max)
+                                .ToList();
+
+                        // Fallback 2: giữ nguyên danh sách gốc để node không rỗng.
+                        ordered = chosen.Count > 0 ? chosen : ordered;
                     }
 
                     return (IReadOnlyList<Guid>)ordered
