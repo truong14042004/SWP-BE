@@ -240,6 +240,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         Guid id,
         VerifyUserSkillRequest request,
         [FromServices] IAuditLogService auditLog,
+        [FromServices] INotificationService notificationService,
         CancellationToken cancellationToken)
     {
         var levelError = ValidateLevel(request.VerifiedLevel);
@@ -284,6 +285,25 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             summary: $"Xác nhận kỹ năng {userSkill.Skill.Name} ở mức {userSkill.VerifiedLevel}.",
             metadata: new { userSkill.SkillId, userSkill.VerifiedLevel },
             cancellationToken: cancellationToken);
+
+        // Nếu kỹ năng này đang nằm trong một lộ trình Active của sinh viên (node
+        // chưa Verified), gợi ý sinh viên tạo lại lộ trình để cắt bớt phần đã đạt.
+        var isInActiveRoadmap = await dbContext.RoadmapNodes
+            .AnyAsync(node => node.SkillId == userSkill.SkillId
+                && node.Roadmap.UserId == userSkill.UserId
+                && node.Roadmap.Status == "Active"
+                && node.Status != "Verified", cancellationToken);
+
+        if (isInActiveRoadmap)
+        {
+            await notificationService.SendNotificationAsync(
+                userId: userSkill.UserId,
+                type: "SkillVerifiedRegenerateRoadmap",
+                title: "Kỹ năng đã được xác minh",
+                message: $"Kỹ năng {userSkill.Skill.Name} đã được xác minh. Hãy tạo lại lộ trình để cập nhật và bỏ bớt phần bạn đã đạt.",
+                linkUrl: "#roadmap",
+                cancellationToken: cancellationToken);
+        }
 
         return Ok(ToResponse(userSkill));
     }
