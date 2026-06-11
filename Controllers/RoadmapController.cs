@@ -23,6 +23,19 @@ public sealed class RoadmapController(
         var userId = GetCurrentUserId();
         var now = DateTimeOffset.UtcNow;
 
+        var pendingVerificationCount = await dbContext.UserSkills
+            .CountAsync(
+                userSkill => userSkill.UserId == userId
+                    && userSkill.VerificationStatus == UserSkillVerificationStatus.PendingVerification,
+                cancellationToken);
+        if (pendingVerificationCount > 0)
+        {
+            return BadRequest(new
+            {
+                message = $"Bạn có {pendingVerificationCount} kỹ năng đang chờ xác thực. Hãy đợi cố vấn duyệt hoặc chuyển sang chưa xác thực trước khi tạo lộ trình."
+            });
+        }
+
         var careerRoleId = request.CareerRoleId
             ?? await dbContext.StudentProfiles
                 .Where(profile => profile.UserId == userId)
@@ -733,6 +746,7 @@ public sealed class RoadmapController(
         var resourcesBySkill = await GetActiveResourcesBySkillAsync(skillIds, cancellationToken);
 
         return reportItems
+            .Where(item => !string.Equals(item.Status, "Matched", StringComparison.OrdinalIgnoreCase))
             .Select(item => new RoadmapNodeInput(
                 item.SkillId,
                 resourcesBySkill.GetValueOrDefault(item.SkillId) ?? [],
@@ -767,8 +781,8 @@ public sealed class RoadmapController(
 
         return requirements
             .Where(requirement => !userSkills.TryGetValue(requirement.SkillId, out var userSkill)
-                || LevelRank(userSkill.Level) < LevelRank(requirement.RequiredLevel)
-                || !userSkill.IsVerified)
+                || !userSkill.IsVerified
+                || LevelRank(string.IsNullOrWhiteSpace(userSkill.VerifiedLevel) ? userSkill.Level : userSkill.VerifiedLevel) < LevelRank(requirement.RequiredLevel))
             .Select(requirement =>
             {
                 var hasSkill = userSkills.TryGetValue(requirement.SkillId, out var userSkill);

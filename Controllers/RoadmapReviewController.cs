@@ -457,6 +457,7 @@ public sealed class RoadmapReviewController(
     public async Task<ActionResult<RoadmapReviewRequestResponse>> ApproveRequest(
         Guid requestId,
         ApproveOrRejectRequest request,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         var reviewerId = GetCurrentUserId();
@@ -565,6 +566,17 @@ public sealed class RoadmapReviewController(
                     request.ReviewerNote));
         }
 
+        await auditLog.LogAsync(
+            actorUserId: reviewerId,
+            actorRole: GetCurrentUserRole(),
+            action: "NodeReviewApproved",
+            entityType: "RoadmapNodeReviewRequest",
+            entityId: reviewRequest.Id,
+            targetUserId: reviewRequest.StudentId,
+            summary: $"Duyệt tiến độ module \"{node.Title}\" (verified).",
+            metadata: new { nodeId = node.Id, node.SkillId },
+            cancellationToken: cancellationToken);
+
         return Ok(await ToResponseAsync(reviewRequest, cancellationToken));
     }
 
@@ -573,6 +585,7 @@ public sealed class RoadmapReviewController(
     public async Task<ActionResult<RoadmapReviewRequestResponse>> RejectRequest(
         Guid requestId,
         ApproveOrRejectRequest request,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.ReviewerNote))
@@ -649,6 +662,17 @@ public sealed class RoadmapReviewController(
                     node.Title,
                     reviewRequest.ReviewerNote!));
         }
+
+        await auditLog.LogAsync(
+            actorUserId: reviewerId,
+            actorRole: GetCurrentUserRole(),
+            action: "NodeReviewRejected",
+            entityType: "RoadmapNodeReviewRequest",
+            entityId: reviewRequest.Id,
+            targetUserId: reviewRequest.StudentId,
+            summary: $"Từ chối tiến độ module \"{node.Title}\". Lý do: {reviewRequest.ReviewerNote}",
+            metadata: new { nodeId = node.Id, reviewRequest.ReviewerNote },
+            cancellationToken: cancellationToken);
 
         return Ok(await ToResponseAsync(reviewRequest, cancellationToken));
     }
@@ -1061,6 +1085,13 @@ public sealed class RoadmapReviewController(
             ? userId
             : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
+
+    private string GetCurrentUserRole() =>
+        User.FindFirstValue(ClaimTypes.Role)
+        ?? (User.IsInRole(UserRoles.AcademicCounselor) ? UserRoles.AcademicCounselor
+            : User.IsInRole(UserRoles.IndustryMentor) ? UserRoles.IndustryMentor
+            : User.IsInRole(UserRoles.Admin) ? UserRoles.Admin
+            : "Unknown");
 
     private async Task SendReviewEmailSafelyAsync(string toEmail, string subject, string body)
     {

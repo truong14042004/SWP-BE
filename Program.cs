@@ -60,6 +60,7 @@ builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationSer
 builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
 builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
 builder.Services.AddScoped<IRoadmapMaterializer, RoadmapMaterializer>();

@@ -49,6 +49,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
     public DbSet<RoleSkillUpdateProposal> RoleSkillUpdateProposals => Set<RoleSkillUpdateProposal>();
     public DbSet<StudentTalentProfile> StudentTalentProfiles => Set<StudentTalentProfile>();
     public DbSet<RoadmapApprovalRequest> RoadmapApprovalRequests => Set<RoadmapApprovalRequest>();
+    public DbSet<AuditLog> AuditLogs => Set<AuditLog>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -1281,6 +1282,29 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasOne(item => item.MaterializedRoadmap)
                 .WithMany()
                 .HasForeignKey(item => item.MaterializedRoadmapId)
+                .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        modelBuilder.Entity<AuditLog>(entity =>
+        {
+            entity.ToTable("audit_logs");
+            entity.HasKey(item => item.Id);
+            entity.HasIndex(item => item.ActorUserId);
+            entity.HasIndex(item => item.TargetUserId);
+            entity.HasIndex(item => item.Action);
+            entity.HasIndex(item => item.CreatedAt);
+            entity.Property(item => item.ActorRole).HasMaxLength(50).IsRequired();
+            entity.Property(item => item.Action).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.EntityType).HasMaxLength(80).IsRequired();
+            entity.Property(item => item.Summary).HasMaxLength(1000).IsRequired();
+            entity.Property(item => item.MetadataJson).HasColumnType("jsonb");
+            entity.HasOne(item => item.ActorUser)
+                .WithMany()
+                .HasForeignKey(item => item.ActorUserId)
+                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasOne(item => item.TargetUser)
+                .WithMany()
+                .HasForeignKey(item => item.TargetUserId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
     }

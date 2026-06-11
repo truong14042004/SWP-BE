@@ -239,6 +239,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     public async Task<ActionResult<UserSkillResponse>> VerifyUserSkill(
         Guid id,
         VerifyUserSkillRequest request,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         var levelError = ValidateLevel(request.VerifiedLevel);
@@ -273,6 +274,17 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await auditLog.LogAsync(
+            actorUserId: verifierId,
+            actorRole: GetCurrentUserRole(),
+            action: "SkillVerified",
+            entityType: "UserSkill",
+            entityId: userSkill.Id,
+            targetUserId: userSkill.UserId,
+            summary: $"Xác nhận kỹ năng {userSkill.Skill.Name} ở mức {userSkill.VerifiedLevel}.",
+            metadata: new { userSkill.SkillId, userSkill.VerifiedLevel },
+            cancellationToken: cancellationToken);
+
         return Ok(ToResponse(userSkill));
     }
 
@@ -286,6 +298,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     public async Task<ActionResult<UserSkillResponse>> UnverifyUserSkill(
         Guid id,
         [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         var counselorId = GetCurrentUserId();
@@ -330,6 +343,94 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             title: "Xác minh kỹ năng đã bị thu hồi",
             message: $"Cố vấn {counselorName} đã thu hồi xác minh kỹ năng {userSkill.Skill.Name} của bạn.",
             linkUrl: "#skills",
+            cancellationToken: cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: counselorId,
+            actorRole: GetCurrentUserRole(),
+            action: "SkillUnverified",
+            entityType: "UserSkill",
+            entityId: userSkill.Id,
+            targetUserId: userSkill.UserId,
+            summary: $"Thu hồi xác minh kỹ năng {userSkill.Skill.Name}.",
+            metadata: new { userSkill.SkillId },
+            cancellationToken: cancellationToken);
+
+        return Ok(ToResponse(userSkill));
+    }
+
+    [HttpPost("{id:guid}/reject-evidence")]
+    [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
+    [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
+    [ProducesResponseType(StatusCodes.Status401Unauthorized)]
+    [ProducesResponseType(StatusCodes.Status403Forbidden)]
+    [ProducesResponseType(StatusCodes.Status404NotFound)]
+    [ProducesResponseType(StatusCodes.Status409Conflict)]
+    public async Task<ActionResult<UserSkillResponse>> RejectUserSkillEvidence(
+        Guid id,
+        RejectUserSkillEvidenceRequest request,
+        [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
+        CancellationToken cancellationToken)
+    {
+        var reviewerId = GetCurrentUserId();
+        var userSkill = await dbContext.UserSkills
+            .Include(item => item.Skill)
+            .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+
+        if (userSkill is null)
+        {
+            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
+        }
+
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && !await IsStudentAssignedToCounselorAsync(userSkill.UserId, reviewerId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
+        }
+
+        if (userSkill.VerificationStatus != UserSkillVerificationStatus.PendingVerification)
+        {
+            return Conflict(new { message = "Chỉ có thể từ chối kỹ năng đang ở trạng thái chờ xác thực." });
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        userSkill.IsVerified = false;
+        userSkill.VerifiedByUserId = null;
+        userSkill.VerifiedLevel = null;
+        userSkill.VerifiedAt = null;
+        userSkill.VerificationStatus = UserSkillVerificationStatus.Unverified;
+        userSkill.UpdatedAt = now;
+
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        var reviewerName = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == reviewerId)
+            .Select(user => user.FullName)
+            .SingleOrDefaultAsync(cancellationToken) ?? "Người duyệt";
+
+        var reason = string.IsNullOrWhiteSpace(request.Reason)
+            ? "Minh chứng chưa đủ điều kiện xác thực."
+            : request.Reason.Trim();
+
+        await notificationService.SendNotificationAsync(
+            userId: userSkill.UserId,
+            type: "SkillVerificationRejected",
+            title: "Minh chứng kỹ năng bị từ chối",
+            message: $"{reviewerName} đã từ chối minh chứng kỹ năng {userSkill.Skill.Name}. Lý do: {reason}",
+            linkUrl: "#skills",
+            cancellationToken: cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: reviewerId,
+            actorRole: GetCurrentUserRole(),
+            action: "SkillEvidenceRejected",
+            entityType: "UserSkill",
+            entityId: userSkill.Id,
+            targetUserId: userSkill.UserId,
+            summary: $"Từ chối minh chứng kỹ năng {userSkill.Skill.Name}. Lý do: {reason}",
+            metadata: new { userSkill.SkillId, reason },
             cancellationToken: cancellationToken);
 
         return Ok(ToResponse(userSkill));
@@ -417,8 +518,10 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             userSkill.Skill.Name,
             userSkill.Skill.Category,
             userSkill.Level,
+            userSkill.VerifiedLevel,
             userSkill.EvidenceUrl,
             userSkill.EvidenceType,
+            userSkill.VerificationStatus,
             userSkill.IsVerified,
             userSkill.VerifiedAt,
             userSkill.CreatedAt,
@@ -431,4 +534,11 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             ? userId
             : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
     }
+
+    private string GetCurrentUserRole() =>
+        User.FindFirstValue(ClaimTypes.Role)
+        ?? (User.IsInRole(UserRoles.AcademicCounselor) ? UserRoles.AcademicCounselor
+            : User.IsInRole(UserRoles.IndustryMentor) ? UserRoles.IndustryMentor
+            : User.IsInRole(UserRoles.Admin) ? UserRoles.Admin
+            : "Unknown");
 }

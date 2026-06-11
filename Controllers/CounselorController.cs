@@ -206,6 +206,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 us.Skill.Name,
                 us.Skill.Category,
                 us.Level,
+                us.VerifiedLevel,
+                us.VerificationStatus,
                 us.IsVerified,
                 us.VerifiedByUserId,
                 us.VerifiedByUser != null ? us.VerifiedByUser.FullName : null,
@@ -820,6 +822,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         Guid id,
         [FromServices] IRoadmapMaterializer roadmapMaterializer,
         [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         var counselorId = GetCurrentUserId();
@@ -882,6 +885,17 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 linkUrl: "#roadmap",
                 cancellationToken: cancellationToken);
 
+            await auditLog.LogAsync(
+                actorUserId: counselorId,
+                actorRole: UserRoles.AcademicCounselor,
+                action: "RoadmapApprovalApproved",
+                entityType: "RoadmapApprovalRequest",
+                entityId: request.Id,
+                targetUserId: request.StudentId,
+                summary: $"Duyệt đề xuất lộ trình và khởi tạo roadmap: {result.Title}",
+                metadata: new { roadmapId = result.RoadmapId, result.Title },
+                cancellationToken: cancellationToken);
+
             return Ok(new { message = "Lộ trình đã được phê duyệt và khởi tạo thành công.", roadmapId = result.RoadmapId });
         }
         catch (Exception ex)
@@ -902,6 +916,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         Guid id,
         RejectRoadmapApprovalRequest requestBody,
         [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(requestBody.RejectionReason))
@@ -946,6 +961,17 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             title: "Đề xuất lộ trình bị từ chối",
             message: $"Đề xuất lộ trình của bạn đã bị từ chối bởi cố vấn {counselorName}. Lý do: {request.RejectionReason}",
             linkUrl: "#roadmap-requests",
+            cancellationToken: cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: counselorId,
+            actorRole: UserRoles.AcademicCounselor,
+            action: "RoadmapApprovalRejected",
+            entityType: "RoadmapApprovalRequest",
+            entityId: request.Id,
+            targetUserId: request.StudentId,
+            summary: $"Từ chối đề xuất lộ trình. Lý do: {request.RejectionReason}",
+            metadata: new { request.RejectionReason },
             cancellationToken: cancellationToken);
 
         return Ok(new { message = "Đã từ chối đề xuất lộ trình." });
@@ -1009,6 +1035,8 @@ public sealed record CounselorStudentSkillResponse(
     string SkillName,
     string SkillCategory,
     string Level,
+    string? VerifiedLevel,
+    string VerificationStatus,
     bool IsVerified,
     Guid? VerifiedByUserId,
     string? VerifiedByFullName,
