@@ -10,6 +10,7 @@ public sealed class UserSkill
     public string? EvidenceUrl { get; set; }
     public string? EvidenceType { get; set; }
     public string VerificationStatus { get; set; } = UserSkillVerificationStatus.SelfDeclared;
+    public string? RejectionReason { get; set; }
     public bool IsVerified { get; set; }
     public Guid? VerifiedByUserId { get; set; }
     public DateTimeOffset? VerifiedAt { get; set; }

@@ -194,6 +194,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         userSkill.EvidenceUrl = request.EvidenceUrl.Trim();
         userSkill.EvidenceType = request.EvidenceType.Trim();
         userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
+        userSkill.RejectionReason = null;
         userSkill.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -271,6 +272,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         userSkill.VerifiedByUserId = verifierId;
         userSkill.VerifiedAt = now;
         userSkill.VerificationStatus = UserSkillVerificationStatus.Verified;
+        userSkill.RejectionReason = null;
         userSkill.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -347,6 +349,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         userSkill.VerifiedLevel = null;
         userSkill.VerifiedAt = null;
         userSkill.VerificationStatus = UserSkillVerificationStatus.Unverified;
+        userSkill.RejectionReason = null;
         userSkill.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -415,11 +418,16 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         }
 
         var now = DateTimeOffset.UtcNow;
+        var reason = string.IsNullOrWhiteSpace(request.Reason)
+            ? "Minh chứng chưa đủ điều kiện xác thực."
+            : request.Reason.Trim();
+
         userSkill.IsVerified = false;
         userSkill.VerifiedByUserId = null;
         userSkill.VerifiedLevel = null;
         userSkill.VerifiedAt = null;
         userSkill.VerificationStatus = UserSkillVerificationStatus.Unverified;
+        userSkill.RejectionReason = reason;
         userSkill.UpdatedAt = now;
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -429,10 +437,6 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             .Where(user => user.Id == reviewerId)
             .Select(user => user.FullName)
             .SingleOrDefaultAsync(cancellationToken) ?? "Người duyệt";
-
-        var reason = string.IsNullOrWhiteSpace(request.Reason)
-            ? "Minh chứng chưa đủ điều kiện xác thực."
-            : request.Reason.Trim();
 
         await notificationService.SendNotificationAsync(
             userId: userSkill.UserId,
@@ -542,6 +546,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             userSkill.EvidenceUrl,
             userSkill.EvidenceType,
             userSkill.VerificationStatus,
+            userSkill.RejectionReason,
             userSkill.IsVerified,
             userSkill.VerifiedAt,
             userSkill.CreatedAt,

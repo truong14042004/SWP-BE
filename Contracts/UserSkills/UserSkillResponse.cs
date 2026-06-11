@@ -10,6 +10,7 @@ public sealed record UserSkillResponse(
     string? EvidenceUrl,
     string? EvidenceType,
     string VerificationStatus,
+    string? RejectionReason,
     bool IsVerified,
     DateTimeOffset? VerifiedAt,
     DateTimeOffset CreatedAt,

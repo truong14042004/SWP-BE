@@ -257,6 +257,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(userSkill => userSkill.EvidenceUrl).HasMaxLength(1024);
             entity.Property(userSkill => userSkill.EvidenceType).HasMaxLength(50);
             entity.Property(userSkill => userSkill.VerificationStatus).HasMaxLength(30).IsRequired().HasDefaultValue(UserSkillVerificationStatus.SelfDeclared);
+            entity.Property(userSkill => userSkill.RejectionReason).HasMaxLength(1000);
             entity.ToTable(t => t.HasCheckConstraint(
                 "CK_user_skills_VerificationStatus",
                 "\"VerificationStatus\" IN ('SelfDeclared','PendingVerification','Verified','Unverified')"));
