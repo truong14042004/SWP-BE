@@ -58,7 +58,7 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
             resource.SkillId,
             resource.Skill?.Name,
             resource.Title,
-            resource.Url,
+            ToExternalResourceUrl(resource.Url),
             resource.StorageObjectName is null ? "Link" : "File",
             resource.ContentType,
             resource.FileSize,
@@ -66,6 +66,15 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
             resource.Difficulty,
             resource.EstimatedHours,
             resource.LessonNumber);
+
+    private static string ToExternalResourceUrl(string? url)
+    {
+        var trimmedUrl = url?.Trim();
+        return string.IsNullOrWhiteSpace(trimmedUrl)
+            || trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : trimmedUrl;
+    }
 }
 
 public sealed record StudentLearningResourceResponse(

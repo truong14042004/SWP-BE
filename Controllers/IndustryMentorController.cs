@@ -664,7 +664,7 @@ public sealed class IndustryMentorController(
         [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
-        var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
+        var validationError = await ValidateLearningResourceRequest(request, hasExistingFile: false, cancellationToken);
         if (validationError is not null)
         {
             return BadRequest(new { message = validationError });
@@ -685,7 +685,7 @@ public sealed class IndustryMentorController(
                 Id = resourceId,
                 SkillId = request.SkillId,
                 Title = request.Title!.Trim(),
-                Url = $"/api/storage/learning-resources/{resourceId}/download",
+                Url = NormalizeExternalResourceUrl(request.Url) ?? string.Empty,
                 StorageObjectName = result.ObjectName,
                 ContentType = result.ContentType,
                 FileSize = result.Size,
@@ -733,17 +733,20 @@ public sealed class IndustryMentorController(
         [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
-        var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
-        if (validationError is not null)
-        {
-            return BadRequest(new { message = validationError });
-        }
-
         var resource = await dbContext.LearningResources
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (resource is null)
         {
             return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
+        }
+
+        var validationError = await ValidateLearningResourceRequest(
+            request,
+            hasExistingFile: !string.IsNullOrWhiteSpace(resource.StorageObjectName),
+            cancellationToken);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
         }
 
         resource.SkillId = request.SkillId;
@@ -766,7 +769,7 @@ public sealed class IndustryMentorController(
             await using var stream = request.File.OpenReadStream();
             var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
 
-            resource.Url = $"/api/storage/learning-resources/{id}/download";
+            resource.Url = NormalizeExternalResourceUrl(request.Url) ?? string.Empty;
             resource.StorageObjectName = result.ObjectName;
             resource.ContentType = result.ContentType;
             resource.FileSize = result.Size;
@@ -774,9 +777,13 @@ public sealed class IndustryMentorController(
         else
         {
             var trimmedUrl = request.Url?.Trim() ?? string.Empty;
-            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
+            var isLocalDownloadUrl = IsInternalLearningResourceUrl(trimmedUrl);
 
-            if (!isLocalDownloadUrl)
+            if (string.IsNullOrWhiteSpace(trimmedUrl) || isLocalDownloadUrl)
+            {
+                resource.Url = string.Empty;
+            }
+            else
             {
                 if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
                 {
@@ -785,9 +792,8 @@ public sealed class IndustryMentorController(
                 resource.StorageObjectName = null;
                 resource.ContentType = null;
                 resource.FileSize = null;
+                resource.Url = trimmedUrl;
             }
-
-            resource.Url = trimmedUrl;
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -1437,6 +1443,7 @@ public sealed class IndustryMentorController(
 
     private async Task<string?> ValidateLearningResourceRequest(
         SaveLearningResourceRequest request,
+        bool hasExistingFile,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -1448,27 +1455,45 @@ public sealed class IndustryMentorController(
         {
             if (string.IsNullOrWhiteSpace(request.Url))
             {
-                return "Đường dẫn (URL) hoặc Tệp tin tải lên là bắt buộc.";
+                if (!hasExistingFile)
+                {
+                    return "URL or uploaded file is required.";
+                }
             }
-
-            var trimmedUrl = request.Url.Trim();
-            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
-
-            if (!isLocalDownloadUrl && !Uri.TryCreate(trimmedUrl, UriKind.Absolute, out _))
+            else
             {
-                return "Đường dẫn (URL) tài nguyên học tập phải là đường dẫn tuyệt đối hoặc đường dẫn tải tệp tin hợp lệ.";
+                var trimmedUrl = request.Url.Trim();
+                var isLocalDownloadUrl = IsInternalLearningResourceUrl(trimmedUrl);
+
+                if (isLocalDownloadUrl)
+                {
+                    if (!hasExistingFile)
+                    {
+                        return "URL must be the original external URL, not an internal file download URL.";
+                    }
+                }
+                else if (!Uri.TryCreate(trimmedUrl, UriKind.Absolute, out _))
+                {
+                    return "URL must be absolute.";
+                }
             }
         }
         else
         {
             if (request.File.Length > storageOpts.MaxUploadBytes)
             {
-                return $"Tệp quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes.";
+                return $"File is too large. Maximum size is {storageOpts.MaxUploadBytes} bytes.";
             }
 
             if (!LearningResourceContentTypes.Contains(request.File.ContentType))
             {
-                return $"Định dạng tệp không được hỗ trợ: {request.File.ContentType}.";
+                return $"Unsupported file type: {request.File.ContentType}.";
+            }
+
+            var normalizedUrl = NormalizeExternalResourceUrl(request.Url);
+            if (!string.IsNullOrWhiteSpace(normalizedUrl) && !Uri.TryCreate(normalizedUrl, UriKind.Absolute, out _))
+            {
+                return "URL must be absolute.";
             }
         }
 
@@ -1571,7 +1596,7 @@ public sealed class IndustryMentorController(
             resource.SkillId,
             resource.Skill?.Name,
             resource.Title,
-            resource.Url,
+            ToExternalResourceUrl(resource.Url),
             resource.StorageObjectName is null ? "Link" : "File",
             resource.ContentType,
             resource.FileSize,
@@ -1631,6 +1656,20 @@ public sealed class IndustryMentorController(
 
         return $"learning-resources/{resourceId}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{baseName}{extension}";
     }
+
+    private static string ToExternalResourceUrl(string? url) =>
+        NormalizeExternalResourceUrl(url) ?? string.Empty;
+
+    private static string? NormalizeExternalResourceUrl(string? url)
+    {
+        var trimmedUrl = url?.Trim();
+        return string.IsNullOrWhiteSpace(trimmedUrl) || IsInternalLearningResourceUrl(trimmedUrl)
+            ? null
+            : trimmedUrl;
+    }
+
+    private static bool IsInternalLearningResourceUrl(string url) =>
+        url.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
 
     private static string GetExtension(string? contentType)
     {
