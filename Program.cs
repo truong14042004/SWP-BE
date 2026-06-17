@@ -201,12 +201,16 @@ using (var scope = app.Services.CreateScope())
 app.Use(async (context, next) =>
 {
     var origin = context.Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+    var requestedHeaders = context.Request.Headers.AccessControlRequestHeaders.ToString();
+    var allowedHeaders = string.IsNullOrWhiteSpace(requestedHeaders)
+        ? "content-type, authorization, x-requested-with"
+        : requestedHeaders;
     if (!string.IsNullOrWhiteSpace(origin)
         && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
     {
         context.Response.Headers.AccessControlAllowOrigin = origin;
         context.Response.Headers.Vary = "Origin";
-        context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
+        context.Response.Headers.AccessControlAllowHeaders = allowedHeaders;
         context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
         context.Response.Headers.AccessControlAllowCredentials = "true";
     }
@@ -234,7 +238,7 @@ app.Use(async (context, next) =>
             {
                 context.Response.Headers.AccessControlAllowOrigin = origin;
                 context.Response.Headers.Vary = "Origin";
-                context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
+                context.Response.Headers.AccessControlAllowHeaders = allowedHeaders;
                 context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
             }
 
