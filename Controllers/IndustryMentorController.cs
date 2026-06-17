@@ -1600,6 +1600,7 @@ public sealed class IndustryMentorController(
             resource.StorageObjectName is null ? "Link" : "File",
             resource.ContentType,
             resource.FileSize,
+            GetLearningResourceFileName(resource.StorageObjectName),
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
@@ -1659,6 +1660,20 @@ public sealed class IndustryMentorController(
 
     private static string ToExternalResourceUrl(string? url) =>
         NormalizeExternalResourceUrl(url) ?? string.Empty;
+
+    private static string? GetLearningResourceFileName(string? storageObjectName)
+    {
+        if (string.IsNullOrWhiteSpace(storageObjectName))
+        {
+            return null;
+        }
+
+        var fileName = Path.GetFileName(storageObjectName.Replace("\\", "/"));
+        var parts = fileName.Split('-', 3, StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length == 3 && parts[0].Length == 17 && parts[1].Length == 32
+            ? parts[2]
+            : fileName;
+    }
 
     private static string? NormalizeExternalResourceUrl(string? url)
     {
@@ -1816,6 +1831,7 @@ public sealed record LearningResourceResponse(
     string SourceType,
     string? ContentType,
     long? FileSize,
+    string? FileName,
     string ResourceType,
     string? Difficulty,
     int? EstimatedHours,
