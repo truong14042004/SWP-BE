@@ -778,6 +778,7 @@ public sealed class IndustryMentorController(
         {
             var trimmedUrl = request.Url?.Trim() ?? string.Empty;
             var isLocalDownloadUrl = IsInternalLearningResourceUrl(trimmedUrl);
+            var hasExistingFile = !string.IsNullOrWhiteSpace(resource.StorageObjectName);
 
             if (string.IsNullOrWhiteSpace(trimmedUrl) || isLocalDownloadUrl)
             {
@@ -785,14 +786,13 @@ public sealed class IndustryMentorController(
             }
             else
             {
-                if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
-                {
-                    await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
-                }
-                resource.StorageObjectName = null;
-                resource.ContentType = null;
-                resource.FileSize = null;
                 resource.Url = trimmedUrl;
+                if (!hasExistingFile)
+                {
+                    resource.StorageObjectName = null;
+                    resource.ContentType = null;
+                    resource.FileSize = null;
+                }
             }
         }
 
