@@ -13,6 +13,7 @@ namespace SWP_BE.Controllers;
 public sealed class RoadmapController(
     AppDbContext dbContext,
     IUserSkillSyncService userSkillSyncService,
+    IRoadmapResourceProvisioner resourceProvisioner,
     INotificationService notificationService) : ControllerBase
 {
     [HttpPost("api/roadmap/generate")]
@@ -123,6 +124,9 @@ public sealed class RoadmapController(
                     CreatedAt = now
                 }))
             .ToList();
+
+        // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
+        nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
 
         dbContext.Roadmaps.Add(roadmap);
         dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
@@ -426,6 +430,8 @@ public sealed class RoadmapController(
                     CreatedAt = now
                 }))
             .ToList();
+        // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
+        nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
         dbContext.RoadmapNodeResources.AddRange(nodeResources);
 
         // Update existing roadmap properties
@@ -754,6 +760,68 @@ public sealed class RoadmapController(
 
         return new RoadmapHierarchy(nodes, actionNodes);
     }
+
+    // FR2.3: đảm bảo mỗi technical node (Level 1, không phải Group) có tối thiểu 2 tài nguyên học tập.
+    // Trả về danh sách RoadmapNodeResource bổ sung (chưa lưu) để caller add cùng các thay đổi khác.
+    private async Task<List<RoadmapNodeResource>> BuildMinimumResourceTopUpAsync(
+        IReadOnlyList<RoadmapActionNode> actionNodes,
+        DateTimeOffset now,
+        CancellationToken cancellationToken)
+    {
+        const int minResources = 2;
+
+        var contexts = actionNodes
+            .Where(pair => !pair.Node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            .Select(pair => new NodeResourceContext(
+                pair.Node.Id,
+                pair.Node.SkillId,
+                pair.Input.Title,
+                pair.Input.LearningResourceIds.Distinct().Count()))
+            .ToList();
+
+        var topUp = await resourceProvisioner.EnsureMinimumResourcesAsync(
+            contexts, minResources, now, cancellationToken);
+
+        var added = new List<RoadmapNodeResource>();
+        foreach (var pair in actionNodes)
+        {
+            if (!topUp.TryGetValue(pair.Node.Id, out var extraResourceIds) || extraResourceIds.Count == 0)
+            {
+                continue;
+            }
+
+            // Loại trừ resource đã gắn sẵn vào node để không vi phạm unique index (NodeId, ResourceId).
+            var existingIds = pair.Input.LearningResourceIds.ToHashSet();
+            var newResourceIds = extraResourceIds.Where(id => existingIds.Add(id)).ToList();
+            if (newResourceIds.Count == 0)
+            {
+                continue;
+            }
+
+            // Tiếp nối OrderIndex sau các tài nguyên sẵn có của node.
+            var startIndex = pair.Input.LearningResourceIds.Distinct().Count();
+            for (var i = 0; i < newResourceIds.Count; i++)
+            {
+                added.Add(new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = pair.Node.Id,
+                    LearningResourceId = newResourceIds[i],
+                    OrderIndex = startIndex + i + 1,
+                    CreatedAt = now
+                });
+            }
+
+            // Nếu node chưa có tài nguyên chính, gán tài nguyên bổ sung đầu tiên làm primary.
+            if (pair.Node.LearningResourceId is null)
+            {
+                pair.Node.LearningResourceId = newResourceIds[0];
+            }
+        }
+
+        return added;
+    }
+
 
     private async Task<List<RoadmapNodeInput>> GetNodesFromSkillGapAsync(
         Guid skillGapReportId,

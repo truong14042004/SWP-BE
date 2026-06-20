@@ -15,11 +15,16 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
 {
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RoadmapMaterializer> _logger;
+    private readonly IRoadmapResourceProvisioner _resourceProvisioner;
 
-    public RoadmapMaterializer(AppDbContext dbContext, ILogger<RoadmapMaterializer> logger)
+    public RoadmapMaterializer(
+        AppDbContext dbContext,
+        ILogger<RoadmapMaterializer> logger,
+        IRoadmapResourceProvisioner resourceProvisioner)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _resourceProvisioner = resourceProvisioner;
     }
 
     public async Task<MaterializeResult> MaterializeRoadmapAsync(
@@ -170,6 +175,54 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         if (nodes.Count == 0)
         {
             throw new InvalidOperationException("Lộ trình phải chứa ít nhất một module.");
+        }
+
+        // FR2.3: đảm bảo mỗi technical node (không phải Group) có tối thiểu 2 tài nguyên học tập.
+        var existingCountByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        // Tập resource đã gắn cho mỗi node để loại trùng (unique index NodeId, ResourceId).
+        var existingResourceIdsByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToHashSet());
+        var topUpContexts = nodes
+            .Where(node => !node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            .Select(node => new NodeResourceContext(
+                node.Id,
+                node.SkillId,
+                node.Title,
+                existingCountByNode.GetValueOrDefault(node.Id, 0)))
+            .ToList();
+        var topUp = await _resourceProvisioner.EnsureMinimumResourcesAsync(
+            topUpContexts, 2, now, cancellationToken);
+        foreach (var node in nodes)
+        {
+            if (!topUp.TryGetValue(node.Id, out var extraIds) || extraIds.Count == 0)
+            {
+                continue;
+            }
+
+            var alreadyOnNode = existingResourceIdsByNode.GetValueOrDefault(node.Id, []);
+            var newIds = extraIds.Where(id => alreadyOnNode.Add(id)).ToList();
+            if (newIds.Count == 0)
+            {
+                continue;
+            }
+
+            var startIndex = existingCountByNode.GetValueOrDefault(node.Id, 0);
+            for (var i = 0; i < newIds.Count; i++)
+            {
+                nodeResources.Add(new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = node.Id,
+                    LearningResourceId = newIds[i],
+                    OrderIndex = startIndex + i + 1,
+                    CreatedAt = now
+                });
+            }
+
+            node.LearningResourceId ??= newIds[0];
         }
 
         try
