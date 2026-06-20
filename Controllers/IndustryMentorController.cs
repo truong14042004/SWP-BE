@@ -207,107 +207,11 @@ public sealed class IndustryMentorController(
         return Ok(responses);
     }
 
-    [HttpPost("user-skills/{userSkillId:guid}/verify")] //mentor xac minh ky nang cua sinh vien
-    public async Task<ActionResult<MentorViewableUserSkillResponse>> VerifyStudentSkill(
-        Guid userSkillId,
-        CancellationToken cancellationToken)
-    {
-        var mentorId = GetCurrentUserId();
-        var userSkill = await dbContext.UserSkills
-            .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
-
-        if (userSkill is null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
-        }
-
-        if (userSkill.IsVerified)
-        {
-            return Conflict(new { message = "Kỹ năng đã được xác minh." });
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        userSkill.IsVerified = true;
-        userSkill.VerifiedByUserId = mentorId;
-        userSkill.VerifiedAt = now;
-        userSkill.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var mentor = await dbContext.Users
-            .AsNoTracking()
-            .Where(item => item.Id == mentorId)
-            .Select(item => new { item.FullName, item.Role })
-            .SingleAsync(cancellationToken);
-
-        return Ok(new MentorViewableUserSkillResponse(
-            userSkill.Id,
-            userSkill.SkillId,
-            userSkill.Skill.Name,
-            userSkill.Skill.Category,
-            userSkill.Level,
-            userSkill.EvidenceUrl,
-            userSkill.EvidenceType,
-            userSkill.IsVerified,
-            userSkill.VerifiedAt,
-            userSkill.VerifiedByUserId,
-            mentor.FullName,
-            mentor.Role,
-            userSkill.CreatedAt,
-            userSkill.UpdatedAt));
-    }
-
-    [HttpPost("user-skills/{userSkillId:guid}/unverify")] //mentor rut lai xac minh (chi nguoi verify ban dau)
-    public async Task<ActionResult<MentorViewableUserSkillResponse>> UnverifyStudentSkill(
-        Guid userSkillId,
-        CancellationToken cancellationToken)
-    {
-        var mentorId = GetCurrentUserId();
-        var userSkill = await dbContext.UserSkills
-            .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
-
-        if (userSkill is null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
-        }
-
-        if (!userSkill.IsVerified)
-        {
-            return Conflict(new { message = "Kỹ năng hiện chưa được xác minh." });
-        }
-
-        // Chi nguoi verify ban dau moi rut lai duoc
-        if (userSkill.VerifiedByUserId != mentorId)
-        {
-            return Forbid();
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        userSkill.IsVerified = false;
-        userSkill.VerifiedByUserId = null;
-        userSkill.VerifiedAt = null;
-        userSkill.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new MentorViewableUserSkillResponse(
-            userSkill.Id,
-            userSkill.SkillId,
-            userSkill.Skill.Name,
-            userSkill.Skill.Category,
-            userSkill.Level,
-            userSkill.EvidenceUrl,
-            userSkill.EvidenceType,
-            userSkill.IsVerified,
-            userSkill.VerifiedAt,
-            userSkill.VerifiedByUserId,
-            null,
-            null,
-            userSkill.CreatedAt,
-            userSkill.UpdatedAt));
-    }
+    // Mentor KHÔNG còn verify/unverify kỹ năng trực tiếp (Đường 1 đã gỡ).
+    // Việc xác minh kỹ năng (học thuật) thuộc về Counselor. Mentor chỉ xác minh
+    // gián tiếp khi chấm Passed một node roadmap gắn skill (SyncVerifiedSkillAsync
+    // trong RoadmapReviewController). GetStudentSkills ở trên vẫn cho mentor XEM
+    // kỹ năng của sinh viên (read-only) phục vụ việc chấm node.
 
     [HttpPost("feedback")] //mentor tao feedback cho sinh vien
     public async Task<ActionResult<MentorFeedbackResponse>> CreateFeedback(
@@ -317,6 +221,18 @@ public sealed class IndustryMentorController(
         if (string.IsNullOrWhiteSpace(request.Comment))
         {
             return BadRequest(new { message = "Nhận xét là bắt buộc." });
+        }
+
+        // Đồng bộ ràng buộc độ dài với FE: tối thiểu 50, tối đa 5000 ký tự
+        var commentLength = request.Comment.Trim().Length;
+        if (commentLength < 50)
+        {
+            return BadRequest(new { message = "Nhận xét phải có ít nhất 50 ký tự." });
+        }
+
+        if (commentLength > 5000)
+        {
+            return BadRequest(new { message = "Nhận xét không được vượt quá 5000 ký tự." });
         }
 
         if (request.Rating is < 1 or > 5)

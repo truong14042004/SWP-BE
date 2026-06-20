@@ -231,7 +231,10 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     }
 
     [HttpPost("{id:guid}/verify")]
-    [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
+    // Chỉ Counselor xác minh skill độc lập. Mentor verify skill GIÁN TIẾP qua việc
+    // chấm Passed một node roadmap (RoadmapReviewController.ApproveRequest), không
+    // qua endpoint này.
+    [Authorize(Roles = UserRoles.AcademicCounselor)]
     [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status400BadRequest)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
@@ -383,7 +386,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
     }
 
     [HttpPost("{id:guid}/reject-evidence")]
-    [Authorize(Roles = UserRoles.AcademicCounselor + "," + UserRoles.IndustryMentor)]
+    [Authorize(Roles = UserRoles.AcademicCounselor)]
     [ProducesResponseType<UserSkillResponse>(StatusCodes.Status200OK)]
     [ProducesResponseType(StatusCodes.Status401Unauthorized)]
     [ProducesResponseType(StatusCodes.Status403Forbidden)]

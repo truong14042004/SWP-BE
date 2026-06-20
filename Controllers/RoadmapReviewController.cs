@@ -233,6 +233,22 @@ public sealed class RoadmapReviewController(
             }
         }
 
+        // Validate evidence: nếu không phải Git repo/URL công khai thì phải là storage
+        // object thuộc về chính sinh viên này (prefix users/{studentId}/). Ngăn sinh viên
+        // đính kèm evidenceUrl trỏ tới file của người khác để reviewer tải về (rò rỉ dữ liệu).
+        var evidenceUrl = request.EvidenceUrl?.Trim();
+        if (!string.IsNullOrWhiteSpace(evidenceUrl)
+            && request.EvidenceType != "GitRepository"
+            && !evidenceUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
+            && !evidenceUrl.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            if (evidenceUrl.Contains("..", StringComparison.Ordinal)
+                || !evidenceUrl.StartsWith($"users/{studentId}/", StringComparison.Ordinal))
+            {
+                return BadRequest(new { message = "Tệp minh chứng không hợp lệ hoặc không thuộc về bạn." });
+            }
+        }
+
         var now = DateTimeOffset.UtcNow;
 
         // Auto cancel any existing pending request for this node
@@ -506,6 +522,7 @@ public sealed class RoadmapReviewController(
         {
             var children = await dbContext.RoadmapNodes
                 .Where(item => item.ParentNodeId == node.Id
+                    && item.RoadmapId == node.RoadmapId
                     && !item.NodeType.ToLower().Equals("group")
                     && item.Status != "Verified")
                 .ToListAsync(cancellationToken);
@@ -543,7 +560,7 @@ public sealed class RoadmapReviewController(
             "RoadmapReviewApproved",
             "Yêu cầu review đã được duyệt",
             $"{reviewerName ?? "Mentor"} đã verify module \"{node.Title}\".",
-            "#roadmap",
+            $"#roadmap?id={node.RoadmapId}",
             null,
             cancellationToken);
 
@@ -640,7 +657,7 @@ public sealed class RoadmapReviewController(
             "RoadmapReviewRejected",
             "Yêu cầu review bị từ chối",
             $"{reviewerName ?? "Mentor"} đã từ chối module \"{node.Title}\". Lý do: {reviewRequest.ReviewerNote}",
-            "#roadmap",
+            $"#roadmap?id={node.RoadmapId}",
             null,
             cancellationToken);
 
@@ -1026,7 +1043,7 @@ public sealed class RoadmapReviewController(
                 "RoadmapCompleted",
                 "Chúc mừng! Bạn đã hoàn thành lộ trình",
                 $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
-                "#roadmap",
+                $"#roadmap?id={node.RoadmapId}",
                 null,
                 cancellationToken);
         }

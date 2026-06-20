@@ -287,7 +287,7 @@ public class SkillGapsController : ControllerBase
             return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng." });
         }
 
-        if (report.UserId != currentUserId && !User.IsInRole("Admin") && !User.IsInRole("Counselor"))
+        if (report.UserId != currentUserId && !User.IsInRole(UserRoles.Admin) && !User.IsInRole(UserRoles.AcademicCounselor))
         {
             return Forbid();
         }

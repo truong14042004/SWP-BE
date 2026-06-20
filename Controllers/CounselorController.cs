@@ -418,6 +418,18 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return BadRequest(new { message = "Nội dung phản hồi là bắt buộc." });
         }
 
+        // Đồng bộ ràng buộc độ dài với FE: tối thiểu 50, tối đa 5000 ký tự
+        var feedbackLength = request.FeedbackText.Trim().Length;
+        if (feedbackLength < 50)
+        {
+            return BadRequest(new { message = "Nhận xét phải có ít nhất 50 ký tự." });
+        }
+
+        if (feedbackLength > 5000)
+        {
+            return BadRequest(new { message = "Nhận xét không được vượt quá 5000 ký tự." });
+        }
+
         if (request.Rating is < 1 or > 5)
         {
             return BadRequest(new { message = "Đánh giá phải từ 1 đến 5 sao." });
@@ -727,7 +739,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 us.EvidenceUrl,
                 us.EvidenceType,
                 us.VerificationStatus,
-                us.UpdatedAt))
+                us.UpdatedAt,
+                us.RejectionReason))
             .ToListAsync(cancellationToken);
 
         return Ok(items);
@@ -842,6 +855,13 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
         }
 
+        // Cố vấn chỉ được duyệt khi vẫn còn được phân công cho sinh viên (assignment Active).
+        // Ngăn cố vấn đã bị admin gỡ phân công vẫn duyệt request Pending cũ.
+        if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
+        }
+
         if (request.Status != "Pending")
         {
             return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
@@ -865,8 +885,27 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            // Atomic guard chống race: chỉ một request thắng việc chuyển Pending -> Approved.
+            // Nếu một luồng khác (bấm 2 lần / 2 tab) đã giành trước, affected = 0 -> dừng,
+            // tránh materialize roadmap nhiều lần cho cùng một yêu cầu.
+            var claimed = await dbContext.RoadmapApprovalRequests
+                .Where(r => r.Id == request.Id && r.Status == "Pending")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(r => r.Status, "Approved")
+                        .SetProperty(r => r.UpdatedAt, DateTimeOffset.UtcNow),
+                    cancellationToken);
+
+            if (claimed == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
+            }
+
             var result = await roadmapMaterializer.MaterializeRoadmapAsync(request.StudentId, payload, cancellationToken);
 
+            // Đồng bộ entity đã tracking với giá trị vừa cập nhật atomic ở trên,
+            // rồi lưu MaterializedRoadmapId.
             request.Status = "Approved";
             request.MaterializedRoadmapId = result.RoadmapId;
             request.UpdatedAt = DateTimeOffset.UtcNow;
@@ -883,7 +922,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 type: "RoadmapApprovalApproved",
                 title: "Đề xuất lộ trình đã được duyệt",
                 message: $"Cố vấn {counselorName} đã duyệt đề xuất lộ trình của bạn: {result.Title}",
-                linkUrl: "#roadmap",
+                linkUrl: $"#roadmap?id={result.RoadmapId}",
                 cancellationToken: cancellationToken);
 
             await auditLog.LogAsync(
@@ -941,12 +980,16 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
         }
 
+        // Cố vấn chỉ được từ chối khi vẫn còn được phân công cho sinh viên (assignment Active).
+        if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
+        }
+
         if (request.Status != "Pending")
         {
             return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
         }
-
-        request.Status = "Rejected";
         request.RejectionReason = requestBody.RejectionReason.Trim();
         request.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -1104,7 +1147,8 @@ public sealed record SkillVerificationQueueItemResponse(
     string? EvidenceUrl,
     string? EvidenceType,
     string VerificationStatus,
-    DateTimeOffset SubmittedAt);
+    DateTimeOffset SubmittedAt,
+    string? RejectionReason = null);
 
 public sealed record RoadmapApprovalQueueItemResponse(
     Guid Id,

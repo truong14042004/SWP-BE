@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Services;
@@ -306,8 +307,11 @@ public sealed class AdminUsersController(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
         {
+            // Chỉ quy lỗi về "dữ liệu liên quan" khi đúng là vi phạm ràng buộc khóa ngoại (SqlState 23503).
+            // Các lỗi DB khác (timeout, deadlock, mất kết nối...) sẽ không bị bắt ở đây mà được ném tiếp cho
+            // middleware xử lý, tránh trả về thông báo sai nguyên nhân cho người dùng.
             return BadRequest(new { message = "Không thể xóa người dùng này vì có dữ liệu liên quan (lịch sử thanh toán, v.v.). Bạn có thể vô hiệu hóa tài khoản thay vì xóa." });
         }
 

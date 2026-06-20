@@ -281,14 +281,6 @@ public sealed class AiMentorActionsController(
         }
     }
 
-    private static int DifficultyRank(string? difficulty) => difficulty?.Trim().ToLowerInvariant() switch
-    {
-        "beginner" or "basic" or "cÆ¡ báº£n" => 0,
-        "intermediate" or "trung cáº¥p" => 1,
-        "advanced" or "nĂ¢ng cao" => 2,
-        _ => 3
-    };
-
     private Guid GetCurrentUserId()
     {
         var value = User.FindFirstValue(ClaimTypes.NameIdentifier);

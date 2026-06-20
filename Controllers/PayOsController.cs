@@ -125,6 +125,9 @@ public sealed class PayOsController(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    // Order code thật được sinh ở SubscriptionsController.CreateOrderCode() và luôn là số dương 15 chữ số.
+    // Webhook xác minh/test của PayOS có OrderCode = 0 (hoặc âm), nên chỉ cần dựa vào OrderCode <= 0.
+    // Bỏ điều kiện độ dài < 13 cũ vì dễ vỡ và có nguy cơ nuốt nhầm webhook thật.
     private static bool IsLikelyVerificationWebhook(WebhookData webhookData) =>
-        webhookData.OrderCode <= 0 || webhookData.OrderCode.ToString().Length < 13;
+        webhookData.OrderCode <= 0;
 }

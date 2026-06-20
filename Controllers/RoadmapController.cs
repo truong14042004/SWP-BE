@@ -276,9 +276,14 @@ public sealed class RoadmapController(
             .GroupBy(n => n.SkillId!.Value)
             .ToDictionary(g => g.Key, g => g.First().Status);
 
+        // Với node không có SkillId thì map trạng thái theo Title.
+        // Chỉ khôi phục khi tất cả node trùng Title có cùng một trạng thái (distinct == 1);
+        // nếu các node trùng Title mâu thuẫn trạng thái thì bỏ qua Title đó để node mới giữ
+        // "NotStarted", tránh "thăng cấp" nhầm (gán Completed/Verified cho node chưa hoàn thành).
         var existingTitleStatus = existingNodes
             .Where(n => n.SkillId is null)
             .GroupBy(n => n.Title)
+            .Where(g => g.Select(n => n.Status).Distinct().Count() == 1)
             .ToDictionary(g => g.Key, g => g.First().Status);
 
         var nodeInputs = skillGapReportId is not null
@@ -556,6 +561,26 @@ public sealed class RoadmapController(
             return BadRequest(new { message = "Không thể trực tiếp xác minh nhóm module." });
         }
 
+        // Authorization: ngoài Admin, reviewer chỉ được verify khi sinh viên đã gửi
+        // yêu cầu review cho chính reviewer này (đang Pending) cho node đó. Ngăn IDOR
+        // verify node của sinh viên bất kỳ chỉ bằng node id.
+        var currentUserId = GetCurrentUserId();
+        if (!User.IsInRole(UserRoles.Admin))
+        {
+            var hasPendingRequest = await dbContext.RoadmapNodeReviewRequests
+                .AnyAsync(item => item.RoadmapNodeId == id
+                    && item.ReviewerId == currentUserId
+                    && item.Status == "Pending", cancellationToken);
+
+            if (!hasPendingRequest)
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new
+                {
+                    message = "Bạn chỉ có thể xác minh module khi sinh viên đã gửi yêu cầu review cho bạn."
+                });
+            }
+        }
+
         if (!(node.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
               node.Status.Equals("NeedReview", StringComparison.OrdinalIgnoreCase) ||
               node.Status.Equals("Verified", StringComparison.OrdinalIgnoreCase)))
@@ -613,7 +638,7 @@ public sealed class RoadmapController(
                 "RoadmapCompleted",
                 "Chúc mừng! Bạn đã hoàn thành lộ trình",
                 $"Bạn đã hoàn thành toàn bộ module trong \"{node.Roadmap.Title}\". Làm tốt lắm!",
-                "#roadmap",
+                $"#roadmap?id={node.RoadmapId}",
                 null,
                 cancellationToken);
         }
