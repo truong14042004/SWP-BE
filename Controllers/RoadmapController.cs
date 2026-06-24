@@ -352,6 +352,7 @@ public sealed class RoadmapController(
 
         // Redirect review requests
         var requestsToDelete = new List<RoadmapNodeReviewRequest>();
+        var requestsToAdd = new List<RoadmapNodeReviewRequest>();
         foreach (var request in reviewRequests)
         {
             var oldNode = existingNodes.FirstOrDefault(n => n.Id == request.RoadmapNodeId);
@@ -364,7 +365,24 @@ public sealed class RoadmapController(
             string key = oldNode.SkillId is not null ? $"skill_{oldNode.SkillId.Value}" : $"title_{oldNode.Title}";
             if (newNodeMap.TryGetValue(key, out var newNodeId))
             {
-                request.RoadmapNodeId = newNodeId;
+                requestsToDelete.Add(request);
+                requestsToAdd.Add(new RoadmapNodeReviewRequest
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = newNodeId,
+                    StudentId = request.StudentId,
+                    ReviewerId = request.ReviewerId,
+                    ReviewerRole = request.ReviewerRole,
+                    Status = request.Status,
+                    StudentNote = request.StudentNote,
+                    ReviewerNote = request.ReviewerNote,
+                    EvidenceUrl = request.EvidenceUrl,
+                    EvidenceType = request.EvidenceType,
+                    EvidenceFileName = request.EvidenceFileName,
+                    RequestedAt = request.RequestedAt,
+                    RespondedAt = request.RespondedAt,
+                    AiSummaryId = request.AiSummaryId
+                });
             }
             else
             {
@@ -374,6 +392,7 @@ public sealed class RoadmapController(
 
         // Redirect lesson progress
         var progressToDelete = new List<LessonProgress>();
+        var progressToAdd = new List<LessonProgress>();
         var seenProgress = new HashSet<(Guid UserId, Guid NodeId, Guid ResourceId)>();
         foreach (var progressItem in lessonProgresses)
         {
@@ -394,7 +413,15 @@ public sealed class RoadmapController(
                 }
                 else
                 {
-                    progressItem.RoadmapNodeId = newNodeId;
+                    progressToDelete.Add(progressItem);
+                    progressToAdd.Add(new LessonProgress
+                    {
+                        Id = Guid.NewGuid(),
+                        UserId = progressItem.UserId,
+                        RoadmapNodeId = newNodeId,
+                        LearningResourceId = progressItem.LearningResourceId,
+                        CompletedAt = progressItem.CompletedAt
+                    });
                     seenProgress.Add(compositeKey);
                 }
             }
@@ -409,54 +436,69 @@ public sealed class RoadmapController(
             .Where(r => oldNodeIds.Contains(r.RoadmapNodeId))
             .ToListAsync(cancellationToken);
 
-        dbContext.RoadmapNodeResources.RemoveRange(oldNodeResources);
-        dbContext.RoadmapNodes.RemoveRange(existingNodes);
-
-        dbContext.RoadmapNodeReviewRequests.RemoveRange(requestsToDelete);
-        dbContext.LessonProgresses.RemoveRange(progressToDelete);
-
-        // Add new nodes and their resources
-        dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
-
-        var nodeResources = hierarchy.ActionNodes
-            .SelectMany(pair => pair.Input.LearningResourceIds
-                .Distinct()
-                .Select((resourceId, resourceIndex) => new RoadmapNodeResource
-                {
-                    Id = Guid.NewGuid(),
-                    RoadmapNodeId = pair.Node.Id,
-                    LearningResourceId = resourceId,
-                    OrderIndex = resourceIndex + 1,
-                    CreatedAt = now
-                }))
-            .ToList();
-        // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
-        nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
-        dbContext.RoadmapNodeResources.AddRange(nodeResources);
-
-        // Update existing roadmap properties
-        existingRoadmap.UpdatedAt = now;
-        existingRoadmap.SkillGapReportId = skillGapReportId;
-
-        // Recalculate progress based on restored node statuses
-        var progressNodes = hierarchy.Nodes
-            .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
-            .ToList();
-        var completedCount = progressNodes.Count(item => item.Status is "Completed" or "Verified");
-        existingRoadmap.Progress = progressNodes.Count == 0
-            ? 0
-            : Math.Round(completedCount * 100m / progressNodes.Count, 2);
-
-        if (progressNodes.Count > 0 && completedCount == progressNodes.Count)
+        using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
         {
-            existingRoadmap.Status = "Completed";
-        }
-        else
-        {
-            existingRoadmap.Status = "Active";
-        }
+            dbContext.RoadmapNodeResources.RemoveRange(oldNodeResources);
+            dbContext.RoadmapNodes.RemoveRange(existingNodes);
 
-        await dbContext.SaveChangesAsync(cancellationToken);
+            dbContext.RoadmapNodeReviewRequests.RemoveRange(requestsToDelete);
+            dbContext.LessonProgresses.RemoveRange(progressToDelete);
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            // Add new nodes and their resources
+            dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
+
+            var nodeResources = hierarchy.ActionNodes
+                .SelectMany(pair => pair.Input.LearningResourceIds
+                    .Distinct()
+                    .Select((resourceId, resourceIndex) => new RoadmapNodeResource
+                    {
+                        Id = Guid.NewGuid(),
+                        RoadmapNodeId = pair.Node.Id,
+                        LearningResourceId = resourceId,
+                        OrderIndex = resourceIndex + 1,
+                        CreatedAt = now
+                    }))
+                .ToList();
+            // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
+            nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
+            dbContext.RoadmapNodeResources.AddRange(nodeResources);
+
+            dbContext.RoadmapNodeReviewRequests.AddRange(requestsToAdd);
+            dbContext.LessonProgresses.AddRange(progressToAdd);
+
+            // Update existing roadmap properties
+            existingRoadmap.UpdatedAt = now;
+            existingRoadmap.SkillGapReportId = skillGapReportId;
+
+            // Recalculate progress based on restored node statuses
+            var progressNodes = hierarchy.Nodes
+                .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var completedCount = progressNodes.Count(item => item.Status is "Completed" or "Verified");
+            existingRoadmap.Progress = progressNodes.Count == 0
+                ? 0
+                : Math.Round(completedCount * 100m / progressNodes.Count, 2);
+
+            if (progressNodes.Count > 0 && completedCount == progressNodes.Count)
+            {
+                existingRoadmap.Status = "Completed";
+            }
+            else
+            {
+                existingRoadmap.Status = "Active";
+            }
+
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         var responseNodes = await dbContext.RoadmapNodes
             .AsNoTracking()
