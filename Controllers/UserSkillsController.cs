@@ -83,7 +83,9 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             Level = NormalizeLevel(request.Level), //chuan hoa chu hoa/thuong
             EvidenceUrl = request.EvidenceUrl?.Trim(),
             EvidenceType = request.EvidenceType?.Trim(),
-            VerificationStatus = UserSkillVerificationStatus.SelfDeclared,
+            VerificationStatus = !string.IsNullOrWhiteSpace(request.EvidenceUrl)
+                ? UserSkillVerificationStatus.PendingVerification
+                : UserSkillVerificationStatus.SelfDeclared,
             IsVerified = false,
             CreatedAt = now,
             UpdatedAt = now
@@ -149,6 +151,19 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             userSkill.EvidenceType = string.IsNullOrWhiteSpace(request.EvidenceType)
                 ? null
                 : request.EvidenceType.Trim();
+        }
+
+        if (!userSkill.IsVerified)
+        {
+            if (!string.IsNullOrWhiteSpace(userSkill.EvidenceUrl))
+            {
+                userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
+                userSkill.RejectionReason = null;
+            }
+            else
+            {
+                userSkill.VerificationStatus = UserSkillVerificationStatus.SelfDeclared;
+            }
         }
 
         userSkill.UpdatedAt = DateTimeOffset.UtcNow;
