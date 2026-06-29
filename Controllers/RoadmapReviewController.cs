@@ -480,6 +480,8 @@ public sealed class RoadmapReviewController(
         var reviewRequest = await dbContext.RoadmapNodeReviewRequests
             .Include(item => item.RoadmapNode)
             .ThenInclude(node => node.Roadmap)
+            .Include(item => item.RoadmapNode)
+            .ThenInclude(node => node.LearningResource)
             .SingleOrDefaultAsync(item => item.Id == requestId, cancellationToken);
 
         if (reviewRequest is null)
@@ -513,6 +515,7 @@ public sealed class RoadmapReviewController(
                 node.SkillId.Value,
                 node.Roadmap.CareerRoleId,
                 reviewerId,
+                node.LearningResource?.Difficulty,
                 cancellationToken);
         }
 
@@ -521,6 +524,7 @@ public sealed class RoadmapReviewController(
         if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
         {
             var children = await dbContext.RoadmapNodes
+                .Include(item => item.LearningResource)
                 .Where(item => item.ParentNodeId == node.Id
                     && item.RoadmapId == node.RoadmapId
                     && !item.NodeType.ToLower().Equals("group")
@@ -539,6 +543,7 @@ public sealed class RoadmapReviewController(
                         child.SkillId.Value,
                         node.Roadmap.CareerRoleId,
                         reviewerId,
+                        child.LearningResource?.Difficulty,
                         cancellationToken);
                 }
             }

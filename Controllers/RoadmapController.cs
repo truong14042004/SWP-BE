@@ -649,6 +649,7 @@ public sealed class RoadmapController(
                 node.SkillId.Value,
                 node.Roadmap.CareerRoleId,
                 GetCurrentUserId(),
+                node.LearningResource?.Difficulty,
                 cancellationToken);
         }
 

@@ -16,6 +16,7 @@ public interface IUserSkillSyncService
         Guid skillId,
         Guid careerRoleId,
         Guid verifierId,
+        string? nodeDifficulty,
         CancellationToken cancellationToken);
 }
 
@@ -26,6 +27,7 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
         Guid skillId,
         Guid careerRoleId,
         Guid verifierId,
+        string? nodeDifficulty,
         CancellationToken cancellationToken)
     {
         if (userId == Guid.Empty || skillId == Guid.Empty)
@@ -47,9 +49,17 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
                 item => item.UserId == userId && item.SkillId == skillId,
                 cancellationToken);
 
+        // Ưu tiên level thực của node (Difficulty trên LearningResource) làm VerifiedLevel.
+        // Nếu node không có difficulty, fallback về RoleSkillRequirement.RequiredLevel.
+        var nodeLevel = DifficultyToLevel(nodeDifficulty);
+        var resolvedLevel = !string.IsNullOrWhiteSpace(nodeLevel)
+            ? nodeLevel
+            : await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
+
         if (existing is not null)
         {
-            // Học viên đã tự khai kỹ năng này: giữ nguyên Level, chỉ đánh dấu đã xác minh.
+            // Học viên đã tự khai kỹ năng này: giữ nguyên Level tự khai, nhưng cập nhật
+            // VerifiedLevel lên mức của node vừa được verify (nếu cao hơn mức đã verify).
             if (!existing.IsVerified)
             {
                 existing.IsVerified = true;
@@ -58,18 +68,35 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
                 existing.UpdatedAt = now;
             }
 
+            existing.VerificationStatus = UserSkillVerificationStatus.Verified;
+
+            // Chỉ nâng VerifiedLevel lên mức mới nếu cao hơn mức đã verify hiện tại.
+            // Nếu VerifiedLevel đang null, dùng resolvedLevel làm baseline (không dùng
+            // Level tự khai vì mentor chưa xác nhận mức đó).
+            var currentVerifiedRank = LevelRank(existing.VerifiedLevel);
+            if (LevelRank(resolvedLevel) > currentVerifiedRank)
+            {
+                existing.VerifiedLevel = resolvedLevel;
+            }
+            else if (string.IsNullOrWhiteSpace(existing.VerifiedLevel))
+            {
+                existing.VerifiedLevel = resolvedLevel;
+            }
+
+            existing.UpdatedAt = now;
+
             return;
         }
-
-        var level = await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
 
         dbContext.UserSkills.Add(new UserSkill
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             SkillId = skillId,
-            Level = level,
+            Level = resolvedLevel,
+            VerifiedLevel = resolvedLevel,
             IsVerified = true,
+            VerificationStatus = UserSkillVerificationStatus.Verified,
             VerifiedByUserId = verifierId,
             VerifiedAt = now,
             CreatedAt = now,
@@ -99,5 +126,30 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
         return normalized.Equals("Expert", StringComparison.OrdinalIgnoreCase)
             ? "Advanced"
             : normalized;
+    }
+
+    private static int LevelRank(string? level) =>
+        level?.Trim().ToLowerInvariant() switch
+        {
+            "verified" => 4,
+            "advanced" => 3,
+            "intermediate" => 2,
+            "beginner" => 1,
+            _ => 0
+        };
+
+    private static string? DifficultyToLevel(string? difficulty)
+    {
+        if (string.IsNullOrWhiteSpace(difficulty))
+            return null;
+
+        return difficulty.Trim().ToLowerInvariant() switch
+        {
+            "beginner" or "basic" or "fundamental" or "fundamentals" or "cơ bản" => "Beginner",
+            "intermediate" or "trung cấp" => "Intermediate",
+            "advanced" or "nâng cao" => "Advanced",
+            "expert" => "Advanced",
+            _ => null
+        };
     }
 }
