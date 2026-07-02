@@ -138,18 +138,62 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         var resourceIdsByTitle = resources
             .GroupBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        // Chỉ chọn tài liệu ĐÚNG mức sinh viên đang cần học (mức verified + 1),
+        // không gắn cả tài liệu Beginner lẫn Advanced vào cùng 1 node.
+        var verifiedLevelBySkill = await _dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.UserId == userId && us.IsVerified)
+            .Select(us => new { us.SkillId, us.VerifiedLevel, us.Level })
+            .ToDictionaryAsync(
+                us => us.SkillId,
+                us => LevelRank(string.IsNullOrWhiteSpace(us.VerifiedLevel) ? us.Level : us.VerifiedLevel),
+                cancellationToken);
+
+        var requiredLevelBySkill = await _dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(item => item.CareerRoleId == targetRoleId.Value)
+            .ToDictionaryAsync(item => item.SkillId, item => LevelRank(item.RequiredLevel), cancellationToken);
+
         var resourceIdsBySkill = resources
             .Where(item => item.SkillId is not null)
             .GroupBy(item => item.SkillId!.Value)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyList<Guid>)group
-                    .OrderBy(item => item.LessonNumber)
-                    .ThenBy(item => DifficultyRank(item.Difficulty))
-                    .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
-                    .ThenBy(item => item.Title)
-                    .Select(item => item.Id)
-                    .ToList());
+                group =>
+                {
+                    var ordered = group
+                        .OrderBy(item => DifficultyRank(item.Difficulty))
+                        .ThenBy(item => item.LessonNumber)
+                        .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
+                        .ThenBy(item => item.Title)
+                        .ToList();
+
+                    var min = verifiedLevelBySkill.GetValueOrDefault(group.Key, 0);
+                    var max = requiredLevelBySkill.GetValueOrDefault(group.Key, 0);
+                    var targetRank = min + 1;
+                    if (max > 0 && targetRank > max)
+                    {
+                        targetRank = max;
+                    }
+
+                    bool Unknown(string? d) => string.IsNullOrWhiteSpace(d);
+
+                    var primary = ordered
+                        .Where(item => Unknown(item.Difficulty) || DifficultyRank(item.Difficulty) == targetRank)
+                        .ToList();
+
+                    var chosen = primary.Count > 0
+                        ? primary
+                        : ordered
+                            .Where(item => Unknown(item.Difficulty)
+                                || (DifficultyRank(item.Difficulty) > min && (max <= 0 || DifficultyRank(item.Difficulty) <= max)))
+                            .ToList();
+
+                    return (IReadOnlyList<Guid>)(chosen.Count > 0 ? chosen : ordered)
+                        .Select(item => item.Id)
+                        .ToList();
+                });
 
         var allowedModuleTitles = skillIdsByTitle.Keys
             .Concat(resourceIdsByTitle.Keys)
@@ -391,9 +435,19 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
 
     private static int DifficultyRank(string? difficulty) => difficulty?.Trim().ToLowerInvariant() switch
     {
-        "beginner" or "basic" or "cơ bản" => 0,
-        "intermediate" or "trung cấp" => 1,
-        "advanced" or "nâng cao" => 2,
-        _ => 3
+        "beginner" or "basic" or "fundamental" or "fundamentals" or "cơ bản" => 1,
+        "intermediate" or "trung cấp" => 2,
+        "advanced" or "nâng cao" => 3,
+        "expert" => 4,
+        _ => 5
+    };
+
+    private static int LevelRank(string? level) => level?.Trim().ToLowerInvariant() switch
+    {
+        "verified" => 4,
+        "advanced" => 3,
+        "intermediate" => 2,
+        "beginner" => 1,
+        _ => 0
     };
 }
