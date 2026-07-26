@@ -244,7 +244,9 @@ public sealed class SubscriptionsController(
                 item.Subscription.UpdatedAt,
                 item.LatestPayment != null ? item.LatestPayment.Amount : item.Plan.Price,
                 item.LatestPayment != null ? item.LatestPayment.Currency : item.Plan.Currency,
-                item.LatestPayment != null ? item.LatestPayment.CheckoutUrl : null))
+                item.LatestPayment != null ? item.LatestPayment.CheckoutUrl : null,
+                item.LatestPayment != null ? item.LatestPayment.ProviderTransactionId : null,
+                item.LatestPayment != null ? item.LatestPayment.Status : null))
             .ToListAsync(cancellationToken);
 
         return Ok(subscriptions);
@@ -362,4 +364,9 @@ public sealed record MySubscriptionResponse(
     DateTimeOffset UpdatedAt,
     decimal Amount,
     string Currency,
-    string? CheckoutUrl);
+    string? CheckoutUrl,
+    // Mã đơn PayOS của giao dịch gần nhất — trang kết quả thanh toán cần nó để
+    // đối chiếu đúng đơn vừa trả tiền, thay vì chỉ thấy "có gói Active nào đó"
+    // rồi báo thành công nhầm cho giao dịch khác.
+    string? LatestOrderCode,
+    string? LatestPaymentStatus);

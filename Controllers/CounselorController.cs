@@ -87,6 +87,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 {
                     report.UserId,
                     report.MatchScore,
+                    report.VerifiedMatchScore,
                     report.CreatedAt
                 })
                 .First())
@@ -109,6 +110,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 profile?.TargetRoleId,
                 profile?.TargetRoleName,
                 gap?.MatchScore,
+                gap?.VerifiedMatchScore,
                 gap?.CreatedAt);
         }).ToList();
 
@@ -1048,6 +1050,9 @@ public sealed record CounselorStudentSummaryResponse(
     Guid? TargetRoleId,
     string? TargetRoleName,
     decimal? LatestMatchScore,
+    // Điểm chỉ tính kỹ năng đã xác thực — cố vấn phải lọc "cần can thiệp" theo con
+    // số này, vì LatestMatchScore gồm cả kỹ năng sinh viên tự khai chưa kiểm chứng.
+    decimal? LatestVerifiedMatchScore,
     DateTimeOffset? LatestSkillGapAt);
 
 public sealed record CounselorStudentProfileResponse(
