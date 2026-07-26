@@ -109,11 +109,27 @@ public sealed class PayOsController(
 
         if (webhookData.Code == "00")
         {
-            await paymentProcessingService.MarkPaidAsync(
-                payment,
-                now,
-                webhookData.PaymentLinkId,
-                cancellationToken);
+            // Phòng vệ chiều sâu: chữ ký đã được verify ở trên, nhưng vẫn phải đối chiếu
+            // số tiền — không có bước này thì một payload báo thành công với số tiền lệch
+            // vẫn kích hoạt gói đầy đủ quyền lợi.
+            var expectedAmount = decimal.ToInt32(decimal.Round(payment.Amount, 0, MidpointRounding.AwayFromZero));
+            if (webhookData.Amount != expectedAmount)
+            {
+                paymentProcessingService.MarkFailed(payment, now);
+                logger.LogWarning(
+                    "Webhook PayOS báo thành công nhưng số tiền không khớp cho đơn {OrderCode}: nhận {Received}, cần {Expected}.",
+                    webhookData.OrderCode,
+                    webhookData.Amount,
+                    expectedAmount);
+            }
+            else
+            {
+                await paymentProcessingService.MarkPaidAsync(
+                    payment,
+                    now,
+                    webhookData.PaymentLinkId,
+                    cancellationToken);
+            }
         }
         else
         {

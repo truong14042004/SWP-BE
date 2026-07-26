@@ -526,18 +526,28 @@ public sealed class GithubController(
                 int visual = talentProp.TryGetProperty("visualDesignScore", out var p3) && p3.ValueKind == System.Text.Json.JsonValueKind.Number ? p3.GetInt32() : 5;
                 string feedback = talentProp.TryGetProperty("aiFeedback", out var p4) ? p4.GetString() ?? "" : "";
 
-                var newTalent = new StudentTalentProfile
+                // Mỗi sinh viên chỉ có MỘT hồ sơ tài năng: TalentAnalysisController đọc
+                // bằng SingleOrDefault, nên chèn thêm dòng mỗi lần phân tích repo sẽ làm
+                // GET /api/talent/profile ném lỗi (500) vĩnh viễn cho sinh viên đó.
+                var talent = await dbContext.StudentTalentProfiles
+                    .FirstOrDefaultAsync(item => item.StudentId == userId, cancellationToken);
+
+                if (talent is null)
                 {
-                    Id = Guid.NewGuid(),
-                    StudentId = userId,
-                    AnalyzedRepoUrl = repository.RepoUrl,
-                    LogicalThinkingScore = logical,
-                    SystemArchitectureScore = system,
-                    VisualDesignScore = visual,
-                    AiFeedback = feedback,
-                    AnalyzedAt = DateTimeOffset.UtcNow
-                };
-                dbContext.StudentTalentProfiles.Add(newTalent);
+                    talent = new StudentTalentProfile
+                    {
+                        Id = Guid.NewGuid(),
+                        StudentId = userId
+                    };
+                    dbContext.StudentTalentProfiles.Add(talent);
+                }
+
+                talent.AnalyzedRepoUrl = repository.RepoUrl;
+                talent.LogicalThinkingScore = logical;
+                talent.SystemArchitectureScore = system;
+                talent.VisualDesignScore = visual;
+                talent.AiFeedback = feedback;
+                talent.AnalyzedAt = DateTimeOffset.UtcNow;
             }
         }
         catch (Exception)

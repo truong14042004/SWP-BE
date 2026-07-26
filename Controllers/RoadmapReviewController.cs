@@ -125,6 +125,7 @@ public sealed class RoadmapReviewController(
         return Ok(new AvailableReviewersResponse(counselorInfo, mentorInfos));
     }
 
+    [Authorize(Roles = UserRoles.Student)]
     [HttpPost("api/roadmap-node/{id:guid}/review-requests")]
     public async Task<ActionResult<RoadmapReviewRequestResponse>> CreateReviewRequest(
         Guid id,
@@ -494,62 +495,109 @@ public sealed class RoadmapReviewController(
             return Forbid();
         }
 
+        // Counselor chỉ được duyệt khi vẫn còn được phân công cho sinh viên —
+        // cùng luật với duyệt RoadmapApprovalRequest bên CounselorController.
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && !await dbContext.CounselorAssignments.AnyAsync(
+                item => item.StudentId == reviewRequest.StudentId
+                    && item.CounselorId == reviewerId
+                    && item.Status == "Active",
+                cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
+        }
+
         if (reviewRequest.Status != "Pending")
         {
             return BadRequest(new { message = "Chỉ có thể duyệt các yêu cầu ở trạng thái chờ duyệt." });
         }
 
         var now = DateTimeOffset.UtcNow;
-        reviewRequest.Status = "Approved";
-        reviewRequest.ReviewerNote = request.ReviewerNote?.Trim();
-        reviewRequest.RespondedAt = now;
-
         var node = reviewRequest.RoadmapNode;
-        node.Status = "Verified";
-        node.UpdatedAt = now;
 
-        if (node.SkillId is not null)
+        // Toàn bộ thay đổi trạng thái phải cùng commit: RecalculateRoadmapProgressAsync
+        // và NotificationService đều tự SaveChanges bên trong — không có transaction thì
+        // lỗi giữa chừng sẽ để lại dữ liệu commit một nửa.
+        await using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
+        try
         {
-            await userSkillSyncService.SyncVerifiedSkillAsync(
-                node.Roadmap.UserId,
-                node.SkillId.Value,
-                node.Roadmap.CareerRoleId,
-                reviewerId,
-                node.LearningResource?.Difficulty,
-                cancellationToken);
-        }
+            reviewRequest.Status = "Approved";
+            reviewRequest.ReviewerNote = request.ReviewerNote?.Trim();
+            reviewRequest.RespondedAt = now;
 
-        // Group review: cascade verify all non-group descendants that are
-        // Completed (so progress reflects the group sign-off).
-        if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
-        {
-            var children = await dbContext.RoadmapNodes
-                .Include(item => item.LearningResource)
-                .Where(item => item.ParentNodeId == node.Id
-                    && item.RoadmapId == node.RoadmapId
-                    && !item.NodeType.ToLower().Equals("group")
-                    && item.Status != "Verified")
-                .ToListAsync(cancellationToken);
+            node.Status = "Verified";
+            node.UpdatedAt = now;
 
-            foreach (var child in children)
+            if (node.SkillId is not null)
             {
-                child.Status = "Verified";
-                child.UpdatedAt = now;
+                await userSkillSyncService.SyncVerifiedSkillAsync(
+                    node.Roadmap.UserId,
+                    node.SkillId.Value,
+                    node.Roadmap.CareerRoleId,
+                    reviewerId,
+                    node.LearningResource?.Difficulty,
+                    cancellationToken);
+            }
 
-                if (child.SkillId is not null)
+            // Group review: cascade verify toàn bộ node con (kể cả trong group lồng nhau)
+            // nhưng CHỈ những node đã Completed — node chưa hoàn thành không được "ăn theo"
+            // chữ ký duyệt nhóm (sinh viên có thể hạ status con về NotStarted sau khi gửi request).
+            if (node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            {
+                var roadmapNodes = await dbContext.RoadmapNodes
+                    .Include(item => item.LearningResource)
+                    .Where(item => item.RoadmapId == node.RoadmapId)
+                    .ToListAsync(cancellationToken);
+                var childrenByParent = roadmapNodes
+                    .Where(item => item.ParentNodeId is not null)
+                    .GroupBy(item => item.ParentNodeId!.Value)
+                    .ToDictionary(group => group.Key, group => group.ToList());
+
+                var completedDescendants = new List<RoadmapNode>();
+                var pendingGroups = new Queue<Guid>();
+                pendingGroups.Enqueue(node.Id);
+                while (pendingGroups.Count > 0)
                 {
-                    await userSkillSyncService.SyncVerifiedSkillAsync(
-                        node.Roadmap.UserId,
-                        child.SkillId.Value,
-                        node.Roadmap.CareerRoleId,
-                        reviewerId,
-                        child.LearningResource?.Difficulty,
-                        cancellationToken);
+                    foreach (var child in childrenByParent.GetValueOrDefault(pendingGroups.Dequeue(), []))
+                    {
+                        if (child.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+                        {
+                            pendingGroups.Enqueue(child.Id);
+                        }
+                        else if (child.Status == "Completed")
+                        {
+                            completedDescendants.Add(child);
+                        }
+                    }
+                }
+
+                foreach (var child in completedDescendants)
+                {
+                    child.Status = "Verified";
+                    child.UpdatedAt = now;
+
+                    if (child.SkillId is not null)
+                    {
+                        await userSkillSyncService.SyncVerifiedSkillAsync(
+                            node.Roadmap.UserId,
+                            child.SkillId.Value,
+                            node.Roadmap.CareerRoleId,
+                            reviewerId,
+                            child.LearningResource?.Difficulty,
+                            cancellationToken);
+                    }
                 }
             }
-        }
 
-        await RecalculateRoadmapProgressAsync(node, cancellationToken);
+            await RecalculateRoadmapProgressAsync(node, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            await transaction.CommitAsync(cancellationToken);
+        }
+        catch
+        {
+            await transaction.RollbackAsync(cancellationToken);
+            throw;
+        }
 
         // Notify student
         var reviewerName = await dbContext.Users
@@ -557,8 +605,6 @@ public sealed class RoadmapReviewController(
             .Where(user => user.Id == reviewerId)
             .Select(user => user.FullName)
             .SingleOrDefaultAsync(cancellationToken);
-
-        await dbContext.SaveChangesAsync(cancellationToken);
 
         await notificationService.SendNotificationAsync(
             reviewRequest.StudentId,
@@ -629,6 +675,17 @@ public sealed class RoadmapReviewController(
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
         {
             return Forbid();
+        }
+
+        // Cùng luật với ApproveRequest: counselor phải còn được phân công cho sinh viên.
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && !await dbContext.CounselorAssignments.AnyAsync(
+                item => item.StudentId == reviewRequest.StudentId
+                    && item.CounselorId == reviewerId
+                    && item.Status == "Active",
+                cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
         }
 
         if (reviewRequest.Status != "Pending")

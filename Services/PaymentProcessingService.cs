@@ -153,17 +153,35 @@ public sealed class PaymentProcessingService(AppDbContext dbContext) : IPaymentP
 
                     if (adminId != Guid.Empty)
                     {
-                        dbContext.CounselorAssignments.Add(new CounselorAssignment
+                        // Unique index (CounselorId, StudentId) KHÔNG lọc theo Status: nếu
+                        // cặp này từng được phân công rồi gỡ (Inactive), chèn dòng mới sẽ
+                        // vi phạm index và làm rollback toàn bộ việc xác nhận thanh toán.
+                        var existingAssignment = await dbContext.CounselorAssignments
+                            .FirstOrDefaultAsync(
+                                ca => ca.StudentId == payment.UserId && ca.CounselorId == randomCounselorId,
+                                cancellationToken);
+
+                        if (existingAssignment is not null)
                         {
-                            Id = Guid.NewGuid(),
-                            StudentId = payment.UserId,
-                            CounselorId = randomCounselorId,
-                            AssignedByAdminId = adminId,
-                            Status = "Active",
-                            Note = "Hệ thống tự động phân công ngẫu nhiên sau khi kích hoạt gói cước.",
-                            CreatedAt = paidAt,
-                            UpdatedAt = paidAt
-                        });
+                            existingAssignment.Status = "Active";
+                            existingAssignment.AssignedByAdminId = adminId;
+                            existingAssignment.Note = "Hệ thống tự động kích hoạt lại phân công sau khi kích hoạt gói cước.";
+                            existingAssignment.UpdatedAt = paidAt;
+                        }
+                        else
+                        {
+                            dbContext.CounselorAssignments.Add(new CounselorAssignment
+                            {
+                                Id = Guid.NewGuid(),
+                                StudentId = payment.UserId,
+                                CounselorId = randomCounselorId,
+                                AssignedByAdminId = adminId,
+                                Status = "Active",
+                                Note = "Hệ thống tự động phân công ngẫu nhiên sau khi kích hoạt gói cước.",
+                                CreatedAt = paidAt,
+                                UpdatedAt = paidAt
+                            });
+                        }
                     }
                 }
             }

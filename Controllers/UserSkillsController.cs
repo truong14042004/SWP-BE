@@ -19,7 +19,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         "Beginner",
         "Intermediate",
         "Advanced",
-        "Verified"
+        "Expert"
     ];
 
     [HttpGet]
@@ -284,6 +284,12 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không được phân công cho cố vấn này." });
         }
 
+        // Chỉ xác minh kỹ năng đang chờ xác thực (đã nộp minh chứng) — đối xứng với reject-evidence.
+        if (userSkill.VerificationStatus != UserSkillVerificationStatus.PendingVerification)
+        {
+            return BadRequest(new { message = "Chỉ có thể xác minh kỹ năng đang ở trạng thái chờ xác thực (đã nộp minh chứng)." });
+        }
+
         var now = DateTimeOffset.UtcNow;
         userSkill.IsVerified = true;
         userSkill.VerifiedLevel = NormalizeLevel(request.VerifiedLevel);
@@ -322,6 +328,18 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
                 title: "Kỹ năng đã được xác minh",
                 message: $"Kỹ năng {userSkill.Skill.Name} đã được xác minh. Hãy tạo lại lộ trình để cập nhật và bỏ bớt phần bạn đã đạt.",
                 linkUrl: "#roadmap",
+                cancellationToken: cancellationToken);
+        }
+        else
+        {
+            // Bị từ chối / bị thu hồi đều có thông báo — được xác minh cũng phải có,
+            // không chỉ trong trường hợp kỹ năng nằm trong roadmap đang học.
+            await notificationService.SendNotificationAsync(
+                userId: userSkill.UserId,
+                type: "SkillVerified",
+                title: "Kỹ năng đã được xác minh",
+                message: $"Kỹ năng {userSkill.Skill.Name} của bạn đã được xác minh ở mức {userSkill.VerifiedLevel}.",
+                linkUrl: "#skills",
                 cancellationToken: cancellationToken);
         }
 
@@ -445,6 +463,11 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
         userSkill.VerifiedLevel = null;
         userSkill.VerifiedAt = null;
         userSkill.VerificationStatus = UserSkillVerificationStatus.Unverified;
+        // Xoá minh chứng đã bị từ chối: nếu giữ lại, student chỉ cần bấm Lưu ở form
+        // sửa là UpdateUserSkill thấy EvidenceUrl khác rỗng và đưa NGUYÊN minh chứng
+        // vừa bị từ chối trở lại hàng đợi (đồng thời xoá mất lý do từ chối).
+        userSkill.EvidenceUrl = null;
+        userSkill.EvidenceType = null;
         userSkill.RejectionReason = reason;
         userSkill.UpdatedAt = now;
 
@@ -533,7 +556,7 @@ public sealed class UserSkillsController(AppDbContext dbContext) : ControllerBas
 
         if (!AllowedLevels.Contains(level.Trim(), StringComparer.OrdinalIgnoreCase))
         {
-            return "Cấp độ phải là một trong các giá trị: Beginner, Intermediate, Advanced, Verified.";
+            return "Cấp độ phải là một trong các giá trị: Beginner, Intermediate, Advanced, Expert.";
         }
 
         return null;

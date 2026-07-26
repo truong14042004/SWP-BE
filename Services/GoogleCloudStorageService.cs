@@ -8,11 +8,16 @@ using SWP_BE.Options;
 namespace SWP_BE.Services;
 
 public sealed class GoogleCloudStorageService(
-    StorageClient storageClient,
+    Lazy<StorageClient> storageClientFactory,
     IHttpClientFactory httpClientFactory,
     IOptions<StorageOptions> options) : IFileStorageService
 {
     private readonly StorageOptions storageOptions = options.Value;
+
+    // Khởi tạo trễ: nếu tạo StorageClient ngay lúc DI dựng service thì môi trường
+    // thiếu Application Default Credentials sẽ làm hỏng cả những endpoint không
+    // hề đụng tới storage (mọi controller có inject IFileStorageService).
+    private StorageClient storageClient => storageClientFactory.Value;
 
     public async Task<StoredFileResult> UploadAsync(
         Stream content,

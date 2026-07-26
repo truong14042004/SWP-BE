@@ -50,7 +50,7 @@ builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
-builder.Services.AddSingleton(_ => StorageClient.Create());
+builder.Services.AddSingleton(_ => new Lazy<StorageClient>(StorageClient.Create));
 builder.Services.AddScoped<IFileStorageService, GoogleCloudStorageService>();
 builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 builder.Services.AddScoped<IStudentReviewQuotaService, StudentReviewQuotaService>();
@@ -146,7 +146,10 @@ builder.Services.AddCors(options =>
             .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .AllowCredentials();
+            .AllowCredentials()
+            // Cho FE đọc tên file gốc khi tải blob (Content-Disposition là
+            // response header, AllowAnyHeader chỉ áp cho request header).
+            .WithExposedHeaders("Content-Disposition");
     });
 });
 

@@ -434,9 +434,30 @@ public sealed class MentorController(
             return new AiChatQuotaResponse(planName, -1, 0, int.MaxValue, since);
         }
 
-        var used = await dbContext.MentorSessions
+        // Quota tính theo SỐ CÂU HỎI (message role=user), không phải số session:
+        // follow-up dùng lại session cũ, nếu đếm session thì hết quota vẫn chat
+        // vô hạn trong thread cũ. Session tạo trước `since` vẫn có thể chứa câu
+        // hỏi mới nên phải quét toàn bộ session của user.
+        var sessionRows = await dbContext.MentorSessions
             .AsNoTracking()
-            .CountAsync(item => item.UserId == userId && item.CreatedAt >= since, cancellationToken);
+            .Where(item => item.UserId == userId)
+            .Select(item => new { item.Answer, item.CreatedAt })
+            .ToListAsync(cancellationToken);
+
+        var used = 0;
+        foreach (var row in sessionRows)
+        {
+            var messageCount = CountUserMessagesSince(row.Answer, since);
+            if (messageCount >= 0)
+            {
+                used += messageCount;
+            }
+            else if (row.CreatedAt >= since)
+            {
+                // Dữ liệu cũ không có mảng messages: 1 session = 1 câu hỏi.
+                used += 1;
+            }
+        }
 
         return new AiChatQuotaResponse(planName, limit, used, Math.Max(limit - used, 0), since);
     }
@@ -741,6 +762,72 @@ public sealed class MentorController(
         """;
     }
 
+    /// <summary>
+    /// Đếm số câu hỏi (message role=user) từ thời điểm <paramref name="since"/> trong
+    /// payload Answer của một MentorSession. Trả -1 nếu payload không có mảng messages
+    /// (dữ liệu cũ dạng 1 session = 1 câu hỏi) để caller tự tính fallback.
+    /// </summary>
+    private static int CountUserMessagesSince(string? answerPayload, DateTimeOffset since)
+    {
+        if (string.IsNullOrWhiteSpace(answerPayload))
+        {
+            return -1;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(answerPayload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object
+                || !TryGetPropertyIgnoreCase(doc.RootElement, "messages", out var messages)
+                || messages.ValueKind != JsonValueKind.Array)
+            {
+                return -1;
+            }
+
+            var count = 0;
+            foreach (var message in messages.EnumerateArray())
+            {
+                if (message.ValueKind != JsonValueKind.Object
+                    || !TryGetPropertyIgnoreCase(message, "role", out var role)
+                    || !"user".Equals(role.GetString(), StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (TryGetPropertyIgnoreCase(message, "createdAt", out var createdAt)
+                    && createdAt.ValueKind == JsonValueKind.String
+                    && DateTimeOffset.TryParse(createdAt.GetString(), out var timestamp)
+                    && timestamp < since)
+                {
+                    continue;
+                }
+
+                count++;
+            }
+
+            return count;
+        }
+        catch (JsonException)
+        {
+            return -1;
+        }
+    }
+
+    private static bool TryGetPropertyIgnoreCase(JsonElement element, string name, out JsonElement value)
+    {
+        foreach (var property in element.EnumerateObject())
+        {
+            if (property.Name.Equals(name, StringComparison.OrdinalIgnoreCase))
+            {
+                value = property.Value;
+                return true;
+            }
+        }
+
+        value = default;
+        return false;
+    }
+
     private ParsedAiResponse ParseAiResponse(string raw)
     {
         if (string.IsNullOrWhiteSpace(raw))
@@ -992,6 +1079,11 @@ public sealed class MentorController(
             if (string.IsNullOrWhiteSpace(title) || !categorySet.Contains(title)) continue;
 
             var clone = (JsonObject)obj.DeepClone();
+            // Ép nodeType = "Group" cho node cấp 1: sanitizer phía apply
+            // (RoadmapMaterializer.SanitizeRoadmapCategories) loại node cấp 1
+            // không phải Group — nếu để nguyên, preview hiển thị được nhưng
+            // bấm "Áp dụng lộ trình" sẽ nhận 400.
+            clone["nodeType"] = "Group";
             if (clone["children"] is JsonArray children)
             {
                 clone["children"] = SanitizeRoadmapModules(children, allowedModuleTitles);

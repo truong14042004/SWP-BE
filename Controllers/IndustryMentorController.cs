@@ -727,6 +727,22 @@ public sealed class IndustryMentorController(
             return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
+        // Cùng chính sách với DeleteSkill: tài nguyên đang được roadmap/tiến độ học
+        // tham chiếu thì soft-delete. Hard-delete sẽ cascade âm thầm gỡ tài nguyên
+        // khỏi mọi roadmap đang học (có thể làm node < 2 tài nguyên - vi phạm FR2.3)
+        // và xoá LessonProgress của sinh viên.
+        var isUsed = await dbContext.RoadmapNodeResources.AnyAsync(item => item.LearningResourceId == id, cancellationToken)
+            || await dbContext.RoadmapNodes.AnyAsync(item => item.LearningResourceId == id, cancellationToken)
+            || await dbContext.LessonProgresses.AnyAsync(item => item.LearningResourceId == id, cancellationToken);
+
+        if (isUsed)
+        {
+            resource.IsActive = false;
+            resource.UpdatedAt = DateTimeOffset.UtcNow;
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return NoContent();
+        }
+
         if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
         {
             await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
@@ -1513,7 +1529,7 @@ public sealed class IndustryMentorController(
             resource.Skill?.Name,
             resource.Title,
             ToExternalResourceUrl(resource.Url),
-            resource.StorageObjectName is null ? "Link" : "File",
+            LearningResourceFiles.SourceType(resource.StorageObjectName),
             resource.ContentType,
             resource.FileSize,
             GetLearningResourceFileName(resource.StorageObjectName),
@@ -1577,19 +1593,8 @@ public sealed class IndustryMentorController(
     private static string ToExternalResourceUrl(string? url) =>
         NormalizeExternalResourceUrl(url) ?? string.Empty;
 
-    private static string? GetLearningResourceFileName(string? storageObjectName)
-    {
-        if (string.IsNullOrWhiteSpace(storageObjectName))
-        {
-            return null;
-        }
-
-        var fileName = Path.GetFileName(storageObjectName.Replace("\\", "/"));
-        var parts = fileName.Split('-', 3, StringSplitOptions.RemoveEmptyEntries);
-        return parts.Length == 3 && parts[0].Length == 17 && parts[1].Length == 32
-            ? parts[2]
-            : fileName;
-    }
+    private static string? GetLearningResourceFileName(string? storageObjectName) =>
+        LearningResourceFiles.GetFileName(storageObjectName);
 
     private static string? NormalizeExternalResourceUrl(string? url)
     {

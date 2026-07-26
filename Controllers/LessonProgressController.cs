@@ -59,13 +59,22 @@ public sealed class LessonProgressController(AppDbContext dbContext) : Controlle
             return NotFound(new { message = "Không tìm thấy module roadmap." });
         }
 
-        var lessonExists = await dbContext.LearningResources
-            .AsNoTracking()
-            .AnyAsync(item => item.Id == lessonId, cancellationToken);
-
-        if (!lessonExists)
+        // Node đã Verified là bất biến với sinh viên — nhất quán với UpdateNodeStatus.
+        if (node.Status.Equals("Verified", StringComparison.OrdinalIgnoreCase))
         {
-            return NotFound(new { message = "Không tìm thấy bài học." });
+            return BadRequest(new { message = "Module đã được xác minh, không thể thay đổi tiến độ bài học." });
+        }
+
+        // Bài học phải thực sự thuộc node này (qua RoadmapNodeResources hoặc là tài
+        // nguyên chính của node) — không nhận LearningResourceId bất kỳ.
+        var lessonBelongsToNode = node.LearningResourceId == lessonId
+            || await dbContext.RoadmapNodeResources
+                .AsNoTracking()
+                .AnyAsync(item => item.RoadmapNodeId == nodeId && item.LearningResourceId == lessonId, cancellationToken);
+
+        if (!lessonBelongsToNode)
+        {
+            return NotFound(new { message = "Không tìm thấy bài học trong module này." });
         }
 
         var existing = await dbContext.LessonProgresses
@@ -106,6 +115,15 @@ public sealed class LessonProgressController(AppDbContext dbContext) : Controlle
         CancellationToken cancellationToken)
     {
         var userId = GetCurrentUserId();
+
+        // Node đã Verified là bất biến với sinh viên — nhất quán với MarkComplete.
+        var nodeIsVerified = await dbContext.RoadmapNodes
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == nodeId && item.Status == "Verified", cancellationToken);
+        if (nodeIsVerified)
+        {
+            return BadRequest(new { message = "Module đã được xác minh, không thể thay đổi tiến độ bài học." });
+        }
 
         var existing = await dbContext.LessonProgresses
             .SingleOrDefaultAsync(item => item.UserId == userId

@@ -167,12 +167,22 @@ public sealed partial class StorageController(
             return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
+        if (userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Kỹ năng đã được xác minh, không thể nộp minh chứng mới." });
+        }
+
         var objectName = BuildUserObjectName(userId, "evidence", request.File.FileName, request.File.ContentType);
         await using var stream = request.File.OpenReadStream();
         var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
 
         userSkill.EvidenceUrl = result.ObjectName;
         userSkill.EvidenceType = result.ContentType;
+        // Có minh chứng mới thì kỹ năng phải vào hàng đợi xác thực — cùng luật với
+        // UserSkillsController (create/update/submit-evidence); nếu bỏ sót, kỹ năng
+        // kẹt ở SelfDeclared và không bao giờ xuất hiện trong queue của cố vấn.
+        userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
+        userSkill.RejectionReason = null;
         userSkill.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -195,6 +205,11 @@ public sealed partial class StorageController(
             return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
         }
 
+        if (userSkill.IsVerified)
+        {
+            return Conflict(new { message = "Kỹ năng đã được xác minh, không thể nộp minh chứng mới." });
+        }
+
         var objectName = BuildUserObjectName(userId, "evidence", request.FileName ?? sourceUrl.Segments.LastOrDefault(), null);
         var result = await storageService.ImportFromUrlAsync(
             sourceUrl,
@@ -205,6 +220,9 @@ public sealed partial class StorageController(
 
         userSkill.EvidenceUrl = result.ObjectName;
         userSkill.EvidenceType = result.ContentType;
+        // Cùng luật auto-transition PendingVerification như luồng upload file ở trên.
+        userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
+        userSkill.RejectionReason = null;
         userSkill.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
 
@@ -275,16 +293,14 @@ public sealed partial class StorageController(
         [FromQuery] string objectName,
         CancellationToken cancellationToken)
     {
+        var normalizedObjectName = NormalizeObjectName(objectName);
         var userId = GetCurrentUserId();
-        if (!IsUserObject(userId, objectName)
-            && !User.IsInRole(UserRoles.Admin)
-            && !User.IsInRole(UserRoles.AcademicCounselor)
-            && !User.IsInRole(UserRoles.IndustryMentor))
+        if (!await CanReadUserObjectAsync(userId, normalizedObjectName, cancellationToken))
         {
             return Forbid();
         }
 
-        return await DownloadObject(objectName, cancellationToken);
+        return await DownloadObject(normalizedObjectName, cancellationToken);
     }
 
     [Authorize]
@@ -293,18 +309,16 @@ public sealed partial class StorageController(
         [FromQuery] string objectName,
         CancellationToken cancellationToken)
     {
+        var normalizedObjectName = NormalizeObjectName(objectName);
         var userId = GetCurrentUserId();
-        if (!IsUserObject(userId, objectName)
-            && !User.IsInRole(UserRoles.Admin)
-            && !User.IsInRole(UserRoles.AcademicCounselor)
-            && !User.IsInRole(UserRoles.IndustryMentor))
+        if (!await CanReadUserObjectAsync(userId, normalizedObjectName, cancellationToken))
         {
             return Forbid();
         }
 
         var duration = TimeSpan.FromMinutes(Math.Clamp(options.SignedUrlMinutes, 1, 60));
-        var url = await storageService.CreateSignedReadUrlAsync(objectName, duration, cancellationToken);
-        return Ok(new SignedUrlResponse(objectName, url, DateTimeOffset.UtcNow.Add(duration)));
+        var url = await storageService.CreateSignedReadUrlAsync(normalizedObjectName, duration, cancellationToken);
+        return Ok(new SignedUrlResponse(normalizedObjectName, url, DateTimeOffset.UtcNow.Add(duration)));
     }
 
     [Authorize]
@@ -314,12 +328,12 @@ public sealed partial class StorageController(
         CancellationToken cancellationToken)
     {
         var resource = await GetReadableLearningResource(resourceId, cancellationToken);
-        if (resource?.StorageObjectName is null)
+        if (resource is null || !LearningResourceFiles.IsStoredFile(resource.StorageObjectName))
         {
             return NotFound(new { message = "Không tìm thấy tệp tài nguyên học tập." });
         }
 
-        return await DownloadObject(resource.StorageObjectName, cancellationToken);
+        return await DownloadObject(resource.StorageObjectName!, cancellationToken);
     }
 
     [Authorize]
@@ -329,14 +343,14 @@ public sealed partial class StorageController(
         CancellationToken cancellationToken)
     {
         var resource = await GetReadableLearningResource(resourceId, cancellationToken);
-        if (resource?.StorageObjectName is null)
+        if (resource is null || !LearningResourceFiles.IsStoredFile(resource.StorageObjectName))
         {
             return NotFound(new { message = "Không tìm thấy tệp tài nguyên học tập." });
         }
 
         var duration = TimeSpan.FromMinutes(Math.Clamp(options.SignedUrlMinutes, 1, 60));
-        var url = await storageService.CreateSignedReadUrlAsync(resource.StorageObjectName, duration, cancellationToken);
-        return Ok(new SignedUrlResponse(resource.StorageObjectName, url, DateTimeOffset.UtcNow.Add(duration)));
+        var url = await storageService.CreateSignedReadUrlAsync(resource.StorageObjectName!, duration, cancellationToken);
+        return Ok(new SignedUrlResponse(resource.StorageObjectName!, url, DateTimeOffset.UtcNow.Add(duration)));
     }
 
     [HttpGet("public/portfolio-projects/{projectId:guid}/image")]
@@ -556,6 +570,107 @@ public sealed partial class StorageController(
         return !string.IsNullOrWhiteSpace(objectName)
             && !objectName.Contains("..", StringComparison.Ordinal)
             && objectName.StartsWith($"users/{userId}/", StringComparison.Ordinal);
+    }
+
+    // Reviewer chỉ được đọc file của sinh viên có quan hệ thực với mình (assignment
+    // Active hoặc review request), không phải mọi object trong bucket theo role —
+    // nếu không, bất kỳ mentor/counselor nào biết objectName đều tải được CV/minh
+    // chứng của sinh viên không liên quan.
+    private async Task<bool> CanReadUserObjectAsync(
+        Guid currentUserId,
+        string objectName,
+        CancellationToken cancellationToken)
+    {
+        if (IsUserObject(currentUserId, objectName))
+        {
+            return true;
+        }
+
+        if (User.IsInRole(UserRoles.Admin))
+        {
+            return true;
+        }
+
+        var ownerId = TryGetObjectOwnerId(objectName);
+        if (ownerId is null)
+        {
+            return false;
+        }
+
+        if (User.IsInRole(UserRoles.AcademicCounselor)
+            && await dbContext.CounselorAssignments.AnyAsync(
+                assignment => assignment.CounselorId == currentUserId
+                    && assignment.StudentId == ownerId
+                    && assignment.Status == "Active",
+                cancellationToken))
+        {
+            return true;
+        }
+
+        if (User.IsInRole(UserRoles.AcademicCounselor) || User.IsInRole(UserRoles.IndustryMentor))
+        {
+            if (await dbContext.RoadmapNodeReviewRequests.AnyAsync(
+                request => request.ReviewerId == currentUserId && request.StudentId == ownerId,
+                cancellationToken))
+            {
+                return true;
+            }
+        }
+
+        // Mentor review portfolio: IndustryMentorController cho mentor xem hồ sơ/CV/kỹ năng
+        // của mọi sinh viên đã publish portfolio (review-queue) — quyền đọc file phải khớp,
+        // nếu không mentor thấy metadata nhưng bấm xem CV/minh chứng là 403.
+        if (User.IsInRole(UserRoles.IndustryMentor))
+        {
+            return await dbContext.Portfolios.AnyAsync(
+                portfolio => portfolio.UserId == ownerId && portfolio.IsPublished,
+                cancellationToken);
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Chuẩn hoá objectName: dữ liệu cũ có thể lưu nguyên download path
+    /// ("/api/storage/download?objectName=users%2F...") thay vì object name thô —
+    /// bóc query ra để authorization lẫn ký URL hoạt động với cả hai dạng.
+    /// </summary>
+    private static string NormalizeObjectName(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName) || !objectName.Contains("objectName=", StringComparison.OrdinalIgnoreCase))
+        {
+            return objectName;
+        }
+
+        var queryIndex = objectName.IndexOf('?', StringComparison.Ordinal);
+        var query = queryIndex >= 0 ? objectName[(queryIndex + 1)..] : objectName;
+        foreach (var pair in query.Split('&'))
+        {
+            var separator = pair.IndexOf('=', StringComparison.Ordinal);
+            if (separator > 0
+                && pair[..separator].Equals("objectName", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = Uri.UnescapeDataString(pair[(separator + 1)..]);
+                return string.IsNullOrWhiteSpace(value) ? objectName : value;
+            }
+        }
+
+        return objectName;
+    }
+
+    private static Guid? TryGetObjectOwnerId(string objectName)
+    {
+        if (string.IsNullOrWhiteSpace(objectName)
+            || objectName.Contains("..", StringComparison.Ordinal)
+            || !objectName.StartsWith("users/", StringComparison.Ordinal))
+        {
+            return null;
+        }
+
+        var segments = objectName.Split('/');
+        return segments.Length > 1 && Guid.TryParse(segments[1], out var ownerId)
+            ? ownerId
+            : null;
     }
 
     private static Uri ValidateSourceUrl(string? value)

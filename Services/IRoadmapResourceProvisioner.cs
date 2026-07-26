@@ -9,7 +9,14 @@ namespace SWP_BE.Services;
 /// <param name="SkillId">Skill gắn với node (nếu có) để tái sử dụng tài nguyên theo kỹ năng.</param>
 /// <param name="Topic">Từ khóa chủ đề dùng để sinh link tài nguyên (thường là tên kỹ năng).</param>
 /// <param name="ExistingCount">Số tài nguyên hiện có của node.</param>
-public sealed record NodeResourceContext(Guid NodeId, Guid? SkillId, string Topic, int ExistingCount);
+/// <param name="TargetDifficulty">Cấp độ node đang giảng dạy (Beginner/Intermediate/Advanced/Expert)
+/// để tài nguyên auto-sinh khớp level thay vì gán cứng Beginner; null nếu không xác định.</param>
+public sealed record NodeResourceContext(
+    Guid NodeId,
+    Guid? SkillId,
+    string Topic,
+    int ExistingCount,
+    string? TargetDifficulty = null);
 
 /// <summary>
 /// Đảm bảo mỗi technical node có tối thiểu N tài nguyên học tập (FR2.3 — ít nhất 2 link).

@@ -701,9 +701,10 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             resource.Skill?.Name,
             resource.Title,
             resource.Url,
-            resource.StorageObjectName is null ? "Link" : "File",
+            LearningResourceFiles.SourceType(resource.StorageObjectName),
             resource.ContentType,
             resource.FileSize,
+            LearningResourceFiles.GetFileName(resource.StorageObjectName),
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
@@ -990,6 +991,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         {
             return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
         }
+        request.Status = "Rejected";
         request.RejectionReason = requestBody.RejectionReason.Trim();
         request.UpdatedAt = DateTimeOffset.UtcNow;
 

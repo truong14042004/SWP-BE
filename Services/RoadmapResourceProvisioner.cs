@@ -6,8 +6,14 @@ namespace SWP_BE.Services;
 
 public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadmapResourceProvisioner
 {
-    // Tài nguyên auto-sinh được gắn nhãn để phân biệt với tài nguyên do admin nhập.
-    private const string AutoResourceMarker = "auto:";
+    // Nhãn cũ trong StorageObjectName của tài nguyên auto-sinh (dữ liệu legacy).
+    // Không dùng cho bản ghi mới nữa: StorageObjectName != null làm DTO trả
+    // SourceType = "File" và FE gọi download GCS với object không tồn tại.
+    private const string LegacyAutoResourceMarker = "auto:";
+
+    // Tài nguyên auto-sinh nhận diện bằng chính URL curated (chỉ provisioner sinh dạng này).
+    private const string AutoYoutubePrefix = "https://www.youtube.com/results?search_query=";
+    private const string AutoDocsPrefix = "https://www.google.com/search?q=";
 
     public async Task<IReadOnlyDictionary<Guid, IReadOnlyList<Guid>>> EnsureMinimumResourcesAsync(
         IReadOnlyList<NodeResourceContext> nodes,
@@ -25,8 +31,10 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
         // khi nhiều node cùng một chủ đề hoặc khi regenerate roadmap. Dùng GroupBy thay cho
         // ToDictionary để an toàn nếu lỡ tồn tại 2 bản ghi auto cùng Url (vd 2 request đồng thời).
         var existingAuto = (await dbContext.LearningResources
-            .Where(resource => resource.StorageObjectName != null
-                && resource.StorageObjectName.StartsWith(AutoResourceMarker))
+            .Where(resource => (resource.StorageObjectName != null
+                    && resource.StorageObjectName.StartsWith(LegacyAutoResourceMarker))
+                || resource.Url.StartsWith(AutoYoutubePrefix)
+                || resource.Url.StartsWith(AutoDocsPrefix))
             .Select(resource => new { resource.Url, resource.Id })
             .ToListAsync(cancellationToken))
             .GroupBy(resource => resource.Url, StringComparer.OrdinalIgnoreCase)
@@ -44,7 +52,7 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
             }
 
             var topic = NormalizeTopic(node.Topic);
-            var candidates = BuildCuratedResources(topic);
+            var candidates = BuildCuratedResources(topic, node.TargetDifficulty);
             var assigned = new List<Guid>();
 
             foreach (var candidate in candidates)
@@ -74,10 +82,11 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
                     SkillId = null,
                     Title = candidate.Title,
                     Url = candidate.Url,
-                    // Đánh dấu nguồn gốc auto-sinh; không phải file tải lên.
-                    StorageObjectName = AutoResourceMarker + candidate.Kind,
+                    // Đây là link ngoài, không phải file tải lên — StorageObjectName phải null
+                    // để DTO trả SourceType = "Link" (marker cũ khiến FE gọi download GCS lỗi).
+                    StorageObjectName = null,
                     ResourceType = candidate.ResourceType,
-                    Difficulty = "Beginner",
+                    Difficulty = candidate.Difficulty,
                     EstimatedHours = candidate.EstimatedHours,
                     LessonNumber = 1,
                     IsActive = true,
@@ -130,25 +139,31 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
         return topic;
     }
 
-    private static IReadOnlyList<CuratedResource> BuildCuratedResources(string topic)
+    private static IReadOnlyList<CuratedResource> BuildCuratedResources(string topic, string? targetDifficulty)
     {
-        var encoded = Uri.EscapeDataString(topic + " tutorial");
-        var encodedDocs = Uri.EscapeDataString(topic + " documentation");
+        // Đưa cấp độ vào từ khóa tìm kiếm: link theo level khác nhau có URL khác nhau,
+        // vừa giữ idempotency theo Url vừa cho kết quả đúng trình độ node đang dạy.
+        var difficulty = SkillLevels.RankToDifficulty(SkillLevels.DifficultyRank(targetDifficulty));
+        var levelKeyword = difficulty?.ToLowerInvariant();
+        var searchTopic = levelKeyword is null ? topic : $"{topic} {levelKeyword}";
+        var encoded = Uri.EscapeDataString(searchTopic + " tutorial");
+        var encodedDocs = Uri.EscapeDataString(searchTopic + " documentation");
+        var titleSuffix = difficulty is null ? string.Empty : $" ({difficulty})";
 
         // Thứ tự ưu tiên: 1 video (YouTube) + 1 documentation, đúng tinh thần FR2.3.
         return
         [
             new CuratedResource(
-                $"Video hướng dẫn: {topic}",
-                $"https://www.youtube.com/results?search_query={encoded}",
+                $"Video hướng dẫn: {topic}{titleSuffix}",
+                $"{AutoYoutubePrefix}{encoded}",
                 "Video",
-                "youtube",
+                difficulty ?? "Beginner",
                 4),
             new CuratedResource(
-                $"Tài liệu tham khảo: {topic}",
-                $"https://www.google.com/search?q={encodedDocs}",
+                $"Tài liệu tham khảo: {topic}{titleSuffix}",
+                $"{AutoDocsPrefix}{encodedDocs}",
                 "Documentation",
-                "docs",
+                difficulty ?? "Beginner",
                 4)
         ];
     }
@@ -157,6 +172,6 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
         string Title,
         string Url,
         string ResourceType,
-        string Kind,
+        string Difficulty,
         int EstimatedHours);
 }

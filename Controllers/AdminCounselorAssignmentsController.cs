@@ -10,13 +10,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize(Roles = UserRoles.Admin)]
 [Route("api/admin/counselor-assignments")]
-public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) : ControllerBase
+public sealed class AdminCounselorAssignmentsController(
+    AppDbContext dbContext,
+    IAuditLogService auditLog) : ControllerBase
 {
     // GET /api/admin/counselor-assignments
     // Lấy toàn bộ danh sách phân công cố vấn - sinh viên
@@ -130,6 +133,17 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
         dbContext.CounselorAssignments.Add(assignment);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await auditLog.LogAsync(
+            actorUserId: adminId,
+            actorRole: UserRoles.Admin,
+            action: "CounselorAssigned",
+            entityType: "CounselorAssignment",
+            entityId: assignment.Id,
+            targetUserId: assignment.StudentId,
+            summary: "Phân công cố vấn cho sinh viên.",
+            metadata: new { assignment.CounselorId, assignment.StudentId },
+            cancellationToken: cancellationToken);
+
         // Load navigation properties for response
         await dbContext.Entry(assignment).Reference(a => a.Counselor).LoadAsync(cancellationToken);
         await dbContext.Entry(assignment).Reference(a => a.Student).LoadAsync(cancellationToken);
@@ -154,6 +168,17 @@ public sealed class AdminCounselorAssignmentsController(AppDbContext dbContext) 
         assignment.Status = "Inactive";
         assignment.UpdatedAt = DateTimeOffset.UtcNow;
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: GetCurrentUserId(),
+            actorRole: UserRoles.Admin,
+            action: "CounselorAssignmentRevoked",
+            entityType: "CounselorAssignment",
+            entityId: assignment.Id,
+            targetUserId: assignment.StudentId,
+            summary: "Gỡ phân công cố vấn khỏi sinh viên.",
+            metadata: new { assignment.CounselorId, assignment.StudentId },
+            cancellationToken: cancellationToken);
 
         return NoContent();
     }

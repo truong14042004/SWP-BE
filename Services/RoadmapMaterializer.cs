@@ -229,13 +229,30 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         var existingResourceIdsByNode = nodeResources
             .GroupBy(item => item.RoadmapNodeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToHashSet());
+        // Cấp độ node đang dạy = độ khó thấp nhất trong các tài nguyên đã gắn,
+        // để tài nguyên auto-sinh khớp level thay vì mặc định Beginner.
+        var difficultyByResourceId = resources.ToDictionary(item => item.Id, item => item.Difficulty);
+        var resourceIdsByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToList());
+
+        string? NodeTargetDifficulty(Guid nodeId)
+        {
+            var knownRanks = resourceIdsByNode.GetValueOrDefault(nodeId, [])
+                .Select(resourceId => SkillLevels.DifficultyRank(difficultyByResourceId.GetValueOrDefault(resourceId)))
+                .Where(rank => rank != SkillLevels.UnknownDifficultyRank)
+                .ToList();
+            return knownRanks.Count > 0 ? SkillLevels.RankToDifficulty(knownRanks.Min()) : null;
+        }
+
         var topUpContexts = nodes
             .Where(node => !node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
             .Select(node => new NodeResourceContext(
                 node.Id,
                 node.SkillId,
                 node.Title,
-                existingCountByNode.GetValueOrDefault(node.Id, 0)))
+                existingCountByNode.GetValueOrDefault(node.Id, 0),
+                NodeTargetDifficulty(node.Id)))
             .ToList();
         var topUp = await _resourceProvisioner.EnsureMinimumResourcesAsync(
             topUpContexts, 2, now, cancellationToken);
@@ -375,7 +392,10 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
                 }
             }
 
-            var safeLevel = level < 0 ? 0 : level;
+            // Clamp cả hai đầu: cây node do AI sinh không giới hạn độ sâu, mà DB có
+            // check constraint CK_roadmap_nodes_Level (0..8) — lồng quá sâu sẽ làm
+            // vỡ transaction duyệt lộ trình của cố vấn.
+            var safeLevel = Math.Clamp(level, 0, 8);
             var priority = item.Priority switch
             {
                 null => 5,
@@ -433,21 +453,7 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         }
     }
 
-    private static int DifficultyRank(string? difficulty) => difficulty?.Trim().ToLowerInvariant() switch
-    {
-        "beginner" or "basic" or "fundamental" or "fundamentals" or "cơ bản" => 1,
-        "intermediate" or "trung cấp" => 2,
-        "advanced" or "nâng cao" => 3,
-        "expert" => 4,
-        _ => 5
-    };
+    private static int DifficultyRank(string? difficulty) => SkillLevels.DifficultyRank(difficulty);
 
-    private static int LevelRank(string? level) => level?.Trim().ToLowerInvariant() switch
-    {
-        "verified" => 4,
-        "advanced" => 3,
-        "intermediate" => 2,
-        "beginner" => 1,
-        _ => 0
-    };
+    private static int LevelRank(string? level) => SkillLevels.LevelRank(level);
 }

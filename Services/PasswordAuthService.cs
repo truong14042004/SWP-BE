@@ -185,6 +185,10 @@ public sealed class PasswordAuthService(
             user.Username = pendingRegistration.Username;
             user.FullName = pendingRegistration.FullName;
             user.PasswordHash = pendingRegistration.PasswordHash;
+            // Đăng ký tự phục vụ chỉ tạo ra Student. Không gán lại Role ở đây thì một
+            // tài khoản đặc quyền (Admin/Mentor/Counselor) từng bị vô hiệu hóa sẽ được
+            // khôi phục NGUYÊN quyền cũ bởi bất kỳ ai đăng ký lại bằng email đó.
+            user.Role = UserRoles.Student;
             user.IsActive = true;
             user.IsEmailVerified = true;
             user.EmailVerifiedAt = now;

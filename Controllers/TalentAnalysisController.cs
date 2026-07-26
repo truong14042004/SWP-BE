@@ -33,9 +33,13 @@ public sealed class TalentAnalysisController(
         {
             var result = await latentTalentAiService.AnalyzeTalentFromCommitsAsync(request.RepoUrl, cancellationToken);
 
-            // Lưu hoặc cập nhật hồ sơ tài năng của học viên
+            // Lưu hoặc cập nhật hồ sơ tài năng của học viên.
+            // Lấy bản mới nhất thay vì SingleOrDefault: dữ liệu cũ có thể đã bị nhân bản
+            // (analyze-readme trước đây chèn thêm dòng mỗi lần chạy) và SingleOrDefault
+            // sẽ ném lỗi trên chính những sinh viên đó.
             var profile = await dbContext.StudentTalentProfiles
-                .SingleOrDefaultAsync(p => p.StudentId == userId, cancellationToken);
+                .OrderByDescending(p => p.AnalyzedAt)
+                .FirstOrDefaultAsync(p => p.StudentId == userId, cancellationToken);
 
             if (profile is null)
             {
@@ -89,7 +93,8 @@ public sealed class TalentAnalysisController(
 
         var profile = await dbContext.StudentTalentProfiles
             .AsNoTracking()
-            .SingleOrDefaultAsync(p => p.StudentId == userId, cancellationToken);
+            .OrderByDescending(p => p.AnalyzedAt)
+            .FirstOrDefaultAsync(p => p.StudentId == userId, cancellationToken);
 
         if (profile is null)
         {

@@ -118,7 +118,10 @@ Hãy sinh các Đề xuất cập nhật (JSON array) dựa trên phân tích c�
                 else
                 {
                     // Nếu AI đề xuất thêm skill mới nhưng không trả về ID đúng, ta cố gắng map bằng Tên
-                    var existingSkill = await dbContext.Skills.FirstOrDefaultAsync(s => s.Name.ToLower() == p.SkillName.ToLower(), cancellationToken);
+                    if (string.IsNullOrWhiteSpace(p.SkillName))
+                        continue; // Không có cả ID lẫn tên thì không thể map — bỏ qua
+                    var skillNameLower = p.SkillName.Trim().ToLower();
+                    var existingSkill = await dbContext.Skills.FirstOrDefaultAsync(s => s.Name.ToLower() == skillNameLower, cancellationToken);
                     if (existingSkill != null)
                         finalSkillId = existingSkill.Id;
                     else

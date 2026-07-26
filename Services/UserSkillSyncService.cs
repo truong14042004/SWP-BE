@@ -69,18 +69,20 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
             }
 
             existing.VerificationStatus = UserSkillVerificationStatus.Verified;
+            existing.RejectionReason = null;
 
             // Chỉ nâng VerifiedLevel lên mức mới nếu cao hơn mức đã verify hiện tại.
             // Nếu VerifiedLevel đang null, dùng resolvedLevel làm baseline (không dùng
             // Level tự khai vì mentor chưa xác nhận mức đó).
             var currentVerifiedRank = LevelRank(existing.VerifiedLevel);
-            if (LevelRank(resolvedLevel) > currentVerifiedRank)
+            if (LevelRank(resolvedLevel) > currentVerifiedRank
+                || string.IsNullOrWhiteSpace(existing.VerifiedLevel))
             {
                 existing.VerifiedLevel = resolvedLevel;
-            }
-            else if (string.IsNullOrWhiteSpace(existing.VerifiedLevel))
-            {
-                existing.VerifiedLevel = resolvedLevel;
+                // Level mới thì người/thời điểm xác minh cũng phải là của lần verify này,
+                // không giữ audit của lần verify cũ cho một mức level khác.
+                existing.VerifiedByUserId = verifierId;
+                existing.VerifiedAt = now;
             }
 
             existing.UpdatedAt = now;
@@ -128,28 +130,7 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
             : normalized;
     }
 
-    private static int LevelRank(string? level) =>
-        level?.Trim().ToLowerInvariant() switch
-        {
-            "verified" => 4,
-            "advanced" => 3,
-            "intermediate" => 2,
-            "beginner" => 1,
-            _ => 0
-        };
+    private static int LevelRank(string? level) => SkillLevels.LevelRank(level);
 
-    private static string? DifficultyToLevel(string? difficulty)
-    {
-        if (string.IsNullOrWhiteSpace(difficulty))
-            return null;
-
-        return difficulty.Trim().ToLowerInvariant() switch
-        {
-            "beginner" or "basic" or "fundamental" or "fundamentals" or "cơ bản" => "Beginner",
-            "intermediate" or "trung cấp" => "Intermediate",
-            "advanced" or "nâng cao" => "Advanced",
-            "expert" => "Advanced",
-            _ => null
-        };
-    }
+    private static string? DifficultyToLevel(string? difficulty) => SkillLevels.DifficultyToLevel(difficulty);
 }
