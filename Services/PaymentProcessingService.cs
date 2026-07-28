@@ -12,6 +12,14 @@ public sealed class PaymentProcessingService(AppDbContext dbContext) : IPaymentP
         string? providerSubscriptionId,
         CancellationToken cancellationToken)
     {
+        // Idempotency theo trạng thái đơn (không chỉ dựa vào dedupe EventId của
+        // webhook): xử lý lại một đơn đã Paid sẽ cộng thêm một chu kỳ miễn phí
+        // ở nhánh gia hạn existingSubscription.
+        if (payment.Status == "Paid")
+        {
+            return;
+        }
+
         payment.Status = "Paid";
         payment.PaidAt ??= paidAt;
         payment.UpdatedAt = paidAt;
@@ -190,6 +198,14 @@ public sealed class PaymentProcessingService(AppDbContext dbContext) : IPaymentP
 
     public void MarkFailed(PaymentTransaction payment, DateTimeOffset failedAt)
     {
+        // Đơn ĐÃ thanh toán thành công là bất biến: PayOS còn gửi các sự kiện
+        // cancel/expire (EventId khác nên không bị dedupe) sau khi đã success —
+        // nếu không guard, webhook đến muộn sẽ huỷ gói đang chạy của khách đã trả tiền.
+        if (payment.Status == "Paid")
+        {
+            return;
+        }
+
         payment.Status = "Failed";
         payment.UpdatedAt = failedAt;
 

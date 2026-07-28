@@ -669,6 +669,11 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.Property(node => node.NodeType).HasMaxLength(30).IsRequired();
             entity.Property(node => node.Status).HasMaxLength(30).HasDefaultValue("NotStarted").IsRequired();
             entity.Property(node => node.Level).HasDefaultValue(0);
+            // Trạng thái node trước đây chỉ được code bảo vệ (khác user_skills có CHECK) —
+            // chốt bằng ràng buộc DB để dữ liệu ngoài luồng không lọt vào.
+            entity.ToTable(t => t.HasCheckConstraint(
+                "CK_roadmap_nodes_Status",
+                "\"Status\" IN ('NotStarted','InProgress','Completed','NeedReview','Verified')"));
             entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_EstimatedHours", "\"EstimatedHours\" IS NULL OR \"EstimatedHours\" >= 0"));
             entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_Level", "\"Level\" >= 0 AND \"Level\" <= 8"));
             entity.ToTable(t => t.HasCheckConstraint("CK_roadmap_nodes_Priority", "\"Priority\" >= 1 AND \"Priority\" <= 5"));
@@ -718,6 +723,12 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
             entity.HasKey(resource => resource.Id);
             entity.HasIndex(resource => resource.SkillId);
             entity.HasIndex(resource => resource.IsActive);
+            // Tài nguyên auto-sinh (FR2.3) get-or-create theo Url — unique index bán phần
+            // chặn bản trùng khi 2 request generate đồng thời hoặc sau soft-delete.
+            entity.HasIndex(resource => resource.Url)
+                .IsUnique()
+                .HasDatabaseName("IX_learning_resources_auto_url")
+                .HasFilter("\"IsActive\" AND (\"Url\" LIKE 'https://www.youtube.com/results?search_query=%' OR \"Url\" LIKE 'https://www.google.com/search?q=%')");
             entity.Property(resource => resource.Title).HasMaxLength(200).IsRequired();
             entity.Property(resource => resource.Url).HasMaxLength(1024).IsRequired();
             entity.Property(resource => resource.StorageObjectName).HasMaxLength(1024);
@@ -1172,6 +1183,13 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
                 .WithMany()
                 .HasForeignKey(item => item.LearningResourceId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<StudentTalentProfile>(entity =>
+        {
+            // Mỗi sinh viên chỉ có MỘT hồ sơ talent — upsert ở controller không chống
+            // được 2 request phân tích đồng thời nếu thiếu ràng buộc DB.
+            entity.HasIndex(profile => profile.StudentId).IsUnique();
         });
 
         modelBuilder.Entity<Notification>(entity =>

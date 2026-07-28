@@ -177,7 +177,7 @@ public sealed partial class StorageController(
         var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
 
         userSkill.EvidenceUrl = result.ObjectName;
-        userSkill.EvidenceType = result.ContentType;
+        userSkill.EvidenceType = MapEvidenceTypeLabel(result.ContentType);
         // Có minh chứng mới thì kỹ năng phải vào hàng đợi xác thực — cùng luật với
         // UserSkillsController (create/update/submit-evidence); nếu bỏ sót, kỹ năng
         // kẹt ở SelfDeclared và không bao giờ xuất hiện trong queue của cố vấn.
@@ -219,7 +219,7 @@ public sealed partial class StorageController(
             cancellationToken);
 
         userSkill.EvidenceUrl = result.ObjectName;
-        userSkill.EvidenceType = result.ContentType;
+        userSkill.EvidenceType = MapEvidenceTypeLabel(result.ContentType);
         // Cùng luật auto-transition PendingVerification như luồng upload file ở trên.
         userSkill.VerificationStatus = UserSkillVerificationStatus.PendingVerification;
         userSkill.RejectionReason = null;
@@ -429,7 +429,8 @@ public sealed partial class StorageController(
     private async Task<IActionResult> DownloadObject(string objectName, CancellationToken cancellationToken)
     {
         var result = await storageService.DownloadAsync(objectName, cancellationToken);
-        var fileName = Path.GetFileName(objectName);
+        // Trả tên file gốc thay vì tên bị mangle "{timestamp}-{guid}-{tên}" trên bucket.
+        var fileName = LearningResourceFiles.GetFileName(objectName) ?? Path.GetFileName(objectName);
         return File(result.Content, result.ContentType, fileName, enableRangeProcessing: true);
     }
 
@@ -461,13 +462,47 @@ public sealed partial class StorageController(
         Guid resourceId,
         CancellationToken cancellationToken)
     {
-        var query = dbContext.LearningResources.AsNoTracking().Where(resource => resource.Id == resourceId);
-        if (!User.IsInRole(UserRoles.Admin))
+        var resource = await dbContext.LearningResources
+            .AsNoTracking()
+            .SingleOrDefaultAsync(item => item.Id == resourceId, cancellationToken);
+
+        if (resource is null || resource.IsActive)
         {
-            query = query.Where(resource => resource.IsActive);
+            return resource;
         }
 
-        return await query.SingleOrDefaultAsync(cancellationToken);
+        // Tài nguyên đã xoá mềm (mentor gỡ khỏi danh mục nhưng còn roadmap tham chiếu):
+        // Admin/Mentor (quản trị danh mục) vẫn đọc được; sinh viên đọc được khi roadmap
+        // của chính mình còn chứa nó — soft-delete sinh ra để bảo toàn lộ trình đang học,
+        // chặn cứng IsActive sẽ làm node hiện nút "Xem/Tải" nhưng luôn 404.
+        if (User.IsInRole(UserRoles.Admin) || User.IsInRole(UserRoles.IndustryMentor))
+        {
+            return resource;
+        }
+
+        var userId = GetCurrentUserId();
+
+        // Counselor: đọc được khi roadmap của sinh viên mình đang phụ trách tham chiếu nó.
+        if (User.IsInRole(UserRoles.AcademicCounselor))
+        {
+            var referencedByAssignedStudent = await dbContext.RoadmapNodeResources.AnyAsync(
+                item => item.LearningResourceId == resourceId
+                    && dbContext.CounselorAssignments.Any(assignment =>
+                        assignment.CounselorId == userId
+                        && assignment.StudentId == item.RoadmapNode.Roadmap.UserId
+                        && assignment.Status == "Active"),
+                cancellationToken);
+            return referencedByAssignedStudent ? resource : null;
+        }
+
+        var referencedByOwnRoadmap = await dbContext.RoadmapNodeResources.AnyAsync(
+                item => item.LearningResourceId == resourceId && item.RoadmapNode.Roadmap.UserId == userId,
+                cancellationToken)
+            || await dbContext.RoadmapNodes.AnyAsync(
+                item => item.LearningResourceId == resourceId && item.Roadmap.UserId == userId,
+                cancellationToken);
+
+        return referencedByOwnRoadmap ? resource : null;
     }
 
     private StorageFileResponse ToResponse(StoredFileResult result)
@@ -672,6 +707,18 @@ public sealed partial class StorageController(
             ? ownerId
             : null;
     }
+
+    /// <summary>
+    /// EvidenceType là nhãn nghiệp vụ (Image/Document/ZipArchive), không phải MIME —
+    /// lưu thẳng "image/png" sẽ hiển thị thô trong hàng đợi duyệt của cố vấn.
+    /// </summary>
+    private static string MapEvidenceTypeLabel(string? contentType) =>
+        contentType?.ToLowerInvariant() switch
+        {
+            "application/zip" or "application/x-zip-compressed" or "application/x-compressed" => "ZipArchive",
+            var value when value?.StartsWith("image/", StringComparison.Ordinal) == true => "Image",
+            _ => "Document"
+        };
 
     private static Uri ValidateSourceUrl(string? value)
     {

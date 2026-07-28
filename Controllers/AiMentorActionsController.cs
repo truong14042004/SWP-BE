@@ -5,13 +5,16 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
 [ApiController]
 [Authorize]
 [Route("api/ai-mentor")]
-public sealed class AiMentorActionsController(AppDbContext dbContext) : ControllerBase
+public sealed class AiMentorActionsController(
+    AppDbContext dbContext,
+    INotificationService notificationService) : ControllerBase
 {
     [Authorize(Roles = UserRoles.Student)]
     [HttpPost("apply-roadmap")]
@@ -83,6 +86,21 @@ public sealed class AiMentorActionsController(AppDbContext dbContext) : Controll
 
         dbContext.RoadmapApprovalRequests.Add(approvalRequest);
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        // Báo cố vấn có đề xuất chờ duyệt — không có notification thì counselor
+        // phải tự nhớ vào tab hàng đợi mới thấy.
+        var studentName = await dbContext.Users
+            .AsNoTracking()
+            .Where(user => user.Id == userId)
+            .Select(user => user.FullName)
+            .SingleOrDefaultAsync(cancellationToken);
+        await notificationService.SendNotificationAsync(
+            userId: counselorId.Value,
+            type: "RoadmapApprovalRequest",
+            title: "Có đề xuất lộ trình chờ duyệt",
+            message: $"{studentName ?? "Sinh viên"} vừa gửi một đề xuất lộ trình từ AI Mentor, đang chờ bạn duyệt.",
+            linkUrl: "#roadmap-approvals",
+            cancellationToken: cancellationToken);
 
         return Ok(new { requestId = approvalRequest.Id });
     }

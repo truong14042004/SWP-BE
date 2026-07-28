@@ -112,7 +112,9 @@ public sealed class PayOsController(
             // Phòng vệ chiều sâu: chữ ký đã được verify ở trên, nhưng vẫn phải đối chiếu
             // số tiền — không có bước này thì một payload báo thành công với số tiền lệch
             // vẫn kích hoạt gói đầy đủ quyền lợi.
-            var expectedAmount = decimal.ToInt32(decimal.Round(payment.Amount, 0, MidpointRounding.AwayFromZero));
+            // So sánh bằng decimal (không ToInt32 — số tiền > int.MaxValue sẽ ném
+            // OverflowException và webhook thật bị nuốt).
+            var expectedAmount = decimal.Round(payment.Amount, 0, MidpointRounding.AwayFromZero);
             if (webhookData.Amount != expectedAmount)
             {
                 paymentProcessingService.MarkFailed(payment, now);
@@ -121,6 +123,18 @@ public sealed class PayOsController(
                     webhookData.OrderCode,
                     webhookData.Amount,
                     expectedAmount);
+            }
+            else if (!string.IsNullOrWhiteSpace(webhookData.Currency)
+                && !string.IsNullOrWhiteSpace(payment.Currency)
+                && !webhookData.Currency.Equals(payment.Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                // Cùng con số nhưng khác đơn vị tiền tệ vẫn là lệch tiền.
+                paymentProcessingService.MarkFailed(payment, now);
+                logger.LogWarning(
+                    "Webhook PayOS báo thành công nhưng đơn vị tiền tệ không khớp cho đơn {OrderCode}: nhận {Received}, cần {Expected}.",
+                    webhookData.OrderCode,
+                    webhookData.Currency,
+                    payment.Currency);
             }
             else
             {

@@ -31,10 +31,11 @@ public sealed class RoadmapResourceProvisioner(AppDbContext dbContext) : IRoadma
         // khi nhiều node cùng một chủ đề hoặc khi regenerate roadmap. Dùng GroupBy thay cho
         // ToDictionary để an toàn nếu lỡ tồn tại 2 bản ghi auto cùng Url (vd 2 request đồng thời).
         var existingAuto = (await dbContext.LearningResources
-            .Where(resource => (resource.StorageObjectName != null
-                    && resource.StorageObjectName.StartsWith(LegacyAutoResourceMarker))
-                || resource.Url.StartsWith(AutoYoutubePrefix)
-                || resource.Url.StartsWith(AutoDocsPrefix))
+            .Where(resource => resource.IsActive
+                && ((resource.StorageObjectName != null
+                        && resource.StorageObjectName.StartsWith(LegacyAutoResourceMarker))
+                    || resource.Url.StartsWith(AutoYoutubePrefix)
+                    || resource.Url.StartsWith(AutoDocsPrefix)))
             .Select(resource => new { resource.Url, resource.Id })
             .ToListAsync(cancellationToken))
             .GroupBy(resource => resource.Url, StringComparer.OrdinalIgnoreCase)

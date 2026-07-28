@@ -50,11 +50,28 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
                 cancellationToken);
 
         // Ưu tiên level thực của node (Difficulty trên LearningResource) làm VerifiedLevel.
-        // Nếu node không có difficulty, fallback về RoleSkillRequirement.RequiredLevel.
+        // Nếu node không có difficulty, fallback về RoleSkillRequirement.RequiredLevel —
+        // nhưng CAP ở (verified hiện tại + 1): một lần verify chỉ tiến đúng một bậc,
+        // không được nhảy thẳng lên Advanced/Expert của requirement.
         var nodeLevel = DifficultyToLevel(nodeDifficulty);
-        var resolvedLevel = !string.IsNullOrWhiteSpace(nodeLevel)
-            ? nodeLevel
-            : await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
+        string resolvedLevel;
+        if (!string.IsNullOrWhiteSpace(nodeLevel))
+        {
+            resolvedLevel = nodeLevel!;
+        }
+        else
+        {
+            var requirementLevel = await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
+            var requirementRank = SkillLevels.LevelRank(requirementLevel);
+            if (requirementRank == 0)
+            {
+                // Chuỗi không nhận diện được (dữ liệu legacy/seed) -> mặc định Intermediate.
+                requirementRank = 2;
+            }
+
+            var capRank = Math.Clamp(SkillLevels.LevelRank(existing?.VerifiedLevel) + 1, 1, 4);
+            resolvedLevel = SkillLevels.RankToDifficulty(Math.Min(requirementRank, capRank))!;
+        }
 
         if (existing is not null)
         {
@@ -122,12 +139,9 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
             return "Intermediate";
         }
 
-        // Cấp độ hợp lệ của UserSkill: Beginner / Intermediate / Advanced.
-        // RoleSkillRequirement có thể là "Expert" -> ánh xạ xuống "Advanced".
-        var normalized = requiredLevel.Trim();
-        return normalized.Equals("Expert", StringComparison.OrdinalIgnoreCase)
-            ? "Advanced"
-            : normalized;
+        // Expert là cấp độ UserSkill hợp lệ — nếu ép xuống Advanced thì requirement
+        // mức Expert không bao giờ được thoả (rank 3 < 4 vĩnh viễn).
+        return requiredLevel.Trim();
     }
 
     private static int LevelRank(string? level) => SkillLevels.LevelRank(level);

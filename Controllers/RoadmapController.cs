@@ -127,7 +127,7 @@ public sealed class RoadmapController(
             .ToList();
 
         // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
-        nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
+        nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, userId, careerRole.Id, now, cancellationToken));
 
         dbContext.Roadmaps.Add(roadmap);
         dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
@@ -291,9 +291,13 @@ public sealed class RoadmapController(
             .Where(node => node.RoadmapId == id)
             .ToListAsync(cancellationToken);
 
+        // Cùng guard nhất quán như nhánh Title bên dưới: 2 node cùng SkillId mà
+        // trạng thái mâu thuẫn (roadmap AI có thể sinh vậy) thì bỏ qua, tránh
+        // "thăng cấp" theo thứ tự ngẫu nhiên của First().
         var existingSkillStatus = existingNodes
             .Where(n => n.SkillId is not null)
             .GroupBy(n => n.SkillId!.Value)
+            .Where(g => g.Select(n => n.Status).Distinct().Count() == 1)
             .ToDictionary(g => g.Key, g => g.First().Status);
 
         // Với node không có SkillId thì map trạng thái theo Title.
@@ -393,42 +397,42 @@ public sealed class RoadmapController(
             .Where(resource => relevantResourceIds.Contains(resource.Id))
             .ToDictionaryAsync(resource => resource.Id, resource => resource.Difficulty, cancellationToken);
 
-        static int? MinKnownRank(IEnumerable<int> ranks)
+        static int? MaxKnownRank(IEnumerable<int> ranks)
         {
             var known = ranks.Where(rank => rank != SkillLevels.UnknownDifficultyRank).ToList();
-            return known.Count > 0 ? known.Min() : null;
+            return known.Count > 0 ? known.Max() : null;
         }
 
         var oldResourceIdsByNodeId = oldNodeResources
             .GroupBy(item => item.RoadmapNodeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToList());
+        // MAX (không phải MIN): fallback của bộ chọn tài nguyên có thể gắn kèm tài
+        // liệu level thấp hơn — mức node cũ THỰC SỰ dạy là tài liệu cao nhất trên nó.
         var oldTaughtRankBySkill = existingNodes
             .Where(n => n.SkillId is not null && !n.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
             .GroupBy(n => n.SkillId!.Value)
             .ToDictionary(
                 group => group.Key,
-                group => MinKnownRank(group
+                group => MaxKnownRank(group
                     .SelectMany(n => oldResourceIdsByNodeId.GetValueOrDefault(n.Id, []))
                     .Select(resourceId => SkillLevels.DifficultyRank(difficultyByResourceId.GetValueOrDefault(resourceId)))));
 
+        // Level node MỚI dạy tính theo đúng công thức của bộ chọn tài nguyên:
+        // min(verified + 1, RequiredLevel), clamp về Expert. KHÔNG suy từ tài nguyên
+        // đã gắn — fallback của bộ chọn có thể trả tài liệu level thấp (vd chỉ có
+        // tài liệu Beginner cho node cần dạy Advanced), khiến MIN rank < verified
+        // và node giữ nguyên "Verified" oan (roadmap 100% nhưng gap vẫn thiếu).
         int NodeTargetRank(RoadmapNode node)
         {
-            var known = nodeInputByNodeId.TryGetValue(node.Id, out var input)
-                ? MinKnownRank(input.LearningResourceIds
-                    .Select(resourceId => SkillLevels.DifficultyRank(difficultyByResourceId.GetValueOrDefault(resourceId))))
-                : null;
-            if (known is not null)
-            {
-                return known.Value;
-            }
-
-            // Node không có tài nguyên gắn nhãn: theo thiết kế, node dạy level kế tiếp
-            // (verified + 1) nhưng không vượt RequiredLevel — nhờ cap này, node của kỹ
-            // năng đã đạt yêu cầu (báo cáo gap cũ) không bị hạ Verified oan.
             var verifiedRank = verifiedRankBySkill.GetValueOrDefault(node.SkillId!.Value);
             var requiredRank = requiredRankBySkill.GetValueOrDefault(node.SkillId.Value);
-            var fallback = verifiedRank + 1;
-            return requiredRank > 0 && fallback > requiredRank ? requiredRank : fallback;
+            var target = verifiedRank + 1;
+            if (requiredRank > 0 && target > requiredRank)
+            {
+                target = requiredRank;
+            }
+
+            return Math.Min(target, 4);
         }
 
         // Restore status for matching nodes in the new hierarchy
@@ -471,6 +475,7 @@ public sealed class RoadmapController(
         // Redirect review requests
         var requestsToDelete = new List<RoadmapNodeReviewRequest>();
         var requestsToAdd = new List<RoadmapNodeReviewRequest>();
+        var newRequestIdByAiSummaryId = new Dictionary<Guid, Guid>();
         foreach (var request in reviewRequests)
         {
             var oldNode = existingNodes.FirstOrDefault(n => n.Id == request.RoadmapNodeId);
@@ -481,17 +486,23 @@ public sealed class RoadmapController(
             }
 
             string key = oldNode.SkillId is not null ? $"skill_{oldNode.SkillId.Value}" : $"title_{oldNode.Title}";
+            // LUÔN giữ lại dòng request khi node còn map được — quota mentor review đếm
+            // theo số dòng Approved/Rejected/Pending, xoá dòng là "đúc lại" quota vô hạn
+            // và mất audit công sức reviewer. Node bị hạ cấp chỉ chuyển Pending -> Cancelled
+            // (hoàn quota, không treo yêu cầu trên node đã về NotStarted).
             if (newNodeMap.TryGetValue(key, out var newNodeId))
             {
-                requestsToDelete.Add(request);
-                requestsToAdd.Add(new RoadmapNodeReviewRequest
+                var redirectedStatus = downgradedNodeIds.Contains(newNodeId) && request.Status == "Pending"
+                    ? "Cancelled"
+                    : request.Status;
+                var redirectedRequest = new RoadmapNodeReviewRequest
                 {
                     Id = Guid.NewGuid(),
                     RoadmapNodeId = newNodeId,
                     StudentId = request.StudentId,
                     ReviewerId = request.ReviewerId,
                     ReviewerRole = request.ReviewerRole,
-                    Status = request.Status,
+                    Status = redirectedStatus,
                     StudentNote = request.StudentNote,
                     ReviewerNote = request.ReviewerNote,
                     EvidenceUrl = request.EvidenceUrl,
@@ -500,7 +511,17 @@ public sealed class RoadmapController(
                     RequestedAt = request.RequestedAt,
                     RespondedAt = request.RespondedAt,
                     AiSummaryId = request.AiSummaryId
-                });
+                };
+                requestsToDelete.Add(request);
+                requestsToAdd.Add(redirectedRequest);
+
+                // AiReviewSummary trỏ ngược về request qua ReviewRequestId — request
+                // được tái tạo với Id mới thì con trỏ ngược cũng phải cập nhật, nếu
+                // không nó treo lơ lửng trỏ tới Id đã bị xoá.
+                if (request.AiSummaryId is Guid aiSummaryId)
+                {
+                    newRequestIdByAiSummaryId[aiSummaryId] = redirectedRequest.Id;
+                }
             }
             else
             {
@@ -508,10 +529,44 @@ public sealed class RoadmapController(
             }
         }
 
+        if (newRequestIdByAiSummaryId.Count > 0)
+        {
+            var summaryIds = newRequestIdByAiSummaryId.Keys.ToList();
+            var summariesToRedirect = await dbContext.AiReviewSummaries
+                .Where(summary => summaryIds.Contains(summary.Id))
+                .ToListAsync(cancellationToken);
+            foreach (var summary in summariesToRedirect)
+            {
+                summary.ReviewRequestId = newRequestIdByAiSummaryId[summary.Id];
+            }
+        }
+
         // Redirect lesson progress
         var progressToDelete = new List<LessonProgress>();
         var progressToAdd = new List<LessonProgress>();
         var seenProgress = new HashSet<(Guid UserId, Guid NodeId, Guid ResourceId)>();
+        // Chỉ giữ tiến độ của bài học còn thuộc node mới — hàng progress trỏ tới
+        // resource không nằm trên node làm FE hiện "0/N bài" và chặn đổi trạng thái.
+        // Phải tính TRƯỚC cả tài nguyên top-up FR2.3: tài nguyên auto idempotent theo
+        // URL nên node mới thường nhận lại ĐÚNG resource cũ — nếu chỉ xét
+        // Input.LearningResourceIds thì progress của các bài auto bị xoá oan.
+        var plannedNodeResources = hierarchy.ActionNodes
+            .SelectMany(pair => pair.Input.LearningResourceIds
+                .Distinct()
+                .Select((resourceId, resourceIndex) => new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = pair.Node.Id,
+                    LearningResourceId = resourceId,
+                    OrderIndex = resourceIndex + 1,
+                    CreatedAt = now
+                }))
+            .ToList();
+        // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
+        plannedNodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, userId, careerRoleId, now, cancellationToken));
+        var newResourceIdSetByNodeId = plannedNodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToHashSet());
         foreach (var progressItem in lessonProgresses)
         {
             var oldNode = existingNodes.FirstOrDefault(n => n.Id == progressItem.RoadmapNodeId);
@@ -522,7 +577,10 @@ public sealed class RoadmapController(
             }
 
             string key = oldNode.SkillId is not null ? $"skill_{oldNode.SkillId.Value}" : $"title_{oldNode.Title}";
-            if (newNodeMap.TryGetValue(key, out var newNodeId))
+            if (newNodeMap.TryGetValue(key, out var newNodeId)
+                && !downgradedNodeIds.Contains(newNodeId)
+                && newResourceIdSetByNodeId.TryGetValue(newNodeId, out var newNodeResourceIds)
+                && newNodeResourceIds.Contains(progressItem.LearningResourceId))
             {
                 var compositeKey = (progressItem.UserId, newNodeId, progressItem.LearningResourceId);
                 if (seenProgress.Contains(compositeKey))
@@ -561,24 +619,10 @@ public sealed class RoadmapController(
 
             await dbContext.SaveChangesAsync(cancellationToken);
 
-            // Add new nodes and their resources
+            // Add new nodes and their resources (plannedNodeResources đã gồm top-up FR2.3,
+            // tính trước vòng lọc lesson progress ở trên).
             dbContext.RoadmapNodes.AddRange(hierarchy.Nodes);
-
-            var nodeResources = hierarchy.ActionNodes
-                .SelectMany(pair => pair.Input.LearningResourceIds
-                    .Distinct()
-                    .Select((resourceId, resourceIndex) => new RoadmapNodeResource
-                    {
-                        Id = Guid.NewGuid(),
-                        RoadmapNodeId = pair.Node.Id,
-                        LearningResourceId = resourceId,
-                        OrderIndex = resourceIndex + 1,
-                        CreatedAt = now
-                    }))
-                .ToList();
-            // FR2.3: bổ sung tài nguyên để mỗi node đạt tối thiểu 2 link.
-            nodeResources.AddRange(await BuildMinimumResourceTopUpAsync(hierarchy.ActionNodes, now, cancellationToken));
-            dbContext.RoadmapNodeResources.AddRange(nodeResources);
+            dbContext.RoadmapNodeResources.AddRange(plannedNodeResources);
 
             dbContext.RoadmapNodeReviewRequests.AddRange(requestsToAdd);
             dbContext.LessonProgresses.AddRange(progressToAdd);
@@ -746,6 +790,19 @@ public sealed class RoadmapController(
                     message = "Bạn chỉ có thể xác minh module khi sinh viên đã gửi yêu cầu review cho bạn."
                 });
             }
+
+            // Counselor phải còn được phân công cho sinh viên — cùng luật với
+            // ApproveRequest/RejectRequest bên RoadmapReviewController; thiếu check
+            // này thì endpoint verify trở thành đường lách 403 cho ex-counselor.
+            if (User.IsInRole(UserRoles.AcademicCounselor)
+                && !await dbContext.CounselorAssignments.AnyAsync(
+                    item => item.StudentId == node.Roadmap.UserId
+                        && item.CounselorId == currentUserId
+                        && item.Status == "Active",
+                    cancellationToken))
+            {
+                return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
+            }
         }
 
         if (!(node.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase) ||
@@ -764,6 +821,8 @@ public sealed class RoadmapController(
 
         // Đóng các review request Pending của node — nếu bỏ treo Pending, request tiếp
         // tục bị tính vào quota của sinh viên và mentor có thể approve lại lần nữa.
+        // Request của chính reviewer -> Approved; request gửi cho reviewer KHÁC mà
+        // Admin đóng hộ -> Cancelled (hoàn quota — reviewer đó chưa hề review).
         var pendingRequests = await dbContext.RoadmapNodeReviewRequests
             .Where(item => item.RoadmapNodeId == id
                 && item.Status == "Pending"
@@ -771,7 +830,7 @@ public sealed class RoadmapController(
             .ToListAsync(cancellationToken);
         foreach (var pendingRequest in pendingRequests)
         {
-            pendingRequest.Status = "Approved";
+            pendingRequest.Status = pendingRequest.ReviewerId == currentUserId ? "Approved" : "Cancelled";
             pendingRequest.RespondedAt = verifiedAt;
         }
 
@@ -941,6 +1000,8 @@ public sealed class RoadmapController(
     // Trả về danh sách RoadmapNodeResource bổ sung (chưa lưu) để caller add cùng các thay đổi khác.
     private async Task<List<RoadmapNodeResource>> BuildMinimumResourceTopUpAsync(
         IReadOnlyList<RoadmapActionNode> actionNodes,
+        Guid userId,
+        Guid careerRoleId,
         DateTimeOffset now,
         CancellationToken cancellationToken)
     {
@@ -957,13 +1018,56 @@ public sealed class RoadmapController(
             .Where(resource => attachedResourceIds.Contains(resource.Id))
             .ToDictionaryAsync(resource => resource.Id, resource => resource.Difficulty, cancellationToken);
 
+        // Node cần top-up nhất là node KHÔNG có tài nguyên nào — với chúng phải suy
+        // level từ thiết kế "học level kế tiếp" (VerifiedLevel + 1, cap RequiredLevel)
+        // thay vì rơi về Beginner mặc định.
+        var topUpSkillIds = actionNodes
+            .Where(pair => pair.Node.SkillId is not null)
+            .Select(pair => pair.Node.SkillId!.Value)
+            .Distinct()
+            .ToList();
+        var topUpVerifiedRankBySkill = (await dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.UserId == userId && us.IsVerified && topUpSkillIds.Contains(us.SkillId))
+            .Select(us => new { us.SkillId, us.VerifiedLevel, us.Level })
+            .ToListAsync(cancellationToken))
+            .ToDictionary(
+                us => us.SkillId,
+                us => SkillLevels.LevelRank(string.IsNullOrWhiteSpace(us.VerifiedLevel) ? us.Level : us.VerifiedLevel));
+        var topUpRequiredRankBySkill = (await dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(item => item.CareerRoleId == careerRoleId && topUpSkillIds.Contains(item.SkillId))
+            .Select(item => new { item.SkillId, item.RequiredLevel })
+            .ToListAsync(cancellationToken))
+            .GroupBy(item => item.SkillId)
+            .ToDictionary(group => group.Key, group => group.Max(item => SkillLevels.LevelRank(item.RequiredLevel)));
+
         string? NodeTargetDifficulty(RoadmapActionNode pair)
         {
             var knownRanks = pair.Input.LearningResourceIds
                 .Select(resourceId => SkillLevels.DifficultyRank(difficultyById.GetValueOrDefault(resourceId)))
                 .Where(rank => rank != SkillLevels.UnknownDifficultyRank)
                 .ToList();
-            return knownRanks.Count > 0 ? SkillLevels.RankToDifficulty(knownRanks.Min()) : null;
+            if (knownRanks.Count > 0)
+            {
+                return SkillLevels.RankToDifficulty(knownRanks.Min());
+            }
+
+            if (pair.Node.SkillId is not Guid skillId)
+            {
+                return null;
+            }
+
+            var fallback = topUpVerifiedRankBySkill.GetValueOrDefault(skillId) + 1;
+            var requiredRank = topUpRequiredRankBySkill.GetValueOrDefault(skillId);
+            if (requiredRank > 0 && fallback > requiredRank)
+            {
+                fallback = requiredRank;
+            }
+
+            // Clamp về Expert: verified=Expert + requirement không parse được sẽ cho
+            // rank 5 -> RankToDifficulty trả null -> provisioner rơi nhầm về Beginner.
+            return SkillLevels.RankToDifficulty(Math.Min(fallback, 4));
         }
 
         var contexts = actionNodes
@@ -1056,6 +1160,23 @@ public sealed class RoadmapController(
 
         return reportItems
             .Where(item => !string.Equals(item.Status, "Matched", StringComparison.OrdinalIgnoreCase))
+            // Đối chiếu VerifiedLevel SỐNG thay vì snapshot trong báo cáo: kỹ năng được
+            // xác thực đạt yêu cầu SAU khi báo cáo được tạo thì không sinh node nữa —
+            // thống nhất luật loại node với GetNodesFromRoleRequirementsAsync (verified
+            // là nguồn chân lý duy nhất) và vá luôn triệu chứng "regenerate theo báo cáo
+            // gap cũ vẫn sinh node thừa".
+            .Where(item =>
+            {
+                var requiredRank = LevelRank(item.RequiredLevel);
+                if (requiredRank == 0)
+                {
+                    // RequiredLevel legacy không parse được -> coi là Intermediate,
+                    // cùng quy ước với SkillGapsController.
+                    requiredRank = 2;
+                }
+
+                return verifiedLevelBySkill.GetValueOrDefault(item.SkillId, 0) < requiredRank;
+            })
             .Select(item => new RoadmapNodeInput(
                 item.SkillId,
                 resourcesBySkill.GetValueOrDefault(item.SkillId) ?? [],

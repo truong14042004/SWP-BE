@@ -665,6 +665,7 @@ public sealed class IndustryMentorController(
             return BadRequest(new { message = validationError });
         }
 
+        var previousSkillId = resource.SkillId;
         resource.SkillId = request.SkillId;
         resource.Title = request.Title!.Trim();
         resource.ResourceType = request.ResourceType!.Trim();
@@ -712,6 +713,14 @@ public sealed class IndustryMentorController(
             }
         }
 
+        // Giáo trình đổi thì sinh viên các nghề dùng kỹ năng này cần được gợi ý
+        // cập nhật lộ trình (bump cả skill cũ nếu tài nguyên bị chuyển sang skill khác).
+        await TouchCareerRolesForSkillAsync(previousSkillId, cancellationToken);
+        if (resource.SkillId != previousSkillId)
+        {
+            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
         await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
 
@@ -739,16 +748,19 @@ public sealed class IndustryMentorController(
         {
             resource.IsActive = false;
             resource.UpdatedAt = DateTimeOffset.UtcNow;
+            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
             return NoContent();
         }
 
-        if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+        // Chỉ gọi GCS khi thực sự là file — marker "auto:*" legacy không phải object.
+        if (LearningResourceFiles.IsStoredFile(resource.StorageObjectName))
         {
-            await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+            await storageService.DeleteAsync(resource.StorageObjectName!, cancellationToken);
         }
 
         dbContext.LearningResources.Remove(resource);
+        await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
@@ -889,6 +901,18 @@ public sealed class IndustryMentorController(
         }
 
         dbContext.RoleSkillRequirements.Remove(requirement);
+
+        // Banner "lộ trình có cập nhật mới" so sánh CreatedAt của roadmap với
+        // MAX(UpdatedAt) của requirements và CareerRole — xoá requirement làm mất
+        // luôn mốc UpdatedAt của nó, nên phải đẩy mốc trên CareerRole để sinh viên
+        // biết roadmap đang dạy kỹ năng đã bị gỡ khỏi vai trò.
+        var careerRole = await dbContext.CareerRoles
+            .SingleOrDefaultAsync(item => item.Id == requirement.CareerRoleId, cancellationToken);
+        if (careerRole is not null)
+        {
+            careerRole.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
@@ -1595,6 +1619,31 @@ public sealed class IndustryMentorController(
 
     private static string? GetLearningResourceFileName(string? storageObjectName) =>
         LearningResourceFiles.GetFileName(storageObjectName);
+
+    /// <summary>
+    /// Đẩy CareerRole.UpdatedAt của mọi nghề có requirement dùng kỹ năng này.
+    /// Banner "lộ trình có cập nhật mới" so roadmap.CreatedAt với mốc này — nếu
+    /// không bump, mentor đổi/gỡ giáo trình xong sinh viên không hề được gợi ý
+    /// cập nhật lộ trình. KHÔNG tự SaveChanges — caller lưu chung một transaction.
+    /// </summary>
+    private async Task TouchCareerRolesForSkillAsync(Guid? skillId, CancellationToken cancellationToken)
+    {
+        if (skillId is not Guid targetSkillId)
+        {
+            return;
+        }
+
+        var roles = await dbContext.CareerRoles
+            .Where(role => dbContext.RoleSkillRequirements.Any(
+                requirement => requirement.CareerRoleId == role.Id && requirement.SkillId == targetSkillId))
+            .ToListAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in roles)
+        {
+            role.UpdatedAt = now;
+        }
+    }
 
     private static string? NormalizeExternalResourceUrl(string? url)
     {

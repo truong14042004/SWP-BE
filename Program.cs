@@ -50,7 +50,10 @@ builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
-builder.Services.AddSingleton(_ => new Lazy<StorageClient>(StorageClient.Create));
+// PublicationOnly: không cache exception của lần khởi tạo đầu — nếu dùng mặc định
+// (ExecutionAndPublication), một trục trặc tạm thời lúc cold start (metadata server
+// chậm) sẽ làm MỌI thao tác storage lỗi vĩnh viễn cho tới khi restart process.
+builder.Services.AddSingleton(_ => new Lazy<StorageClient>(StorageClient.Create, LazyThreadSafetyMode.PublicationOnly));
 builder.Services.AddScoped<IFileStorageService, GoogleCloudStorageService>();
 builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 builder.Services.AddScoped<IStudentReviewQuotaService, StudentReviewQuotaService>();

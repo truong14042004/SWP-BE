@@ -54,10 +54,17 @@ public sealed class GoogleAuthService(
         }
         else
         {
+            // Tài khoản đã bị vô hiệu hoá (admin khoá / tự xoá) KHÔNG được tự mở
+            // khoá bằng đăng nhập Google — nếu không, mọi lệnh khoá tài khoản
+            // (kể cả Admin/Mentor) đều bị bypass chỉ bằng một cú bấm, giữ nguyên Role cũ.
+            if (!user.IsActive)
+            {
+                throw new UnauthorizedAccessException("Tài khoản đã bị vô hiệu hóa. Vui lòng liên hệ quản trị viên.");
+            }
+
             user.FullName = payload.Name ?? user.FullName;
             user.AvatarUrl = payload.Picture ?? user.AvatarUrl;
             user.GoogleSubject ??= payload.Subject;
-            user.IsActive = true;
             user.IsEmailVerified = true;
             user.EmailVerifiedAt ??= now;
             user.EmailVerificationOtpHash = null;

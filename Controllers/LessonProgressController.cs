@@ -117,9 +117,13 @@ public sealed class LessonProgressController(AppDbContext dbContext) : Controlle
         var userId = GetCurrentUserId();
 
         // Node đã Verified là bất biến với sinh viên — nhất quán với MarkComplete.
+        // Chỉ xét node THUỘC roadmap của user: nếu quét toàn bảng theo id, response
+        // 400 sẽ rò rỉ trạng thái node của người khác.
         var nodeIsVerified = await dbContext.RoadmapNodes
             .AsNoTracking()
-            .AnyAsync(item => item.Id == nodeId && item.Status == "Verified", cancellationToken);
+            .AnyAsync(item => item.Id == nodeId
+                && item.Roadmap.UserId == userId
+                && item.Status == "Verified", cancellationToken);
         if (nodeIsVerified)
         {
             return BadRequest(new { message = "Module đã được xác minh, không thể thay đổi tiến độ bài học." });

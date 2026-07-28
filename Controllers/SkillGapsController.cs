@@ -106,6 +106,14 @@ public class SkillGapsController : ControllerBase
             };
 
             int reqLevelValue = ParseLevel(req.RequiredLevel);
+            if (reqLevelValue == 0)
+            {
+                // RequiredLevel không nhận diện được (legacy/seed): coi là Intermediate.
+                // Nếu để rank 0, điều kiện "verified >= required" thành 0 >= 0 và sinh viên
+                // CHƯA XÁC THỰC gì cũng được "Matched" -> mất node khỏi lộ trình vĩnh viễn.
+                reqLevelValue = 2;
+            }
+
             int userLevelValue = userSkill != null ? ParseLevel(userSkill.Level) : 0;
             int verifiedLevelValue = userSkill is { IsVerified: true }
                 ? ParseLevel(string.IsNullOrWhiteSpace(userSkill.VerifiedLevel) ? userSkill.Level : userSkill.VerifiedLevel)

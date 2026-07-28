@@ -76,27 +76,35 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             })
             .ToDictionaryAsync(p => p.UserId, cancellationToken);
 
-        // Lấy skill gap report mới nhất của từng sinh viên (1 query, group + max)
-        var latestGaps = await dbContext.SkillGapReports
+        // Điểm hiển thị phải CÙNG NGỮ CẢNH với cột "Định hướng" bên cạnh: ưu tiên báo
+        // cáo mới nhất CỦA nghề mục tiêu; sinh viên chưa phân tích cho nghề mục tiêu
+        // thì để trống ("Chưa phân tích") thay vì mượn điểm của một nghề khác.
+        // Sinh viên chưa chọn nghề -> lấy báo cáo mới nhất bất kỳ.
+        var gapRows = await dbContext.SkillGapReports
             .AsNoTracking()
             .Where(report => studentIds.Contains(report.UserId))
-            .GroupBy(report => report.UserId)
-            .Select(group => group
-                .OrderByDescending(report => report.CreatedAt)
-                .Select(report => new
-                {
-                    report.UserId,
-                    report.MatchScore,
-                    report.VerifiedMatchScore,
-                    report.CreatedAt
-                })
-                .First())
-            .ToDictionaryAsync(report => report.UserId, cancellationToken);
+            .Select(report => new
+            {
+                report.UserId,
+                report.CareerRoleId,
+                report.MatchScore,
+                report.VerifiedMatchScore,
+                report.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+        var gapsByStudent = gapRows
+            .GroupBy(row => row.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(row => row.CreatedAt).ToList());
 
         var result = students.Select(student =>
         {
             profiles.TryGetValue(student.Id, out var profile);
-            latestGaps.TryGetValue(student.Id, out var gap);
+            gapsByStudent.TryGetValue(student.Id, out var gapList);
+            var gap = profile?.TargetRoleId is Guid targetRoleId
+                ? gapList?.FirstOrDefault(row => row.CareerRoleId == targetRoleId)
+                : gapList?.FirstOrDefault();
             assignmentDateByStudent.TryGetValue(student.Id, out var assignedAt);
 
             return new CounselorStudentSummaryResponse(
@@ -299,6 +307,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 r.CareerRoleId,
                 r.CareerRole.Name,
                 r.MatchScore,
+                r.VerifiedMatchScore,
                 r.Summary,
                 r.CreatedAt))
             .ToListAsync(cancellationToken);
@@ -592,6 +601,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             report.CareerRoleId,
             report.CareerRole.Name,
             report.MatchScore,
+            report.VerifiedMatchScore,
             report.Summary,
             report.CreatedAt,
             items.Select(i => new CounselorSkillGapReportItemResponse(
@@ -1118,6 +1128,7 @@ public sealed record CounselorSkillGapHistoryResponse(
     Guid CareerRoleId,
     string CareerRoleName,
     decimal MatchScore,
+    decimal? VerifiedMatchScore,
     string? Summary,
     DateTimeOffset CreatedAt);
 
@@ -1127,6 +1138,7 @@ public sealed record CounselorSkillGapReportResponse(
     Guid CareerRoleId,
     string CareerRoleName,
     decimal MatchScore,
+    decimal? VerifiedMatchScore,
     string? Summary,
     DateTimeOffset CreatedAt,
     IReadOnlyList<CounselorSkillGapReportItemResponse> Items);

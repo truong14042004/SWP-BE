@@ -143,26 +143,48 @@ public sealed class RoadmapReviewController(
             return NotFound(new { message = "Không tìm thấy module lộ trình." });
         }
 
-        // Group nodes: allow review only when all non-group descendants
-        // are Completed or Verified (Design A — direct children only).
+        // Group nodes: chỉ cho gửi review khi TOÀN BỘ hậu duệ không-group (kể cả
+        // trong group lồng nhau) đã Completed/Verified — cùng phạm vi với cascade
+        // verify lúc approve; nếu chỉ xét con trực tiếp thì node trong sub-group
+        // không được kiểm nhưng vẫn bị verify theo nhóm.
         var isGroup = node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase);
         if (isGroup)
         {
-            var children = await dbContext.RoadmapNodes
+            var roadmapNodes = await dbContext.RoadmapNodes
                 .AsNoTracking()
-                .Where(item => item.ParentNodeId == id)
+                .Where(item => item.RoadmapId == node.RoadmapId)
                 .ToListAsync(cancellationToken);
+            var childrenByParent = roadmapNodes
+                .Where(item => item.ParentNodeId is not null)
+                .GroupBy(item => item.ParentNodeId!.Value)
+                .ToDictionary(group => group.Key, group => group.ToList());
 
-            if (children.Count == 0)
+            var nonGroupDescendants = new List<RoadmapNode>();
+            var hasAnyChild = false;
+            var pendingGroups = new Queue<Guid>();
+            pendingGroups.Enqueue(node.Id);
+            while (pendingGroups.Count > 0)
+            {
+                foreach (var child in childrenByParent.GetValueOrDefault(pendingGroups.Dequeue(), []))
+                {
+                    hasAnyChild = true;
+                    if (child.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+                    {
+                        pendingGroups.Enqueue(child.Id);
+                    }
+                    else
+                    {
+                        nonGroupDescendants.Add(child);
+                    }
+                }
+            }
+
+            if (!hasAnyChild)
             {
                 return BadRequest(new { message = "Nhóm module không có bài học con nào để đánh giá." });
             }
 
-            var nonGroupChildren = children
-                .Where(item => !item.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
-                .ToList();
-
-            if (nonGroupChildren.Count == 0)
+            if (nonGroupDescendants.Count == 0)
             {
                 return BadRequest(new
                 {
@@ -170,7 +192,7 @@ public sealed class RoadmapReviewController(
                 });
             }
 
-            var pending = nonGroupChildren
+            var pending = nonGroupDescendants
                 .Where(item => item.Status is not ("Completed" or "Verified"))
                 .ToList();
 
@@ -178,7 +200,7 @@ public sealed class RoadmapReviewController(
             {
                 return BadRequest(new
                 {
-                    message = $"{pending.Count}/{nonGroupChildren.Count} module chưa hoàn thành. Hoàn thành tất cả module trong nhóm trước khi yêu cầu review nhóm."
+                    message = $"{pending.Count}/{nonGroupDescendants.Count} module chưa hoàn thành. Hoàn thành tất cả module trong nhóm trước khi yêu cầu review nhóm."
                 });
             }
         }
@@ -220,11 +242,21 @@ public sealed class RoadmapReviewController(
             }
         }
 
+        // Request Pending của CHÍNH node này sẽ bị huỷ (hoàn lượt) khi tạo request
+        // mới — tính trước khi check quota để sinh viên hết lượt vẫn ĐỔI được
+        // reviewer: thao tác huỷ-cũ-tạo-mới không tiêu thêm lượt nào.
+        var now = DateTimeOffset.UtcNow;
+        var existingPending = await dbContext.RoadmapNodeReviewRequests
+            .Where(item => item.RoadmapNodeId == id
+                && item.StudentId == studentId
+                && item.Status == "Pending")
+            .ToListAsync(cancellationToken);
+
         // If mentor: check quota
         if (reviewer.Role == UserRoles.IndustryMentor)
         {
             var quota = await quotaService.GetQuotaAsync(studentId, cancellationToken);
-            if (quota.Remaining <= 0)
+            if (quota.Remaining + existingPending.Count <= 0)
             {
                 return StatusCode(StatusCodes.Status402PaymentRequired, new
                 {
@@ -238,6 +270,15 @@ public sealed class RoadmapReviewController(
         // object thuộc về chính sinh viên này (prefix users/{studentId}/). Ngăn sinh viên
         // đính kèm evidenceUrl trỏ tới file của người khác để reviewer tải về (rò rỉ dữ liệu).
         var evidenceUrl = request.EvidenceUrl?.Trim();
+
+        // Review node lẻ phải kèm minh chứng — reviewer không có gì để chấm nếu
+        // request rỗng. Review NHÓM được miễn: nhóm tổng hợp các node con đã
+        // Completed/Verified (mỗi con đã qua vòng minh chứng riêng).
+        if (!isGroup && string.IsNullOrWhiteSpace(evidenceUrl))
+        {
+            return BadRequest(new { message = "Vui lòng đính kèm minh chứng (liên kết Git/URL hoặc tệp) trước khi gửi yêu cầu review." });
+        }
+
         if (!string.IsNullOrWhiteSpace(evidenceUrl)
             && request.EvidenceType != "GitRepository"
             && !evidenceUrl.StartsWith("http://", StringComparison.OrdinalIgnoreCase)
@@ -250,15 +291,7 @@ public sealed class RoadmapReviewController(
             }
         }
 
-        var now = DateTimeOffset.UtcNow;
-
-        // Auto cancel any existing pending request for this node
-        var existingPending = await dbContext.RoadmapNodeReviewRequests
-            .Where(item => item.RoadmapNodeId == id
-                && item.StudentId == studentId
-                && item.Status == "Pending")
-            .ToListAsync(cancellationToken);
-
+        // Auto cancel any existing pending request for this node (đã nạp ở trên)
         foreach (var pending in existingPending)
         {
             pending.Status = "Cancelled";
@@ -383,6 +416,34 @@ public sealed class RoadmapReviewController(
         return Ok(responses);
     }
 
+    // GET /api/roadmap/{roadmapId}/review-requests
+    // Toàn bộ review request của một roadmap trong MỘT call — FE trước đây bắn
+    // 1 request cho MỖI node (roadmap 30 node = 30 call song song mỗi lần mở trang).
+    [HttpGet("api/roadmap/{roadmapId:guid}/review-requests")]
+    public async Task<ActionResult<IReadOnlyList<RoadmapReviewRequestResponse>>> GetReviewRequestsForRoadmap(
+        Guid roadmapId,
+        CancellationToken cancellationToken)
+    {
+        var studentId = GetCurrentUserId();
+
+        var ownsRoadmap = await dbContext.Roadmaps
+            .AsNoTracking()
+            .AnyAsync(item => item.Id == roadmapId && item.UserId == studentId, cancellationToken);
+        if (!ownsRoadmap)
+        {
+            return NotFound(new { message = "Không tìm thấy lộ trình." });
+        }
+
+        var list = await dbContext.RoadmapNodeReviewRequests
+            .AsNoTracking()
+            .Include(item => item.Reviewer)
+            .Where(item => item.RoadmapNode.RoadmapId == roadmapId && item.StudentId == studentId)
+            .OrderByDescending(item => item.RequestedAt)
+            .ToListAsync(cancellationToken);
+
+        return Ok(list.Select(item => ToResponse(item, item.Reviewer)).ToList());
+    }
+
     // ============================================================
     //  STORAGE — Upload evidence
     // ============================================================
@@ -457,7 +518,7 @@ public sealed class RoadmapReviewController(
         CancellationToken cancellationToken)
     {
         var mentorId = GetCurrentUserId();
-        return Ok(await BuildReviewerQueueAsync(mentorId, cancellationToken));
+        return Ok(await BuildReviewerQueueAsync(mentorId, requireActiveAssignment: false, cancellationToken));
     }
 
     [Authorize(Roles = UserRoles.AcademicCounselor)]
@@ -466,7 +527,7 @@ public sealed class RoadmapReviewController(
         CancellationToken cancellationToken)
     {
         var counselorId = GetCurrentUserId();
-        return Ok(await BuildReviewerQueueAsync(counselorId, cancellationToken));
+        return Ok(await BuildReviewerQueueAsync(counselorId, requireActiveAssignment: true, cancellationToken));
     }
 
     [Authorize(Roles = $"{UserRoles.IndustryMentor},{UserRoles.AcademicCounselor},{UserRoles.Admin}")]
@@ -492,7 +553,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu review này không được gửi cho bạn." });
         }
 
         // Counselor chỉ được duyệt khi vẫn còn được phân công cho sinh viên —
@@ -564,8 +625,13 @@ public sealed class RoadmapReviewController(
                         {
                             pendingGroups.Enqueue(child.Id);
                         }
-                        else if (child.Status == "Completed")
+                        else if (child.Status.Equals("Completed", StringComparison.OrdinalIgnoreCase)
+                            || child.Status.Equals("NeedReview", StringComparison.OrdinalIgnoreCase))
                         {
+                            // NeedReview cũng được cascade: con đã Completed lúc gửi request
+                            // nhóm có thể bị đẩy sang NeedReview bởi một request riêng — nếu
+                            // bỏ sót, group Verified nhưng con kẹt NeedReview vĩnh viễn và
+                            // roadmap không bao giờ đạt 100%.
                             completedDescendants.Add(child);
                         }
                     }
@@ -585,6 +651,24 @@ public sealed class RoadmapReviewController(
                             reviewerId,
                             child.LearningResource?.Difficulty,
                             cancellationToken);
+                    }
+                }
+
+                // Đóng các request Pending của node con vừa được cascade verify —
+                // cùng luật với VerifyNode: nếu bỏ treo, request lẻ gửi cho reviewer
+                // khác tiếp tục tính quota và reviewer đó vẫn approve lại được node
+                // đã Verified (trừ quota lần 2). Cùng reviewer -> Approved; reviewer
+                // khác -> Cancelled (hoàn quota, họ chưa hề review).
+                var cascadedNodeIds = completedDescendants.Select(item => item.Id).ToList();
+                if (cascadedNodeIds.Count > 0)
+                {
+                    var childPendingRequests = await dbContext.RoadmapNodeReviewRequests
+                        .Where(item => cascadedNodeIds.Contains(item.RoadmapNodeId) && item.Status == "Pending")
+                        .ToListAsync(cancellationToken);
+                    foreach (var childRequest in childPendingRequests)
+                    {
+                        childRequest.Status = childRequest.ReviewerId == reviewerId ? "Approved" : "Cancelled";
+                        childRequest.RespondedAt = now;
                     }
                 }
             }
@@ -674,7 +758,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu review này không được gửi cho bạn." });
         }
 
         // Cùng luật với ApproveRequest: counselor phải còn được phân công cho sinh viên.
@@ -778,7 +862,7 @@ public sealed class RoadmapReviewController(
 
         if (reviewRequest.ReviewerId != reviewerId && !User.IsInRole(UserRoles.Admin))
         {
-            return Forbid();
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu review này không được gửi cho bạn." });
         }
 
         if (string.IsNullOrWhiteSpace(reviewRequest.EvidenceUrl))
@@ -1006,11 +1090,25 @@ public sealed class RoadmapReviewController(
 
     private async Task<IReadOnlyList<ReviewerQueueItemResponse>> BuildReviewerQueueAsync(
         Guid reviewerId,
+        bool requireActiveAssignment,
         CancellationToken cancellationToken)
     {
-        var items = await dbContext.RoadmapNodeReviewRequests
+        var query = dbContext.RoadmapNodeReviewRequests
             .AsNoTracking()
-            .Where(item => item.ReviewerId == reviewerId)
+            .Where(item => item.ReviewerId == reviewerId);
+
+        // Counselor: Approve/Reject đều đòi assignment Active — nếu queue không lọc
+        // cùng điều kiện, request Pending của sinh viên đã bị gỡ phân công treo vĩnh
+        // viễn trong hàng đợi (bấm gì cũng 403, không có cách nào xoá).
+        if (requireActiveAssignment)
+        {
+            query = query.Where(item => dbContext.CounselorAssignments.Any(assignment =>
+                assignment.CounselorId == reviewerId
+                && assignment.StudentId == item.StudentId
+                && assignment.Status == "Active"));
+        }
+
+        var items = await query
             .OrderBy(item => item.Status == "Pending" ? 0 : 1)
             .ThenByDescending(item => item.RequestedAt)
             .Include(item => item.Student)

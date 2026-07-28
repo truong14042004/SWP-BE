@@ -236,13 +236,34 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
             .GroupBy(item => item.RoadmapNodeId)
             .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToList());
 
-        string? NodeTargetDifficulty(Guid nodeId)
+        string? NodeTargetDifficulty(Guid nodeId, Guid? skillId)
         {
             var knownRanks = resourceIdsByNode.GetValueOrDefault(nodeId, [])
                 .Select(resourceId => SkillLevels.DifficultyRank(difficultyByResourceId.GetValueOrDefault(resourceId)))
                 .Where(rank => rank != SkillLevels.UnknownDifficultyRank)
                 .ToList();
-            return knownRanks.Count > 0 ? SkillLevels.RankToDifficulty(knownRanks.Min()) : null;
+            if (knownRanks.Count > 0)
+            {
+                return SkillLevels.RankToDifficulty(knownRanks.Min());
+            }
+
+            // Node không có tài nguyên gắn nhãn (đối tượng chính của FR2.3): suy level
+            // theo thiết kế "học level kế tiếp" — VerifiedLevel + 1, cap RequiredLevel —
+            // thay vì để provisioner rơi về Beginner mặc định.
+            if (skillId is not Guid sid)
+            {
+                return null;
+            }
+
+            var fallback = verifiedLevelBySkill.GetValueOrDefault(sid, 0) + 1;
+            var requiredRank = requiredLevelBySkill.GetValueOrDefault(sid, 0);
+            if (requiredRank > 0 && fallback > requiredRank)
+            {
+                fallback = requiredRank;
+            }
+
+            // Clamp về Expert (xem RoadmapController.BuildMinimumResourceTopUpAsync).
+            return SkillLevels.RankToDifficulty(Math.Min(fallback, 4));
         }
 
         var topUpContexts = nodes
@@ -252,7 +273,7 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
                 node.SkillId,
                 node.Title,
                 existingCountByNode.GetValueOrDefault(node.Id, 0),
-                NodeTargetDifficulty(node.Id)))
+                NodeTargetDifficulty(node.Id, node.SkillId)))
             .ToList();
         var topUp = await _resourceProvisioner.EnsureMinimumResourcesAsync(
             topUpContexts, 2, now, cancellationToken);
