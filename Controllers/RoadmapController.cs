@@ -25,18 +25,10 @@ public sealed class RoadmapController(
         var userId = GetCurrentUserId();
         var now = DateTimeOffset.UtcNow;
 
-        var pendingVerificationCount = await dbContext.UserSkills
-            .CountAsync(
-                userSkill => userSkill.UserId == userId
-                    && userSkill.VerificationStatus == UserSkillVerificationStatus.PendingVerification,
-                cancellationToken);
-        if (pendingVerificationCount > 0)
-        {
-            return BadRequest(new
-            {
-                message = $"Bạn có {pendingVerificationCount} kỹ năng đang chờ xác thực. Hãy đợi cố vấn duyệt hoặc chuyển sang chưa xác thực trước khi tạo lộ trình."
-            });
-        }
+        // KHÔNG chặn khi còn kỹ năng chờ xác thực: lộ trình sinh trên dữ liệu hiện
+        // tại (kỹ năng chờ duyệt được coi là chưa xác thực); khi cố vấn duyệt xong,
+        // VerifiedAt mới hơn CreatedAt của roadmap -> banner "có cập nhật mới" hiện
+        // ra để sinh viên bấm cập nhật (xem GetLatestVerificationChangeAsync).
 
         var careerRoleId = request.CareerRoleId
             ?? await dbContext.StudentProfiles
@@ -189,10 +181,16 @@ public sealed class RoadmapController(
             .GroupBy(node => node.RoadmapId)
             .ToDictionary(group => group.Key, group => (IReadOnlyList<RoadmapNode>)group.ToList());
 
+        var verificationUpdate = await GetLatestVerificationChangeAsync(userId, cancellationToken);
+
         var responseList = roadmaps.Select(roadmap => {
             var reqUpdate = requirementsLatestUpdates.GetValueOrDefault(roadmap.CareerRoleId, DateTimeOffset.MinValue);
             var roleUpdate = rolesLatestUpdates.GetValueOrDefault(roadmap.CareerRoleId, DateTimeOffset.MinValue);
             var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
+            if (verificationUpdate > latestUpdate)
+            {
+                latestUpdate = verificationUpdate;
+            }
             bool isOutdated = roadmap.CreatedAt < latestUpdate;
 
             return ToResponse(
@@ -227,6 +225,11 @@ public sealed class RoadmapController(
 
         var roleUpdate = roadmap.CareerRole.UpdatedAt;
         var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
+        var verificationUpdate = await GetLatestVerificationChangeAsync(userId, cancellationToken);
+        if (verificationUpdate > latestUpdate)
+        {
+            latestUpdate = verificationUpdate;
+        }
         bool isOutdated = roadmap.CreatedAt < latestUpdate;
 
         var nodes = await dbContext.RoadmapNodes
@@ -261,19 +264,8 @@ public sealed class RoadmapController(
             return NotFound(new { message = "Không tìm thấy lộ trình học tập để cập nhật." });
         }
 
-        // Cùng luật với Generate: không tạo lại lộ trình khi còn kỹ năng chờ xác thực.
-        var pendingVerificationCount = await dbContext.UserSkills
-            .CountAsync(
-                userSkill => userSkill.UserId == userId
-                    && userSkill.VerificationStatus == UserSkillVerificationStatus.PendingVerification,
-                cancellationToken);
-        if (pendingVerificationCount > 0)
-        {
-            return BadRequest(new
-            {
-                message = $"Bạn có {pendingVerificationCount} kỹ năng đang chờ xác thực. Hãy đợi cố vấn duyệt hoặc chuyển sang chưa xác thực trước khi tạo lại lộ trình."
-            });
-        }
+        // Cùng luật với Generate: KHÔNG chặn khi còn kỹ năng chờ xác thực — tạo lại
+        // trên dữ liệu hiện tại; kết quả duyệt về sau sẽ bật banner cập nhật.
 
         var careerRoleId = existingRoadmap.CareerRoleId;
         var careerRole = existingRoadmap.CareerRole;
@@ -1535,6 +1527,43 @@ public sealed class RoadmapController(
         return Guid.TryParse(value, out var userId)
             ? userId
             : throw new UnauthorizedAccessException("Mã xác thực người dùng không hợp lệ.");
+    }
+
+    /// <summary>
+    /// Mốc thay đổi xác thực kỹ năng gần nhất của sinh viên: VerifiedAt (được duyệt /
+    /// nâng cấp) và UpdatedAt của kỹ năng bị từ chối/thu hồi (Unverified). Dùng cho
+    /// banner "lộ trình có cập nhật mới": thay vì CHẶN tạo lộ trình khi còn kỹ năng
+    /// chờ duyệt, cho tạo tự do trên dữ liệu hiện tại rồi nhắc cập nhật khi kết quả
+    /// xác thực về sau (lộ trình tạo trước thời điểm đó là lỗi thời).
+    /// </summary>
+    private async Task<DateTimeOffset> GetLatestVerificationChangeAsync(
+        Guid userId,
+        CancellationToken cancellationToken)
+    {
+        var rows = await dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.UserId == userId
+                && (us.VerifiedAt != null
+                    || us.VerificationStatus == UserSkillVerificationStatus.Unverified))
+            .Select(us => new { us.VerifiedAt, us.UpdatedAt, us.VerificationStatus })
+            .ToListAsync(cancellationToken);
+
+        var latest = DateTimeOffset.MinValue;
+        foreach (var row in rows)
+        {
+            if (row.VerifiedAt is DateTimeOffset verifiedAt && verifiedAt > latest)
+            {
+                latest = verifiedAt;
+            }
+
+            if (row.VerificationStatus == UserSkillVerificationStatus.Unverified
+                && row.UpdatedAt > latest)
+            {
+                latest = row.UpdatedAt;
+            }
+        }
+
+        return latest;
     }
 
     private static int LevelRank(string? level) => SkillLevels.LevelRank(level);
