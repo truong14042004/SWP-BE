@@ -3,7 +3,6 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
-using Npgsql;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Services;
@@ -347,22 +346,45 @@ public sealed class AdminUsersController(
             return NotFound(new { message = "Không tìm thấy người dùng." });
         }
 
+        var username = user.Username;
+        var email = user.Email;
+        var role = user.Role;
+
         dbContext.Users.Remove(user);
-        
-        try 
+        try
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
+        catch (DbUpdateException)
         {
-            // Chỉ quy lỗi về "dữ liệu liên quan" khi đúng là vi phạm ràng buộc khóa ngoại (SqlState 23503).
-            // Các lỗi DB khác (timeout, deadlock, mất kết nối...) sẽ không bị bắt ở đây mà được ném tiếp cho
-            // middleware xử lý, tránh trả về thông báo sai nguyên nhân cho người dùng.
-            return BadRequest(new { message = "Không thể xóa người dùng này vì có dữ liệu liên quan (lịch sử thanh toán, v.v.). Bạn có thể vô hiệu hóa tài khoản thay vì xóa." });
+            // FK Restrict (thanh toán, feedback, review...) — soft-delete để FE vẫn nhận 204.
+            dbContext.ChangeTracker.Clear();
+
+            var existing = await dbContext.Users.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+            if (existing is null)
+            {
+                return NoContent();
+            }
+
+            existing.IsActive = false;
+            existing.UpdatedAt = DateTimeOffset.UtcNow;
+            await RevokeUserRefreshTokensAsync(existing.Id, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+
+            await auditLog.LogAsync(
+                actorUserId: currentUserId,
+                actorRole: UserRoles.Admin,
+                action: "AdminUserSoftDeleted",
+                entityType: "User",
+                entityId: id,
+                targetUserId: id,
+                summary: $"Xóa mềm tài khoản {username} ({email}), vai trò {role} (không hard-delete vì còn dữ liệu liên quan).",
+                metadata: new { Username = username, Email = email, Role = role, SoftDeleted = true },
+                cancellationToken: cancellationToken);
+
+            return NoContent();
         }
 
-        // Ghi log SAU khi xóa thành công. targetUserId để null vì bản ghi user không
-        // còn tồn tại — giữ lại danh tính trong summary/metadata.
         await auditLog.LogAsync(
             actorUserId: currentUserId,
             actorRole: UserRoles.Admin,
@@ -370,8 +392,8 @@ public sealed class AdminUsersController(
             entityType: "User",
             entityId: id,
             targetUserId: null,
-            summary: $"Xóa tài khoản {user.Username} ({user.Email}), vai trò {user.Role}.",
-            metadata: new { user.Username, user.Email, user.Role },
+            summary: $"Xóa tài khoản {username} ({email}), vai trò {role}.",
+            metadata: new { Username = username, Email = email, Role = role },
             cancellationToken: cancellationToken);
 
         return NoContent();
