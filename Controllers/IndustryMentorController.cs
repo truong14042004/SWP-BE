@@ -1040,21 +1040,28 @@ public sealed class IndustryMentorController(
             return BadRequest(new { message = "Tên định hướng là bắt buộc." });
         }
 
+        if (string.IsNullOrWhiteSpace(request.Level))
+        {
+            return BadRequest(new { message = "Cấp độ định hướng là bắt buộc." });
+        }
+
+        var name = request.Name.Trim();
+        var level = request.Level.Trim();
         var exists = await dbContext.CareerRoles.AnyAsync(
-            role => role.Name == request.Name.Trim(),
+            role => role.Name == name && role.Level == level,
             cancellationToken);
         if (exists)
         {
-            return Conflict(new { message = "Định hướng nghề nghiệp với tên này đã tồn tại." });
+            return Conflict(new { message = "Định hướng nghề nghiệp với tên và cấp độ này đã tồn tại." });
         }
 
         var now = DateTimeOffset.UtcNow;
         var role = new CareerRole
         {
             Id = Guid.NewGuid(),
-            Name = request.Name.Trim(),
+            Name = name,
             Description = request.Description?.Trim(),
-            Level = request.Level?.Trim(),
+            Level = level,
             IsActive = true,
             CreatedAt = now,
             UpdatedAt = now
@@ -1088,23 +1095,30 @@ public sealed class IndustryMentorController(
             return BadRequest(new { message = "Tên định hướng là bắt buộc." });
         }
 
+        if (string.IsNullOrWhiteSpace(request.Level))
+        {
+            return BadRequest(new { message = "Cấp độ định hướng là bắt buộc." });
+        }
+
         var role = await dbContext.CareerRoles.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (role is null)
         {
             return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
         }
 
+        var name = request.Name.Trim();
+        var level = request.Level.Trim();
         var exists = await dbContext.CareerRoles.AnyAsync(
-            item => item.Name == request.Name.Trim() && item.Id != id,
+            item => item.Name == name && item.Level == level && item.Id != id,
             cancellationToken);
         if (exists)
         {
-            return Conflict(new { message = "Định hướng nghề nghiệp khác với tên này đã tồn tại." });
+            return Conflict(new { message = "Định hướng nghề nghiệp với tên và cấp độ này đã tồn tại." });
         }
 
-        role.Name = request.Name.Trim();
+        role.Name = name;
         role.Description = request.Description?.Trim();
-        role.Level = request.Level?.Trim();
+        role.Level = level;
         role.IsActive = request.IsActive;
         role.UpdatedAt = DateTimeOffset.UtcNow;
 
@@ -1154,6 +1168,7 @@ public sealed class IndustryMentorController(
                 p.Id,
                 CareerRoleId = p.CareerRoleId,
                 CareerRoleName = p.CareerRole.Name,
+                CareerRoleLevel = p.CareerRole.Level,
                 SkillId = p.SkillId,
                 SkillName = p.SkillName,
                 ActionType = p.ActionType,
@@ -1588,6 +1603,7 @@ public sealed class IndustryMentorController(
             requirement.Id,
             requirement.CareerRoleId,
             requirement.CareerRole.Name,
+            requirement.CareerRole.Level,
             requirement.SkillId,
             requirement.Skill.Name,
             requirement.RequiredLevel,
@@ -1796,6 +1812,7 @@ public sealed record RoleSkillRequirementResponse(
     Guid Id,
     Guid CareerRoleId,
     string CareerRoleName,
+    string? CareerRoleLevel,
     Guid SkillId,
     string SkillName,
     string RequiredLevel,

@@ -127,7 +127,7 @@ public sealed class RoadmapController(
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, responseNodes, false));
+        return CreatedAtAction(nameof(GetById), new { id = roadmap.Id }, ToResponse(roadmap, careerRole.Name, careerRole.Level, responseNodes, false));
     }
 
     [HttpGet("api/roadmap")]
@@ -180,6 +180,7 @@ public sealed class RoadmapController(
             return ToResponse(
                 roadmap,
                 roadmap.CareerRole.Name,
+                roadmap.CareerRole.Level,
                 nodesByRoadmap.GetValueOrDefault(roadmap.Id) ?? [],
                 isOutdated);
         }).ToList();
@@ -222,7 +223,7 @@ public sealed class RoadmapController(
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return Ok(ToResponse(roadmap, roadmap.CareerRole.Name, nodes, isOutdated));
+        return Ok(ToResponse(roadmap, roadmap.CareerRole.Name, roadmap.CareerRole.Level, nodes, isOutdated));
     }
 
     [HttpPost("api/roadmap/{id:guid}/regenerate")]
@@ -445,7 +446,7 @@ public sealed class RoadmapController(
             .OrderBy(node => node.OrderIndex)
             .ToListAsync(cancellationToken);
 
-        return Ok(ToResponse(existingRoadmap, careerRole.Name, responseNodes, false));
+        return Ok(ToResponse(existingRoadmap, careerRole.Name, careerRole.Level, responseNodes, false));
     }
 
     [HttpPut("api/roadmap-node/{id:guid}/status")]
@@ -1084,11 +1085,12 @@ public sealed class RoadmapController(
     private static string BuildGroupDescription(string groupName) =>
         $"Hoàn thành các module {groupName.ToLowerInvariant()} theo thứ tự ưu tiên trước khi chuyển sang phần học tiếp theo.";
 
-    private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
+    private static RoadmapResponse ToResponse(Roadmap roadmap, string careerRoleName, string? careerRoleLevel, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
         new(
             roadmap.Id,
             roadmap.CareerRoleId,
             careerRoleName,
+            careerRoleLevel,
             roadmap.SkillGapReportId,
             roadmap.Title,
             roadmap.Description,
@@ -1199,6 +1201,7 @@ public sealed record RoadmapResponse(
     Guid Id,
     Guid CareerRoleId,
     string CareerRoleName,
+    string? CareerRoleLevel,
     Guid? SkillGapReportId,
     string Title,
     string? Description,

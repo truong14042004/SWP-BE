@@ -54,8 +54,9 @@ public class SkillGapsController : ControllerBase
             targetRoleId = profile.TargetRoleId.Value;
         }
 
-        var roleExists = await _context.CareerRoles.AnyAsync(r => r.Id == targetRoleId);
-        if (!roleExists)
+        var careerRole = await _context.CareerRoles.AsNoTracking()
+            .SingleOrDefaultAsync(r => r.Id == targetRoleId);
+        if (careerRole is null)
         {
             return NotFound(new { message = "Không tìm thấy vai trò nghề nghiệp." });
         }
@@ -187,6 +188,8 @@ public class SkillGapsController : ControllerBase
             report.Id,
             report.UserId,
             report.CareerRoleId,
+            CareerRoleName = careerRole.Name,
+            CareerRoleLevel = careerRole.Level,
             SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
             report.VerifiedMatchScore,
@@ -251,6 +254,7 @@ public class SkillGapsController : ControllerBase
             report.UserId,
             report.CareerRoleId,
             CareerRoleName = report.CareerRole.Name,
+            CareerRoleLevel = report.CareerRole.Level,
             SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
             report.VerifiedMatchScore,
@@ -303,6 +307,7 @@ public class SkillGapsController : ControllerBase
             report.UserId,
             report.CareerRoleId,
             CareerRoleName = report.CareerRole.Name,
+            CareerRoleLevel = report.CareerRole.Level,
             SelfReportedMatchScore = report.MatchScore,
             report.MatchScore,
             report.VerifiedMatchScore,
