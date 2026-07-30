@@ -12,12 +12,40 @@ import re
 import sys
 from typing import Iterable
 
-from scrapling.fetchers import Fetcher
+from scrapling.fetchers import Fetcher, StealthyFetcher
 
 
 def _log(*values) -> None:
     """In thông tin chẩn đoán ra stderr, giữ stdout sạch để xuất JSON."""
     print(*values, file=sys.stderr)
+
+
+# TopCV bật Cloudflare chặn HTTP thuần (403 kể cả khi giả TLS fingerprint Chrome).
+# Chiến lược: thử Fetcher (nhanh, rẻ) trước; dính chặn thì chuyển hẳn sang
+# StealthyFetcher (Camoufox — trình duyệt chống nhận diện, giải được challenge)
+# cho tất cả trang còn lại trong phiên cào.
+_use_stealthy = False
+
+
+def _fetch_page(url: str, timeout: int):
+    global _use_stealthy
+    if not _use_stealthy:
+        try:
+            response = Fetcher.get(url, timeout=timeout)
+            if response.status == 200:
+                return response
+            _log(f"[scrape_topcv] HTTP thuần bị chặn (status {response.status}), chuyển sang StealthyFetcher.")
+        except Exception as exc:  # noqa: BLE001
+            _log(f"[scrape_topcv] HTTP thuần lỗi {exc!r}, chuyển sang StealthyFetcher.")
+        _use_stealthy = True
+
+    # timeout của StealthyFetcher tính bằng mili giây (theo Playwright).
+    return StealthyFetcher.fetch(
+        url,
+        headless=True,
+        solve_cloudflare=True,
+        timeout=max(timeout, 90) * 1000,
+    )
 
 import os
 
@@ -187,7 +215,7 @@ def scrape_topcv(
         url = f"{base_url}{sep}page={page}"
 
         try:
-            response = Fetcher.get(url, timeout=timeout)
+            response = _fetch_page(url, timeout)
         except Exception as exc:  # noqa: BLE001 - cào thất bại thì dừng an toàn
             _log(f"[scrape_topcv] Lỗi tải trang {page}: {exc!r}")
             break
