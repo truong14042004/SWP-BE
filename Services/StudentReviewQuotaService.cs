@@ -140,17 +140,23 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
                 return null;
             }
 
+            // So khớp key KHÔNG phân biệt hoa thường: dữ liệu plan thực tế đang lẫn
+            // "mentorReviewLimit" (Free) và "MentorReviewLimit" (Premium) — TryGetProperty
+            // case-sensitive từng làm gói trả phí rơi về hạn mức Free.
             foreach (var key in FeatureLimitKeys)
             {
-                if (!root.TryGetProperty(key, out var element))
+                foreach (var property in root.EnumerateObject())
                 {
-                    continue;
-                }
+                    if (!string.Equals(property.Name, key, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
 
-                var resolved = ResolveLimitValue(element);
-                if (resolved.HasValue)
-                {
-                    return resolved.Value;
+                    var resolved = ResolveLimitValue(property.Value);
+                    if (resolved.HasValue)
+                    {
+                        return resolved.Value;
+                    }
                 }
             }
         }

@@ -636,7 +636,10 @@ public sealed class IndustryMentorController(
         }
 
         dbContext.LearningResources.Add(resource);
+        // Tài liệu mới cũng là thay đổi giáo trình — bump mốc và báo sinh viên như update/delete.
+        var createTouchedRoleIds = await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyRoadmapCatalogUpdatedAsync(createTouchedRoleIds, cancellationToken);
         await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
 
         return CreatedAtAction(nameof(GetLearningResource), new { id = resource.Id }, ToResponse(resource));
@@ -715,13 +718,15 @@ public sealed class IndustryMentorController(
 
         // Giáo trình đổi thì sinh viên các nghề dùng kỹ năng này cần được gợi ý
         // cập nhật lộ trình (bump cả skill cũ nếu tài nguyên bị chuyển sang skill khác).
-        await TouchCareerRolesForSkillAsync(previousSkillId, cancellationToken);
+        var touchedRoleIds = new List<Guid>();
+        touchedRoleIds.AddRange(await TouchCareerRolesForSkillAsync(previousSkillId, cancellationToken));
         if (resource.SkillId != previousSkillId)
         {
-            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
+            touchedRoleIds.AddRange(await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken));
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyRoadmapCatalogUpdatedAsync(touchedRoleIds.Distinct().ToList(), cancellationToken);
         await dbContext.Entry(resource).Reference(item => item.Skill).LoadAsync(cancellationToken);
 
         return Ok(ToResponse(resource));
@@ -748,8 +753,9 @@ public sealed class IndustryMentorController(
         {
             resource.IsActive = false;
             resource.UpdatedAt = DateTimeOffset.UtcNow;
-            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
+            var softDeleteTouchedRoleIds = await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+            await NotifyRoadmapCatalogUpdatedAsync(softDeleteTouchedRoleIds, cancellationToken);
             return NoContent();
         }
 
@@ -760,8 +766,9 @@ public sealed class IndustryMentorController(
         }
 
         dbContext.LearningResources.Remove(resource);
-        await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
+        var touchedRoleIds = await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyRoadmapCatalogUpdatedAsync(touchedRoleIds, cancellationToken);
 
         return NoContent();
     }
@@ -842,6 +849,7 @@ public sealed class IndustryMentorController(
 
         dbContext.RoleSkillRequirements.Add(requirement);
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyRoadmapCatalogUpdatedAsync([requirement.CareerRoleId], cancellationToken);
         await dbContext.Entry(requirement).Reference(item => item.CareerRole).LoadAsync(cancellationToken);
         await dbContext.Entry(requirement).Reference(item => item.Skill).LoadAsync(cancellationToken);
 
@@ -877,6 +885,7 @@ public sealed class IndustryMentorController(
             return Conflict(new { message = "Định hướng nghề nghiệp này đã có yêu cầu cho kỹ năng được chọn." });
         }
 
+        var previousCareerRoleId = requirement.CareerRoleId;
         requirement.CareerRoleId = request.CareerRoleId;
         requirement.SkillId = request.SkillId;
         requirement.RequiredLevel = request.RequiredLevel!.Trim();
@@ -885,6 +894,11 @@ public sealed class IndustryMentorController(
         requirement.UpdatedAt = DateTimeOffset.UtcNow;
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        // Báo cả role cũ nếu requirement bị chuyển sang role khác.
+        var affectedRoleIds = previousCareerRoleId == request.CareerRoleId
+            ? new[] { request.CareerRoleId }
+            : new[] { request.CareerRoleId, previousCareerRoleId };
+        await NotifyRoadmapCatalogUpdatedAsync(affectedRoleIds, cancellationToken);
         await dbContext.Entry(requirement).Reference(item => item.CareerRole).LoadAsync(cancellationToken);
         await dbContext.Entry(requirement).Reference(item => item.Skill).LoadAsync(cancellationToken);
 
@@ -914,6 +928,7 @@ public sealed class IndustryMentorController(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+        await NotifyRoadmapCatalogUpdatedAsync([requirement.CareerRoleId], cancellationToken);
 
         return NoContent();
     }
@@ -1677,11 +1692,11 @@ public sealed class IndustryMentorController(
     /// không bump, mentor đổi/gỡ giáo trình xong sinh viên không hề được gợi ý
     /// cập nhật lộ trình. KHÔNG tự SaveChanges — caller lưu chung một transaction.
     /// </summary>
-    private async Task TouchCareerRolesForSkillAsync(Guid? skillId, CancellationToken cancellationToken)
+    private async Task<IReadOnlyList<Guid>> TouchCareerRolesForSkillAsync(Guid? skillId, CancellationToken cancellationToken)
     {
         if (skillId is not Guid targetSkillId)
         {
-            return;
+            return [];
         }
 
         var roles = await dbContext.CareerRoles
@@ -1693,6 +1708,51 @@ public sealed class IndustryMentorController(
         foreach (var role in roles)
         {
             role.UpdatedAt = now;
+        }
+
+        return roles.Select(role => role.Id).ToList();
+    }
+
+    /// <summary>
+    /// Đẩy notification realtime "lộ trình có cập nhật mới" tới các sinh viên đang có
+    /// roadmap thuộc những nghề bị ảnh hưởng — banner isOutdated vốn chỉ tính lúc tải
+    /// trang, có tín hiệu này FE mới biết đường tự tải lại. Gọi SAU SaveChanges.
+    /// Bỏ qua sinh viên còn notification cùng loại chưa đọc để không spam khi mentor
+    /// sửa nhiều tài liệu liên tiếp.
+    /// </summary>
+    private async Task NotifyRoadmapCatalogUpdatedAsync(
+        IReadOnlyCollection<Guid> careerRoleIds,
+        CancellationToken cancellationToken)
+    {
+        if (careerRoleIds.Count == 0)
+        {
+            return;
+        }
+
+        var studentIds = await dbContext.Roadmaps
+            .Where(roadmap => careerRoleIds.Contains(roadmap.CareerRoleId))
+            .Select(roadmap => roadmap.UserId)
+            .Distinct()
+            .ToListAsync(cancellationToken);
+
+        foreach (var studentId in studentIds)
+        {
+            var hasUnread = await dbContext.Notifications.AnyAsync(
+                item => item.UserId == studentId && item.Type == "RoadmapCatalogUpdated" && !item.IsRead,
+                cancellationToken);
+            if (hasUnread)
+            {
+                continue;
+            }
+
+            await notificationService.SendNotificationAsync(
+                studentId,
+                "RoadmapCatalogUpdated",
+                "Lộ trình học tập có cập nhật mới",
+                "Giáo trình hoặc yêu cầu kỹ năng của vai trò bạn theo học vừa thay đổi. Bấm \"Cập nhật lộ trình\" để đồng bộ.",
+                "#roadmap",
+                null,
+                cancellationToken);
         }
     }
 
