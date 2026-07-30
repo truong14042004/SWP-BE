@@ -1098,6 +1098,41 @@ public sealed class IndustryMentorController(
         });
     }
 
+    [HttpDelete("career-roles/{id:guid}")]
+    public async Task<IActionResult> DeleteCareerRole(Guid id, CancellationToken cancellationToken)
+    {
+        var role = await dbContext.CareerRoles.SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
+        if (role is null)
+        {
+            return NotFound(new { message = "Không tìm thấy định hướng nghề nghiệp." });
+        }
+
+        var isBeingLearned = await dbContext.Roadmaps.AnyAsync(
+            roadmap => roadmap.CareerRoleId == id,
+            cancellationToken);
+        if (isBeingLearned)
+        {
+            return Conflict(new
+            {
+                message = "Không thể xoá định hướng nghề nghiệp vì đang có sinh viên đang học."
+            });
+        }
+
+        // SkillGapReports.CareerRoleId is Restrict — remove reports (items cascade) before role.
+        var skillGapReports = await dbContext.SkillGapReports
+            .Where(report => report.CareerRoleId == id)
+            .ToListAsync(cancellationToken);
+        if (skillGapReports.Count > 0)
+        {
+            dbContext.SkillGapReports.RemoveRange(skillGapReports);
+        }
+
+        dbContext.CareerRoles.Remove(role);
+        await dbContext.SaveChangesAsync(cancellationToken);
+
+        return NoContent();
+    }
+
     [HttpPost("auto-evolve/generate/{careerRoleId:guid}")]
     public async Task<IActionResult> GenerateProposals(Guid careerRoleId, CancellationToken cancellationToken)
     {
