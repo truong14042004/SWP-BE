@@ -280,7 +280,7 @@ public sealed class AppDbContext(DbContextOptions<AppDbContext> options) : DbCon
         {
             entity.ToTable("career_roles");
             entity.HasKey(role => role.Id);
-            entity.HasIndex(role => role.Name).IsUnique();
+            entity.HasIndex(role => new { role.Name, role.Level }).IsUnique();
             entity.HasIndex(role => role.IsActive);
             entity.Property(role => role.Name).HasMaxLength(150).IsRequired();
             entity.Property(role => role.Description).HasMaxLength(2000);

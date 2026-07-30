@@ -410,7 +410,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
         bool isOutdated = roadmap.CreatedAt < latestUpdate;
 
-        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, nodes, isOutdated));
+        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, roadmap.CareerRole.Level, nodes, isOutdated));
     }
 
     // POST /api/counselor/feedback
@@ -635,11 +635,12 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
     // ── Mappers for RoadmapResponse ──────────────────────────────────────────
 
-    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
+    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, string? careerRoleLevel, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
         new(
             roadmap.Id,
             roadmap.CareerRoleId,
             careerRoleName,
+            careerRoleLevel,
             roadmap.SkillGapReportId,
             roadmap.Title,
             roadmap.Description,

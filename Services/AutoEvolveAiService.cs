@@ -77,6 +77,7 @@ Cấu trúc đối tượng JSON mong muốn:
         var marketTrendsJson = JsonSerializer.Serialize(relevantTrends);
 
         var userPrompt = $@"Định hướng nghề nghiệp: {role.Name}
+Cấp độ: {role.Level}
         
 Yêu cầu hiện tại:
 {currentReqJson}
