@@ -303,9 +303,21 @@ public sealed class RoadmapController(
             .Where(g => g.Select(n => n.Status).Distinct().Count() == 1)
             .ToDictionary(g => g.Key, g => g.First().Status);
 
+        // Giữ lại node của các skill đã Completed/Verified: kỹ năng đạt mức yêu cầu
+        // sẽ bị bộ sinh node loại (roadmap = phần còn thiếu), nhưng xoá module sinh
+        // viên vừa học xong khỏi lộ trình làm mất cảm giác tiến độ — giữ node lại
+        // như "chứng tích", trạng thái cũ được khôi phục ở bước restore bên dưới.
+        var completedSkillIds = existingNodes
+            .Where(n => n.SkillId is not null
+                && (string.Equals(n.Status, "Completed", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(n.Status, "Verified", StringComparison.OrdinalIgnoreCase)))
+            .Select(n => n.SkillId!.Value)
+            .Distinct()
+            .ToList();
+
         var nodeInputs = skillGapReportId is not null
-            ? await GetNodesFromSkillGapAsync(skillGapReportId.Value, cancellationToken)
-            : await GetNodesFromRoleRequirementsAsync(careerRole.Id, cancellationToken);
+            ? await GetNodesFromSkillGapAsync(skillGapReportId.Value, cancellationToken, completedSkillIds)
+            : await GetNodesFromRoleRequirementsAsync(careerRole.Id, cancellationToken, completedSkillIds);
 
         if (nodeInputs.Count == 0)
         {
@@ -1119,7 +1131,8 @@ public sealed class RoadmapController(
 
     private async Task<List<RoadmapNodeInput>> GetNodesFromSkillGapAsync(
         Guid skillGapReportId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<Guid>? keepSkillIds = null)
     {
         var reportItems = await dbContext.SkillGapReportItems
             .AsNoTracking()
@@ -1160,6 +1173,14 @@ public sealed class RoadmapController(
             // gap cũ vẫn sinh node thừa".
             .Where(item =>
             {
+                // Regenerate truyền keepSkillIds = các skill có node cũ đã Completed/Verified:
+                // kỹ năng đạt yêu cầu rồi vẫn giữ node lại (trạng thái được khôi phục bên
+                // caller) thay vì xoá — sinh viên không bị "mất" module vừa học xong.
+                if (keepSkillIds is not null && keepSkillIds.Contains(item.SkillId))
+                {
+                    return true;
+                }
+
                 var requiredRank = LevelRank(item.RequiredLevel);
                 if (requiredRank == 0)
                 {
@@ -1184,7 +1205,8 @@ public sealed class RoadmapController(
 
     private async Task<List<RoadmapNodeInput>> GetNodesFromRoleRequirementsAsync(
         Guid careerRoleId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        IReadOnlyCollection<Guid>? keepSkillIds = null)
     {
         var userSkills = await dbContext.UserSkills
             .AsNoTracking()
@@ -1216,7 +1238,9 @@ public sealed class RoadmapController(
         var resourcesBySkill = await GetActiveResourcesBySkillAsync(requirementSkillIds, cancellationToken, levelBoundsBySkill);
 
         return requirements
-            .Where(requirement => !userSkills.TryGetValue(requirement.SkillId, out var userSkill)
+            // keepSkillIds: xem ghi chú cùng tên ở GetNodesFromSkillGapAsync.
+            .Where(requirement => (keepSkillIds is not null && keepSkillIds.Contains(requirement.SkillId))
+                || !userSkills.TryGetValue(requirement.SkillId, out var userSkill)
                 || !userSkill.IsVerified
                 || LevelRank(string.IsNullOrWhiteSpace(userSkill.VerifiedLevel) ? userSkill.Level : userSkill.VerifiedLevel) < LevelRank(requirement.RequiredLevel))
             .Select(requirement =>
