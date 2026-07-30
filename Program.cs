@@ -50,7 +50,10 @@ builder.Services.AddScoped<IGoogleAuthService, GoogleAuthService>();
 builder.Services.AddScoped<IPasswordAuthService, PasswordAuthService>();
 builder.Services.AddScoped<IEmailSender, SmtpEmailSender>();
 builder.Services.AddScoped<IPasswordHasher<User>, PasswordHasher<User>>();
-builder.Services.AddSingleton(_ => StorageClient.Create());
+// PublicationOnly: không cache exception của lần khởi tạo đầu — nếu dùng mặc định
+// (ExecutionAndPublication), một trục trặc tạm thời lúc cold start (metadata server
+// chậm) sẽ làm MỌI thao tác storage lỗi vĩnh viễn cho tới khi restart process.
+builder.Services.AddSingleton(_ => new Lazy<StorageClient>(StorageClient.Create, LazyThreadSafetyMode.PublicationOnly));
 builder.Services.AddScoped<IFileStorageService, GoogleCloudStorageService>();
 builder.Services.AddScoped<IPaymentProcessingService, PaymentProcessingService>();
 builder.Services.AddScoped<IStudentReviewQuotaService, StudentReviewQuotaService>();
@@ -60,9 +63,11 @@ builder.Services.AddHttpClient<IAiTextGenerationService, GeminiTextGenerationSer
 builder.Services.AddScoped<IAiReviewSummaryService, AiReviewSummaryService>();
 builder.Services.AddScoped<IAutoEvolveAiService, AutoEvolveAiService>();
 builder.Services.AddScoped<INotificationService, NotificationService>();
+builder.Services.AddScoped<IAuditLogService, AuditLogService>();
 builder.Services.AddHttpClient<IGitHubAnalysisService, GitHubAnalysisService>();
 builder.Services.AddScoped<ILatentTalentAiService, LatentTalentAiService>();
 builder.Services.AddScoped<IRoadmapMaterializer, RoadmapMaterializer>();
+builder.Services.AddScoped<IRoadmapResourceProvisioner, RoadmapResourceProvisioner>();
 builder.Services.AddSingleton<ISkillExtractor, SkillExtractor>();
 // TopCV được cào bằng script Python (Scrapling) chạy như tiến trình con ngay
 // trong cùng container — không cần service riêng, không HTTP, không token.
@@ -144,7 +149,10 @@ builder.Services.AddCors(options =>
             .WithOrigins(allowedOrigins)
             .AllowAnyHeader()
             .AllowAnyMethod()
-            .AllowCredentials();
+            .AllowCredentials()
+            // Cho FE đọc tên file gốc khi tải blob (Content-Disposition là
+            // response header, AllowAnyHeader chỉ áp cho request header).
+            .WithExposedHeaders("Content-Disposition");
     });
 });
 
@@ -200,12 +208,16 @@ using (var scope = app.Services.CreateScope())
 app.Use(async (context, next) =>
 {
     var origin = context.Request.Headers.Origin.ToString().Trim().TrimEnd('/');
+    var requestedHeaders = context.Request.Headers.AccessControlRequestHeaders.ToString();
+    var allowedHeaders = string.IsNullOrWhiteSpace(requestedHeaders)
+        ? "content-type, authorization, x-requested-with"
+        : requestedHeaders;
     if (!string.IsNullOrWhiteSpace(origin)
         && allowedOrigins.Contains(origin, StringComparer.OrdinalIgnoreCase))
     {
         context.Response.Headers.AccessControlAllowOrigin = origin;
         context.Response.Headers.Vary = "Origin";
-        context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
+        context.Response.Headers.AccessControlAllowHeaders = allowedHeaders;
         context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
         context.Response.Headers.AccessControlAllowCredentials = "true";
     }
@@ -233,7 +245,7 @@ app.Use(async (context, next) =>
             {
                 context.Response.Headers.AccessControlAllowOrigin = origin;
                 context.Response.Headers.Vary = "Origin";
-                context.Response.Headers.AccessControlAllowHeaders = "content-type, authorization";
+                context.Response.Headers.AccessControlAllowHeaders = allowedHeaders;
                 context.Response.Headers.AccessControlAllowMethods = "GET, POST, PUT, PATCH, DELETE, OPTIONS";
             }
 

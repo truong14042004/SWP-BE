@@ -120,7 +120,10 @@ public sealed class SearchController(AppDbContext dbContext) : ControllerBase
                 r.Skill != null ? r.Skill.Category : null,
                 r.Title,
                 r.Url,
-                r.StorageObjectName == null ? "Link" : "File",
+                // Cùng luật với LearningResourceFiles.SourceType: marker "auto:*" legacy
+                // là link ngoài, không phải file GCS (viết inline + ToLower để EF dịch
+                // sang SQL và khớp OrdinalIgnoreCase của helper).
+                r.StorageObjectName == null || r.StorageObjectName.ToLower().StartsWith("auto:") ? "Link" : "File",
                 r.ContentType,
                 r.FileSize,
                 r.ResourceType,

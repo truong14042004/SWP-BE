@@ -140,7 +140,7 @@ public sealed partial class PortfolioController(AppDbContext dbContext) : Contro
         return Ok(await ToResponse(portfolio, cancellationToken));
     }
 
-    [Authorize]
+    [Authorize(Roles = UserRoles.Student)]
     [HttpPost("publish")]
     public async Task<ActionResult<PortfolioResponse>> Publish(CancellationToken cancellationToken)
     {

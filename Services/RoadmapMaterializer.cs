@@ -15,11 +15,16 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
 {
     private readonly AppDbContext _dbContext;
     private readonly ILogger<RoadmapMaterializer> _logger;
+    private readonly IRoadmapResourceProvisioner _resourceProvisioner;
 
-    public RoadmapMaterializer(AppDbContext dbContext, ILogger<RoadmapMaterializer> logger)
+    public RoadmapMaterializer(
+        AppDbContext dbContext,
+        ILogger<RoadmapMaterializer> logger,
+        IRoadmapResourceProvisioner resourceProvisioner)
     {
         _dbContext = dbContext;
         _logger = logger;
+        _resourceProvisioner = resourceProvisioner;
     }
 
     public async Task<MaterializeResult> MaterializeRoadmapAsync(
@@ -133,18 +138,62 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         var resourceIdsByTitle = resources
             .GroupBy(item => item.Title, StringComparer.OrdinalIgnoreCase)
             .ToDictionary(group => group.Key, group => group.First().Id, StringComparer.OrdinalIgnoreCase);
+
+        // Chỉ chọn tài liệu ĐÚNG mức sinh viên đang cần học (mức verified + 1),
+        // không gắn cả tài liệu Beginner lẫn Advanced vào cùng 1 node.
+        var verifiedLevelBySkill = await _dbContext.UserSkills
+            .AsNoTracking()
+            .Where(us => us.UserId == userId && us.IsVerified)
+            .Select(us => new { us.SkillId, us.VerifiedLevel, us.Level })
+            .ToDictionaryAsync(
+                us => us.SkillId,
+                us => LevelRank(string.IsNullOrWhiteSpace(us.VerifiedLevel) ? us.Level : us.VerifiedLevel),
+                cancellationToken);
+
+        var requiredLevelBySkill = await _dbContext.RoleSkillRequirements
+            .AsNoTracking()
+            .Where(item => item.CareerRoleId == targetRoleId.Value)
+            .ToDictionaryAsync(item => item.SkillId, item => LevelRank(item.RequiredLevel), cancellationToken);
+
         var resourceIdsBySkill = resources
             .Where(item => item.SkillId is not null)
             .GroupBy(item => item.SkillId!.Value)
             .ToDictionary(
                 group => group.Key,
-                group => (IReadOnlyList<Guid>)group
-                    .OrderBy(item => item.LessonNumber)
-                    .ThenBy(item => DifficultyRank(item.Difficulty))
-                    .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
-                    .ThenBy(item => item.Title)
-                    .Select(item => item.Id)
-                    .ToList());
+                group =>
+                {
+                    var ordered = group
+                        .OrderBy(item => DifficultyRank(item.Difficulty))
+                        .ThenBy(item => item.LessonNumber)
+                        .ThenBy(item => item.StorageObjectName == null ? 0 : 1)
+                        .ThenBy(item => item.Title)
+                        .ToList();
+
+                    var min = verifiedLevelBySkill.GetValueOrDefault(group.Key, 0);
+                    var max = requiredLevelBySkill.GetValueOrDefault(group.Key, 0);
+                    var targetRank = min + 1;
+                    if (max > 0 && targetRank > max)
+                    {
+                        targetRank = max;
+                    }
+
+                    bool Unknown(string? d) => string.IsNullOrWhiteSpace(d);
+
+                    var primary = ordered
+                        .Where(item => Unknown(item.Difficulty) || DifficultyRank(item.Difficulty) == targetRank)
+                        .ToList();
+
+                    var chosen = primary.Count > 0
+                        ? primary
+                        : ordered
+                            .Where(item => Unknown(item.Difficulty)
+                                || (DifficultyRank(item.Difficulty) > min && (max <= 0 || DifficultyRank(item.Difficulty) <= max)))
+                            .ToList();
+
+                    return (IReadOnlyList<Guid>)(chosen.Count > 0 ? chosen : ordered)
+                        .Select(item => item.Id)
+                        .ToList();
+                });
 
         var allowedModuleTitles = skillIdsByTitle.Keys
             .Concat(resourceIdsByTitle.Keys)
@@ -170,6 +219,92 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         if (nodes.Count == 0)
         {
             throw new InvalidOperationException("Lộ trình phải chứa ít nhất một module.");
+        }
+
+        // FR2.3: đảm bảo mỗi technical node (không phải Group) có tối thiểu 2 tài nguyên học tập.
+        var existingCountByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Count());
+        // Tập resource đã gắn cho mỗi node để loại trùng (unique index NodeId, ResourceId).
+        var existingResourceIdsByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToHashSet());
+        // Cấp độ node đang dạy = độ khó thấp nhất trong các tài nguyên đã gắn,
+        // để tài nguyên auto-sinh khớp level thay vì mặc định Beginner.
+        var difficultyByResourceId = resources.ToDictionary(item => item.Id, item => item.Difficulty);
+        var resourceIdsByNode = nodeResources
+            .GroupBy(item => item.RoadmapNodeId)
+            .ToDictionary(group => group.Key, group => group.Select(item => item.LearningResourceId).ToList());
+
+        string? NodeTargetDifficulty(Guid nodeId, Guid? skillId)
+        {
+            var knownRanks = resourceIdsByNode.GetValueOrDefault(nodeId, [])
+                .Select(resourceId => SkillLevels.DifficultyRank(difficultyByResourceId.GetValueOrDefault(resourceId)))
+                .Where(rank => rank != SkillLevels.UnknownDifficultyRank)
+                .ToList();
+            if (knownRanks.Count > 0)
+            {
+                return SkillLevels.RankToDifficulty(knownRanks.Min());
+            }
+
+            // Node không có tài nguyên gắn nhãn (đối tượng chính của FR2.3): suy level
+            // theo thiết kế "học level kế tiếp" — VerifiedLevel + 1, cap RequiredLevel —
+            // thay vì để provisioner rơi về Beginner mặc định.
+            if (skillId is not Guid sid)
+            {
+                return null;
+            }
+
+            var fallback = verifiedLevelBySkill.GetValueOrDefault(sid, 0) + 1;
+            var requiredRank = requiredLevelBySkill.GetValueOrDefault(sid, 0);
+            if (requiredRank > 0 && fallback > requiredRank)
+            {
+                fallback = requiredRank;
+            }
+
+            // Clamp về Expert (xem RoadmapController.BuildMinimumResourceTopUpAsync).
+            return SkillLevels.RankToDifficulty(Math.Min(fallback, 4));
+        }
+
+        var topUpContexts = nodes
+            .Where(node => !node.NodeType.Equals("Group", StringComparison.OrdinalIgnoreCase))
+            .Select(node => new NodeResourceContext(
+                node.Id,
+                node.SkillId,
+                node.Title,
+                existingCountByNode.GetValueOrDefault(node.Id, 0),
+                NodeTargetDifficulty(node.Id, node.SkillId)))
+            .ToList();
+        var topUp = await _resourceProvisioner.EnsureMinimumResourcesAsync(
+            topUpContexts, 2, now, cancellationToken);
+        foreach (var node in nodes)
+        {
+            if (!topUp.TryGetValue(node.Id, out var extraIds) || extraIds.Count == 0)
+            {
+                continue;
+            }
+
+            var alreadyOnNode = existingResourceIdsByNode.GetValueOrDefault(node.Id, []);
+            var newIds = extraIds.Where(id => alreadyOnNode.Add(id)).ToList();
+            if (newIds.Count == 0)
+            {
+                continue;
+            }
+
+            var startIndex = existingCountByNode.GetValueOrDefault(node.Id, 0);
+            for (var i = 0; i < newIds.Count; i++)
+            {
+                nodeResources.Add(new RoadmapNodeResource
+                {
+                    Id = Guid.NewGuid(),
+                    RoadmapNodeId = node.Id,
+                    LearningResourceId = newIds[i],
+                    OrderIndex = startIndex + i + 1,
+                    CreatedAt = now
+                });
+            }
+
+            node.LearningResourceId ??= newIds[0];
         }
 
         try
@@ -278,7 +413,10 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
                 }
             }
 
-            var safeLevel = level < 0 ? 0 : level;
+            // Clamp cả hai đầu: cây node do AI sinh không giới hạn độ sâu, mà DB có
+            // check constraint CK_roadmap_nodes_Level (0..8) — lồng quá sâu sẽ làm
+            // vỡ transaction duyệt lộ trình của cố vấn.
+            var safeLevel = Math.Clamp(level, 0, 8);
             var priority = item.Priority switch
             {
                 null => 5,
@@ -336,11 +474,7 @@ public sealed class RoadmapMaterializer : IRoadmapMaterializer
         }
     }
 
-    private static int DifficultyRank(string? difficulty) => difficulty?.Trim().ToLowerInvariant() switch
-    {
-        "beginner" or "basic" or "cơ bản" => 0,
-        "intermediate" or "trung cấp" => 1,
-        "advanced" or "nâng cao" => 2,
-        _ => 3
-    };
+    private static int DifficultyRank(string? difficulty) => SkillLevels.DifficultyRank(difficulty);
+
+    private static int LevelRank(string? level) => SkillLevels.LevelRank(level);
 }

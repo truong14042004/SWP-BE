@@ -16,6 +16,7 @@ public interface IUserSkillSyncService
         Guid skillId,
         Guid careerRoleId,
         Guid verifierId,
+        string? nodeDifficulty,
         CancellationToken cancellationToken);
 }
 
@@ -26,6 +27,7 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
         Guid skillId,
         Guid careerRoleId,
         Guid verifierId,
+        string? nodeDifficulty,
         CancellationToken cancellationToken)
     {
         if (userId == Guid.Empty || skillId == Guid.Empty)
@@ -47,9 +49,34 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
                 item => item.UserId == userId && item.SkillId == skillId,
                 cancellationToken);
 
+        // Ưu tiên level thực của node (Difficulty trên LearningResource) làm VerifiedLevel.
+        // Nếu node không có difficulty, fallback về RoleSkillRequirement.RequiredLevel —
+        // nhưng CAP ở (verified hiện tại + 1): một lần verify chỉ tiến đúng một bậc,
+        // không được nhảy thẳng lên Advanced/Expert của requirement.
+        var nodeLevel = DifficultyToLevel(nodeDifficulty);
+        string resolvedLevel;
+        if (!string.IsNullOrWhiteSpace(nodeLevel))
+        {
+            resolvedLevel = nodeLevel!;
+        }
+        else
+        {
+            var requirementLevel = await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
+            var requirementRank = SkillLevels.LevelRank(requirementLevel);
+            if (requirementRank == 0)
+            {
+                // Chuỗi không nhận diện được (dữ liệu legacy/seed) -> mặc định Intermediate.
+                requirementRank = 2;
+            }
+
+            var capRank = Math.Clamp(SkillLevels.LevelRank(existing?.VerifiedLevel) + 1, 1, 4);
+            resolvedLevel = SkillLevels.RankToDifficulty(Math.Min(requirementRank, capRank))!;
+        }
+
         if (existing is not null)
         {
-            // Học viên đã tự khai kỹ năng này: giữ nguyên Level, chỉ đánh dấu đã xác minh.
+            // Học viên đã tự khai kỹ năng này: giữ nguyên Level tự khai, nhưng cập nhật
+            // VerifiedLevel lên mức của node vừa được verify (nếu cao hơn mức đã verify).
             if (!existing.IsVerified)
             {
                 existing.IsVerified = true;
@@ -58,18 +85,37 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
                 existing.UpdatedAt = now;
             }
 
+            existing.VerificationStatus = UserSkillVerificationStatus.Verified;
+            existing.RejectionReason = null;
+
+            // Chỉ nâng VerifiedLevel lên mức mới nếu cao hơn mức đã verify hiện tại.
+            // Nếu VerifiedLevel đang null, dùng resolvedLevel làm baseline (không dùng
+            // Level tự khai vì mentor chưa xác nhận mức đó).
+            var currentVerifiedRank = LevelRank(existing.VerifiedLevel);
+            if (LevelRank(resolvedLevel) > currentVerifiedRank
+                || string.IsNullOrWhiteSpace(existing.VerifiedLevel))
+            {
+                existing.VerifiedLevel = resolvedLevel;
+                // Level mới thì người/thời điểm xác minh cũng phải là của lần verify này,
+                // không giữ audit của lần verify cũ cho một mức level khác.
+                existing.VerifiedByUserId = verifierId;
+                existing.VerifiedAt = now;
+            }
+
+            existing.UpdatedAt = now;
+
             return;
         }
-
-        var level = await ResolveLevelAsync(careerRoleId, skillId, cancellationToken);
 
         dbContext.UserSkills.Add(new UserSkill
         {
             Id = Guid.NewGuid(),
             UserId = userId,
             SkillId = skillId,
-            Level = level,
+            Level = resolvedLevel,
+            VerifiedLevel = resolvedLevel,
             IsVerified = true,
+            VerificationStatus = UserSkillVerificationStatus.Verified,
             VerifiedByUserId = verifierId,
             VerifiedAt = now,
             CreatedAt = now,
@@ -93,11 +139,12 @@ public sealed class UserSkillSyncService(AppDbContext dbContext) : IUserSkillSyn
             return "Intermediate";
         }
 
-        // Cấp độ hợp lệ của UserSkill: Beginner / Intermediate / Advanced.
-        // RoleSkillRequirement có thể là "Expert" -> ánh xạ xuống "Advanced".
-        var normalized = requiredLevel.Trim();
-        return normalized.Equals("Expert", StringComparison.OrdinalIgnoreCase)
-            ? "Advanced"
-            : normalized;
+        // Expert là cấp độ UserSkill hợp lệ — nếu ép xuống Advanced thì requirement
+        // mức Expert không bao giờ được thoả (rank 3 < 4 vĩnh viễn).
+        return requiredLevel.Trim();
     }
+
+    private static int LevelRank(string? level) => SkillLevels.LevelRank(level);
+
+    private static string? DifficultyToLevel(string? difficulty) => SkillLevels.DifficultyToLevel(difficulty);
 }

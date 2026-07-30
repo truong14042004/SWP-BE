@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -58,14 +59,23 @@ public sealed class LearningResourcesController(AppDbContext dbContext) : Contro
             resource.SkillId,
             resource.Skill?.Name,
             resource.Title,
-            resource.Url,
-            resource.StorageObjectName is null ? "Link" : "File",
+            ToExternalResourceUrl(resource.Url),
+            LearningResourceFiles.SourceType(resource.StorageObjectName),
             resource.ContentType,
             resource.FileSize,
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
             resource.LessonNumber);
+
+    private static string ToExternalResourceUrl(string? url)
+    {
+        var trimmedUrl = url?.Trim();
+        return string.IsNullOrWhiteSpace(trimmedUrl)
+            || trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase)
+                ? string.Empty
+                : trimmedUrl;
+    }
 }
 
 public sealed record StudentLearningResourceResponse(

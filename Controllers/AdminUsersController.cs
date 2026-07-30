@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Npgsql;
 using SWP_BE.Data;
 using SWP_BE.Models;
 using SWP_BE.Services;
@@ -15,7 +16,8 @@ namespace SWP_BE.Controllers;
 public sealed class AdminUsersController(
     AppDbContext dbContext,
     IPasswordHasher<User> passwordHasher,
-    IFileStorageService storageService) : ControllerBase
+    IFileStorageService storageService,
+    IAuditLogService auditLog) : ControllerBase
 {
     private static readonly HashSet<string> ImageContentTypes = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -117,6 +119,17 @@ public sealed class AdminUsersController(
         dbContext.Users.Add(user);
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await auditLog.LogAsync(
+            actorUserId: GetCurrentUserId(),
+            actorRole: UserRoles.Admin,
+            action: "AdminUserCreated",
+            entityType: "User",
+            entityId: user.Id,
+            targetUserId: user.Id,
+            summary: $"Tạo tài khoản {user.Username} với vai trò {user.Role}.",
+            metadata: new { user.Username, user.Email, user.Role, user.IsActive },
+            cancellationToken: cancellationToken);
+
         return CreatedAtAction(nameof(GetUser), new { id = user.Id }, ToResponse(user));
     }
 
@@ -183,6 +196,17 @@ public sealed class AdminUsersController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await auditLog.LogAsync(
+            actorUserId: currentUserId,
+            actorRole: UserRoles.Admin,
+            action: "AdminUserUpdated",
+            entityType: "User",
+            entityId: user.Id,
+            targetUserId: user.Id,
+            summary: $"Cập nhật tài khoản {user.Username} (vai trò {user.Role}, hoạt động: {user.IsActive}).",
+            metadata: new { user.Username, user.Email, user.Role, user.IsActive, PasswordChanged = !string.IsNullOrWhiteSpace(request.Password) },
+            cancellationToken: cancellationToken);
+
         return Ok(ToResponse(user));
     }
 
@@ -212,6 +236,17 @@ public sealed class AdminUsersController(
 
         await dbContext.SaveChangesAsync(cancellationToken);
 
+        await auditLog.LogAsync(
+            actorUserId: GetCurrentUserId(),
+            actorRole: UserRoles.Admin,
+            action: request.IsActive ? "AdminUserEnabled" : "AdminUserDisabled",
+            entityType: "User",
+            entityId: user.Id,
+            targetUserId: user.Id,
+            summary: $"{(request.IsActive ? "Kích hoạt" : "Vô hiệu hóa")} tài khoản {user.Username}.",
+            metadata: new { user.Username, user.IsActive },
+            cancellationToken: cancellationToken);
+
         return Ok(ToResponse(user));
     }
 
@@ -240,10 +275,22 @@ public sealed class AdminUsersController(
 
         if (user.Role != role)
         {
+            var previousRole = user.Role;
             user.Role = role;
             user.UpdatedAt = DateTimeOffset.UtcNow;
             await RevokeUserRefreshTokensAsync(user.Id, cancellationToken);
             await dbContext.SaveChangesAsync(cancellationToken);
+
+            await auditLog.LogAsync(
+                actorUserId: GetCurrentUserId(),
+                actorRole: UserRoles.Admin,
+                action: "AdminUserRoleChanged",
+                entityType: "User",
+                entityId: user.Id,
+                targetUserId: user.Id,
+                summary: $"Đổi vai trò {user.Username}: {previousRole} → {role}.",
+                metadata: new { user.Username, PreviousRole = previousRole, NewRole = role },
+                cancellationToken: cancellationToken);
         }
 
         return Ok(ToResponse(user));
@@ -306,10 +353,26 @@ public sealed class AdminUsersController(
         {
             await dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (DbUpdateException)
+        catch (DbUpdateException ex) when (ex.InnerException is PostgresException { SqlState: PostgresErrorCodes.ForeignKeyViolation })
         {
+            // Chỉ quy lỗi về "dữ liệu liên quan" khi đúng là vi phạm ràng buộc khóa ngoại (SqlState 23503).
+            // Các lỗi DB khác (timeout, deadlock, mất kết nối...) sẽ không bị bắt ở đây mà được ném tiếp cho
+            // middleware xử lý, tránh trả về thông báo sai nguyên nhân cho người dùng.
             return BadRequest(new { message = "Không thể xóa người dùng này vì có dữ liệu liên quan (lịch sử thanh toán, v.v.). Bạn có thể vô hiệu hóa tài khoản thay vì xóa." });
         }
+
+        // Ghi log SAU khi xóa thành công. targetUserId để null vì bản ghi user không
+        // còn tồn tại — giữ lại danh tính trong summary/metadata.
+        await auditLog.LogAsync(
+            actorUserId: currentUserId,
+            actorRole: UserRoles.Admin,
+            action: "AdminUserDeleted",
+            entityType: "User",
+            entityId: id,
+            targetUserId: null,
+            summary: $"Xóa tài khoản {user.Username} ({user.Email}), vai trò {user.Role}.",
+            metadata: new { user.Username, user.Email, user.Role },
+            cancellationToken: cancellationToken);
 
         return NoContent();
     }

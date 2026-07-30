@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using System.Security.Claims;
 using SWP_BE.Data;
 using SWP_BE.Models;
+using SWP_BE.Services;
 
 namespace SWP_BE.Controllers;
 
@@ -106,6 +107,14 @@ public class SkillGapsController : ControllerBase
             };
 
             int reqLevelValue = ParseLevel(req.RequiredLevel);
+            if (reqLevelValue == 0)
+            {
+                // RequiredLevel không nhận diện được (legacy/seed): coi là Intermediate.
+                // Nếu để rank 0, điều kiện "verified >= required" thành 0 >= 0 và sinh viên
+                // CHƯA XÁC THỰC gì cũng được "Matched" -> mất node khỏi lộ trình vĩnh viễn.
+                reqLevelValue = 2;
+            }
+
             int userLevelValue = userSkill != null ? ParseLevel(userSkill.Level) : 0;
             int verifiedLevelValue = userSkill is { IsVerified: true }
                 ? ParseLevel(string.IsNullOrWhiteSpace(userSkill.VerifiedLevel) ? userSkill.Level : userSkill.VerifiedLevel)
@@ -117,10 +126,20 @@ public class SkillGapsController : ControllerBase
             {
                 selfReportedScore += req.Weight;
 
-                if (userSkill.IsVerified)
+                // "Matched" phải đo trên mức ĐÃ XÁC THỰC, không phải mức tự khai:
+                // node "Matched" bị loại khỏi lộ trình (RoadmapController.GetNodesFromSkillGapAsync),
+                // nên nếu chỉ cần IsVerified mà không so VerifiedLevel với yêu cầu thì
+                // sinh viên tự khai Advanced / được xác thực Beginner / yêu cầu Intermediate
+                // sẽ mất luôn node để học lên cho đủ mức.
+                if (verifiedLevelValue >= reqLevelValue)
                 {
                     item.Status = "Matched";
                     item.Recommendation = "Làm tốt lắm! Bạn đã thành thạo và xác thực kỹ năng này.";
+                }
+                else if (userSkill.IsVerified)
+                {
+                    item.Status = "NotVerified";
+                    item.Recommendation = $"Kỹ năng mới được xác thực ở cấp độ {userSkill.VerifiedLevel ?? userSkill.Level}, cần đạt và xác thực tới cấp độ {req.RequiredLevel}.";
                 }
                 else
                 {
@@ -208,20 +227,7 @@ public class SkillGapsController : ControllerBase
         });
     }
 
-    private int ParseLevel(string? level)
-    {
-        if (string.IsNullOrWhiteSpace(level)) return 0;
-        
-        return level.ToLower() switch
-        {
-            "none" => 0,
-            "beginner" => 1,
-            "intermediate" => 2,
-            "advanced" => 3,
-            "expert" => 4,
-            _ => 1 // Default if unknown format
-        };
-    }
+    private static int ParseLevel(string? level) => SkillLevels.LevelRank(level);
 
     [HttpGet("latest")]
     public async Task<IActionResult> GetLatestSkillGapReport()
@@ -291,7 +297,7 @@ public class SkillGapsController : ControllerBase
             return NotFound(new { message = "Không tìm thấy báo cáo khoảng cách kỹ năng." });
         }
 
-        if (report.UserId != currentUserId && !User.IsInRole("Admin") && !User.IsInRole("Counselor"))
+        if (report.UserId != currentUserId && !User.IsInRole(UserRoles.Admin) && !User.IsInRole(UserRoles.AcademicCounselor))
         {
             return Forbid();
         }

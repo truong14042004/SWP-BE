@@ -109,11 +109,41 @@ public sealed class PayOsController(
 
         if (webhookData.Code == "00")
         {
-            await paymentProcessingService.MarkPaidAsync(
-                payment,
-                now,
-                webhookData.PaymentLinkId,
-                cancellationToken);
+            // Phòng vệ chiều sâu: chữ ký đã được verify ở trên, nhưng vẫn phải đối chiếu
+            // số tiền — không có bước này thì một payload báo thành công với số tiền lệch
+            // vẫn kích hoạt gói đầy đủ quyền lợi.
+            // So sánh bằng decimal (không ToInt32 — số tiền > int.MaxValue sẽ ném
+            // OverflowException và webhook thật bị nuốt).
+            var expectedAmount = decimal.Round(payment.Amount, 0, MidpointRounding.AwayFromZero);
+            if (webhookData.Amount != expectedAmount)
+            {
+                paymentProcessingService.MarkFailed(payment, now);
+                logger.LogWarning(
+                    "Webhook PayOS báo thành công nhưng số tiền không khớp cho đơn {OrderCode}: nhận {Received}, cần {Expected}.",
+                    webhookData.OrderCode,
+                    webhookData.Amount,
+                    expectedAmount);
+            }
+            else if (!string.IsNullOrWhiteSpace(webhookData.Currency)
+                && !string.IsNullOrWhiteSpace(payment.Currency)
+                && !webhookData.Currency.Equals(payment.Currency, StringComparison.OrdinalIgnoreCase))
+            {
+                // Cùng con số nhưng khác đơn vị tiền tệ vẫn là lệch tiền.
+                paymentProcessingService.MarkFailed(payment, now);
+                logger.LogWarning(
+                    "Webhook PayOS báo thành công nhưng đơn vị tiền tệ không khớp cho đơn {OrderCode}: nhận {Received}, cần {Expected}.",
+                    webhookData.OrderCode,
+                    webhookData.Currency,
+                    payment.Currency);
+            }
+            else
+            {
+                await paymentProcessingService.MarkPaidAsync(
+                    payment,
+                    now,
+                    webhookData.PaymentLinkId,
+                    cancellationToken);
+            }
         }
         else
         {
@@ -125,6 +155,9 @@ public sealed class PayOsController(
         await dbContext.SaveChangesAsync(cancellationToken);
     }
 
+    // Order code thật được sinh ở SubscriptionsController.CreateOrderCode() và luôn là số dương 15 chữ số.
+    // Webhook xác minh/test của PayOS có OrderCode = 0 (hoặc âm), nên chỉ cần dựa vào OrderCode <= 0.
+    // Bỏ điều kiện độ dài < 13 cũ vì dễ vỡ và có nguy cơ nuốt nhầm webhook thật.
     private static bool IsLikelyVerificationWebhook(WebhookData webhookData) =>
-        webhookData.OrderCode <= 0 || webhookData.OrderCode.ToString().Length < 13;
+        webhookData.OrderCode <= 0;
 }

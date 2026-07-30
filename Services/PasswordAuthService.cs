@@ -169,13 +169,15 @@ public sealed class PasswordAuthService(
         var existingUser = await dbContext.Users
             .SingleOrDefaultAsync(user => user.Email == pendingRegistration.Email, cancellationToken);
 
-        // If there is another inactive user using the new username, we must delete it first to free up the username
-        var conflictingUsernameUser = await dbContext.Users
-            .SingleOrDefaultAsync(user => user.Username == pendingRegistration.Username && user.Email != pendingRegistration.Email, cancellationToken);
-        if (conflictingUsernameUser is not null)
+        // Username trùng với một tài khoản khác (kể cả inactive) thì từ chối — TUYỆT
+        // ĐỐI không xoá bản ghi user kia: người lạ chỉ cần biết username của một tài
+        // khoản bị vô hiệu hoá là xoá cứng được nó (mất luôn payment/audit liên quan).
+        var usernameTaken = await dbContext.Users.AnyAsync(
+            user => user.Username == pendingRegistration.Username && user.Email != pendingRegistration.Email,
+            cancellationToken);
+        if (usernameTaken)
         {
-            dbContext.Users.Remove(conflictingUsernameUser);
-            await dbContext.SaveChangesAsync(cancellationToken); // Save to free up username unique index
+            throw new UnauthorizedAccessException("Tên đăng nhập đã được sử dụng. Vui lòng chọn tên khác.");
         }
 
         User user;
@@ -185,6 +187,10 @@ public sealed class PasswordAuthService(
             user.Username = pendingRegistration.Username;
             user.FullName = pendingRegistration.FullName;
             user.PasswordHash = pendingRegistration.PasswordHash;
+            // Đăng ký tự phục vụ chỉ tạo ra Student. Không gán lại Role ở đây thì một
+            // tài khoản đặc quyền (Admin/Mentor/Counselor) từng bị vô hiệu hóa sẽ được
+            // khôi phục NGUYÊN quyền cũ bởi bất kỳ ai đăng ký lại bằng email đó.
+            user.Role = UserRoles.Student;
             user.IsActive = true;
             user.IsEmailVerified = true;
             user.EmailVerifiedAt = now;

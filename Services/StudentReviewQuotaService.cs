@@ -77,20 +77,24 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
             }
         }
 
-        // Used = (số portfolio feedback nhận được) + (số roadmap node review đã được approve)
-        // trong period subscription hiện tại.
+        // Used = (số portfolio feedback nhận được) + (số roadmap node review mentor đã
+        // xử lý: approve hoặc reject) + (số đang chờ) trong period subscription hiện tại.
         var portfolioFeedbackCount = await dbContext.MentorFeedbacks
             .AsNoTracking()
             .CountAsync(
                 item => item.StudentId == studentId && item.CreatedAt >= since,
                 cancellationToken);
 
-        var approvedRoadmapReviewCount = await dbContext.RoadmapNodeReviewRequests
+        // Tính cả lượt bị từ chối: mentor đã bỏ công xem xét thì lượt đó đã tiêu thụ
+        // quota. Nếu chỉ đếm Approved, sinh viên bị reject sẽ được hoàn quota và có
+        // thể gửi lại vô hạn (node quay về "Completed" nên gửi lại được ngay).
+        // Chỉ Cancelled mới được hoàn — mentor chưa xử lý.
+        var handledRoadmapReviewCount = await dbContext.RoadmapNodeReviewRequests
             .AsNoTracking()
             .CountAsync(
                 item => item.StudentId == studentId
                     && item.ReviewerRole == "IndustryMentor"
-                    && item.Status == "Approved"
+                    && (item.Status == "Approved" || item.Status == "Rejected")
                     && (item.RespondedAt ?? item.RequestedAt) >= since,
                 cancellationToken);
 
@@ -103,7 +107,7 @@ public sealed class StudentReviewQuotaService(AppDbContext dbContext) : IStudent
                     && item.RequestedAt >= since,
                 cancellationToken);
 
-        var used = portfolioFeedbackCount + approvedRoadmapReviewCount + pendingRoadmapReviewCount;
+        var used = portfolioFeedbackCount + handledRoadmapReviewCount + pendingRoadmapReviewCount;
 
         return new StudentReviewQuota(
             planName,

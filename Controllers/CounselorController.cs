@@ -76,26 +76,35 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             })
             .ToDictionaryAsync(p => p.UserId, cancellationToken);
 
-        // Lấy skill gap report mới nhất của từng sinh viên (1 query, group + max)
-        var latestGaps = await dbContext.SkillGapReports
+        // Điểm hiển thị phải CÙNG NGỮ CẢNH với cột "Định hướng" bên cạnh: ưu tiên báo
+        // cáo mới nhất CỦA nghề mục tiêu; sinh viên chưa phân tích cho nghề mục tiêu
+        // thì để trống ("Chưa phân tích") thay vì mượn điểm của một nghề khác.
+        // Sinh viên chưa chọn nghề -> lấy báo cáo mới nhất bất kỳ.
+        var gapRows = await dbContext.SkillGapReports
             .AsNoTracking()
             .Where(report => studentIds.Contains(report.UserId))
-            .GroupBy(report => report.UserId)
-            .Select(group => group
-                .OrderByDescending(report => report.CreatedAt)
-                .Select(report => new
-                {
-                    report.UserId,
-                    report.MatchScore,
-                    report.CreatedAt
-                })
-                .First())
-            .ToDictionaryAsync(report => report.UserId, cancellationToken);
+            .Select(report => new
+            {
+                report.UserId,
+                report.CareerRoleId,
+                report.MatchScore,
+                report.VerifiedMatchScore,
+                report.CreatedAt
+            })
+            .ToListAsync(cancellationToken);
+        var gapsByStudent = gapRows
+            .GroupBy(row => row.UserId)
+            .ToDictionary(
+                group => group.Key,
+                group => group.OrderByDescending(row => row.CreatedAt).ToList());
 
         var result = students.Select(student =>
         {
             profiles.TryGetValue(student.Id, out var profile);
-            latestGaps.TryGetValue(student.Id, out var gap);
+            gapsByStudent.TryGetValue(student.Id, out var gapList);
+            var gap = profile?.TargetRoleId is Guid targetRoleId
+                ? gapList?.FirstOrDefault(row => row.CareerRoleId == targetRoleId)
+                : gapList?.FirstOrDefault();
             assignmentDateByStudent.TryGetValue(student.Id, out var assignedAt);
 
             return new CounselorStudentSummaryResponse(
@@ -109,6 +118,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 profile?.TargetRoleId,
                 profile?.TargetRoleName,
                 gap?.MatchScore,
+                gap?.VerifiedMatchScore,
                 gap?.CreatedAt);
         }).ToList();
 
@@ -206,6 +216,9 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 us.Skill.Name,
                 us.Skill.Category,
                 us.Level,
+                us.VerifiedLevel,
+                us.VerificationStatus,
+                us.RejectionReason,
                 us.IsVerified,
                 us.VerifiedByUserId,
                 us.VerifiedByUser != null ? us.VerifiedByUser.FullName : null,
@@ -294,6 +307,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 r.CareerRoleId,
                 r.CareerRole.Name,
                 r.MatchScore,
+                r.VerifiedMatchScore,
                 r.Summary,
                 r.CreatedAt))
             .ToListAsync(cancellationToken);
@@ -396,7 +410,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         var latestUpdate = reqUpdate > roleUpdate ? reqUpdate : roleUpdate;
         bool isOutdated = roadmap.CreatedAt < latestUpdate;
 
-        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, nodes, isOutdated));
+        return Ok(ToRoadmapResponse(roadmap, roadmap.CareerRole.Name, roadmap.CareerRole.Level, nodes, isOutdated));
     }
 
     // POST /api/counselor/feedback
@@ -413,6 +427,18 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         if (string.IsNullOrWhiteSpace(request.FeedbackText))
         {
             return BadRequest(new { message = "Nội dung phản hồi là bắt buộc." });
+        }
+
+        // Đồng bộ ràng buộc độ dài với FE: tối thiểu 50, tối đa 5000 ký tự
+        var feedbackLength = request.FeedbackText.Trim().Length;
+        if (feedbackLength < 50)
+        {
+            return BadRequest(new { message = "Nhận xét phải có ít nhất 50 ký tự." });
+        }
+
+        if (feedbackLength > 5000)
+        {
+            return BadRequest(new { message = "Nhận xét không được vượt quá 5000 ký tự." });
         }
 
         if (request.Rating is < 1 or > 5)
@@ -575,6 +601,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             report.CareerRoleId,
             report.CareerRole.Name,
             report.MatchScore,
+            report.VerifiedMatchScore,
             report.Summary,
             report.CreatedAt,
             items.Select(i => new CounselorSkillGapReportItemResponse(
@@ -608,11 +635,12 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
 
     // ── Mappers for RoadmapResponse ──────────────────────────────────────────
 
-    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
+    private static RoadmapResponse ToRoadmapResponse(Roadmap roadmap, string careerRoleName, string? careerRoleLevel, IReadOnlyList<RoadmapNode> nodes, bool isOutdated) =>
         new(
             roadmap.Id,
             roadmap.CareerRoleId,
             careerRoleName,
+            careerRoleLevel,
             roadmap.SkillGapReportId,
             roadmap.Title,
             roadmap.Description,
@@ -686,9 +714,10 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             resource.Skill?.Name,
             resource.Title,
             resource.Url,
-            resource.StorageObjectName is null ? "Link" : "File",
+            LearningResourceFiles.SourceType(resource.StorageObjectName),
             resource.ContentType,
             resource.FileSize,
+            LearningResourceFiles.GetFileName(resource.StorageObjectName),
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
@@ -724,7 +753,8 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 us.EvidenceUrl,
                 us.EvidenceType,
                 us.VerificationStatus,
-                us.UpdatedAt))
+                us.UpdatedAt,
+                us.RejectionReason))
             .ToListAsync(cancellationToken);
 
         return Ok(items);
@@ -820,6 +850,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         Guid id,
         [FromServices] IRoadmapMaterializer roadmapMaterializer,
         [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         var counselorId = GetCurrentUserId();
@@ -836,6 +867,13 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         if (request.CounselorId != counselorId)
         {
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
+        }
+
+        // Cố vấn chỉ được duyệt khi vẫn còn được phân công cho sinh viên (assignment Active).
+        // Ngăn cố vấn đã bị admin gỡ phân công vẫn duyệt request Pending cũ.
+        if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
         }
 
         if (request.Status != "Pending")
@@ -861,8 +899,27 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         using var transaction = await dbContext.Database.BeginTransactionAsync(cancellationToken);
         try
         {
+            // Atomic guard chống race: chỉ một request thắng việc chuyển Pending -> Approved.
+            // Nếu một luồng khác (bấm 2 lần / 2 tab) đã giành trước, affected = 0 -> dừng,
+            // tránh materialize roadmap nhiều lần cho cùng một yêu cầu.
+            var claimed = await dbContext.RoadmapApprovalRequests
+                .Where(r => r.Id == request.Id && r.Status == "Pending")
+                .ExecuteUpdateAsync(
+                    setters => setters
+                        .SetProperty(r => r.Status, "Approved")
+                        .SetProperty(r => r.UpdatedAt, DateTimeOffset.UtcNow),
+                    cancellationToken);
+
+            if (claimed == 0)
+            {
+                await transaction.RollbackAsync(cancellationToken);
+                return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
+            }
+
             var result = await roadmapMaterializer.MaterializeRoadmapAsync(request.StudentId, payload, cancellationToken);
 
+            // Đồng bộ entity đã tracking với giá trị vừa cập nhật atomic ở trên,
+            // rồi lưu MaterializedRoadmapId.
             request.Status = "Approved";
             request.MaterializedRoadmapId = result.RoadmapId;
             request.UpdatedAt = DateTimeOffset.UtcNow;
@@ -879,7 +936,18 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
                 type: "RoadmapApprovalApproved",
                 title: "Đề xuất lộ trình đã được duyệt",
                 message: $"Cố vấn {counselorName} đã duyệt đề xuất lộ trình của bạn: {result.Title}",
-                linkUrl: "#roadmap",
+                linkUrl: $"#roadmap?id={result.RoadmapId}",
+                cancellationToken: cancellationToken);
+
+            await auditLog.LogAsync(
+                actorUserId: counselorId,
+                actorRole: UserRoles.AcademicCounselor,
+                action: "RoadmapApprovalApproved",
+                entityType: "RoadmapApprovalRequest",
+                entityId: request.Id,
+                targetUserId: request.StudentId,
+                summary: $"Duyệt đề xuất lộ trình và khởi tạo roadmap: {result.Title}",
+                metadata: new { roadmapId = result.RoadmapId, result.Title },
                 cancellationToken: cancellationToken);
 
             return Ok(new { message = "Lộ trình đã được phê duyệt và khởi tạo thành công.", roadmapId = result.RoadmapId });
@@ -902,6 +970,7 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
         Guid id,
         RejectRoadmapApprovalRequest requestBody,
         [FromServices] INotificationService notificationService,
+        [FromServices] IAuditLogService auditLog,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(requestBody.RejectionReason))
@@ -925,11 +994,16 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             return StatusCode(StatusCodes.Status403Forbidden, new { message = "Yêu cầu duyệt lộ trình này không thuộc quản lý của bạn." });
         }
 
+        // Cố vấn chỉ được từ chối khi vẫn còn được phân công cho sinh viên (assignment Active).
+        if (!await IsStudentAssignedToCounselorAsync(request.StudentId, counselorId, cancellationToken))
+        {
+            return StatusCode(StatusCodes.Status403Forbidden, new { message = "Sinh viên không còn được phân công cho cố vấn này." });
+        }
+
         if (request.Status != "Pending")
         {
             return BadRequest(new { message = "Yêu cầu này không ở trạng thái chờ duyệt." });
         }
-
         request.Status = "Rejected";
         request.RejectionReason = requestBody.RejectionReason.Trim();
         request.UpdatedAt = DateTimeOffset.UtcNow;
@@ -946,6 +1020,17 @@ public sealed class CounselorController(AppDbContext dbContext) : ControllerBase
             title: "Đề xuất lộ trình bị từ chối",
             message: $"Đề xuất lộ trình của bạn đã bị từ chối bởi cố vấn {counselorName}. Lý do: {request.RejectionReason}",
             linkUrl: "#roadmap-requests",
+            cancellationToken: cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: counselorId,
+            actorRole: UserRoles.AcademicCounselor,
+            action: "RoadmapApprovalRejected",
+            entityType: "RoadmapApprovalRequest",
+            entityId: request.Id,
+            targetUserId: request.StudentId,
+            summary: $"Từ chối đề xuất lộ trình. Lý do: {request.RejectionReason}",
+            metadata: new { request.RejectionReason },
             cancellationToken: cancellationToken);
 
         return Ok(new { message = "Đã từ chối đề xuất lộ trình." });
@@ -976,6 +1061,9 @@ public sealed record CounselorStudentSummaryResponse(
     Guid? TargetRoleId,
     string? TargetRoleName,
     decimal? LatestMatchScore,
+    // Điểm chỉ tính kỹ năng đã xác thực — cố vấn phải lọc "cần can thiệp" theo con
+    // số này, vì LatestMatchScore gồm cả kỹ năng sinh viên tự khai chưa kiểm chứng.
+    decimal? LatestVerifiedMatchScore,
     DateTimeOffset? LatestSkillGapAt);
 
 public sealed record CounselorStudentProfileResponse(
@@ -1009,6 +1097,9 @@ public sealed record CounselorStudentSkillResponse(
     string SkillName,
     string SkillCategory,
     string Level,
+    string? VerifiedLevel,
+    string VerificationStatus,
+    string? RejectionReason,
     bool IsVerified,
     Guid? VerifiedByUserId,
     string? VerifiedByFullName,
@@ -1038,6 +1129,7 @@ public sealed record CounselorSkillGapHistoryResponse(
     Guid CareerRoleId,
     string CareerRoleName,
     decimal MatchScore,
+    decimal? VerifiedMatchScore,
     string? Summary,
     DateTimeOffset CreatedAt);
 
@@ -1047,6 +1139,7 @@ public sealed record CounselorSkillGapReportResponse(
     Guid CareerRoleId,
     string CareerRoleName,
     decimal MatchScore,
+    decimal? VerifiedMatchScore,
     string? Summary,
     DateTimeOffset CreatedAt,
     IReadOnlyList<CounselorSkillGapReportItemResponse> Items);
@@ -1074,7 +1167,8 @@ public sealed record SkillVerificationQueueItemResponse(
     string? EvidenceUrl,
     string? EvidenceType,
     string VerificationStatus,
-    DateTimeOffset SubmittedAt);
+    DateTimeOffset SubmittedAt,
+    string? RejectionReason = null);
 
 public sealed record RoadmapApprovalQueueItemResponse(
     Guid Id,

@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using SWP_BE.Data;
@@ -11,9 +12,11 @@ using SWP_BE.Data;
 namespace SWP_BE.Migrations
 {
     [DbContext(typeof(AppDbContext))]
-    partial class AppDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260611044351_AddUserSkillRejectionReason")]
+    partial class AddUserSkillRejectionReason
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        /// <inheritdoc />
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -180,7 +183,7 @@ namespace SWP_BE.Migrations
 
                     b.HasIndex("IsActive");
 
-                    b.HasIndex("Name", "Level")
+                    b.HasIndex("Name")
                         .IsUnique();
 
                     b.ToTable("career_roles", (string)null);
@@ -922,11 +925,6 @@ namespace SWP_BE.Migrations
                     b.HasIndex("IsActive");
 
                     b.HasIndex("SkillId");
-
-                    b.HasIndex("Url")
-                        .IsUnique()
-                        .HasDatabaseName("IX_learning_resources_auto_url")
-                        .HasFilter("\"IsActive\" AND (\"Url\" LIKE 'https://www.youtube.com/results?search_query=%' OR \"Url\" LIKE 'https://www.google.com/search?q=%')");
 
                     b.ToTable("learning_resources", null, t =>
                         {
@@ -1918,8 +1916,6 @@ namespace SWP_BE.Migrations
                             t.HasCheckConstraint("CK_roadmap_nodes_Level", "\"Level\" >= 0 AND \"Level\" <= 8");
 
                             t.HasCheckConstraint("CK_roadmap_nodes_Priority", "\"Priority\" >= 1 AND \"Priority\" <= 5");
-
-                            t.HasCheckConstraint("CK_roadmap_nodes_Status", "\"Status\" IN ('NotStarted','InProgress','Completed','NeedReview','Verified')");
                         });
                 });
 
@@ -3875,8 +3871,7 @@ namespace SWP_BE.Migrations
 
                     b.HasKey("Id");
 
-                    b.HasIndex("StudentId")
-                        .IsUnique();
+                    b.HasIndex("StudentId");
 
                     b.ToTable("student_talent_profiles");
                 });

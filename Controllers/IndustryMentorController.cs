@@ -207,107 +207,11 @@ public sealed class IndustryMentorController(
         return Ok(responses);
     }
 
-    [HttpPost("user-skills/{userSkillId:guid}/verify")] //mentor xac minh ky nang cua sinh vien
-    public async Task<ActionResult<MentorViewableUserSkillResponse>> VerifyStudentSkill(
-        Guid userSkillId,
-        CancellationToken cancellationToken)
-    {
-        var mentorId = GetCurrentUserId();
-        var userSkill = await dbContext.UserSkills
-            .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
-
-        if (userSkill is null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
-        }
-
-        if (userSkill.IsVerified)
-        {
-            return Conflict(new { message = "Kỹ năng đã được xác minh." });
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        userSkill.IsVerified = true;
-        userSkill.VerifiedByUserId = mentorId;
-        userSkill.VerifiedAt = now;
-        userSkill.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        var mentor = await dbContext.Users
-            .AsNoTracking()
-            .Where(item => item.Id == mentorId)
-            .Select(item => new { item.FullName, item.Role })
-            .SingleAsync(cancellationToken);
-
-        return Ok(new MentorViewableUserSkillResponse(
-            userSkill.Id,
-            userSkill.SkillId,
-            userSkill.Skill.Name,
-            userSkill.Skill.Category,
-            userSkill.Level,
-            userSkill.EvidenceUrl,
-            userSkill.EvidenceType,
-            userSkill.IsVerified,
-            userSkill.VerifiedAt,
-            userSkill.VerifiedByUserId,
-            mentor.FullName,
-            mentor.Role,
-            userSkill.CreatedAt,
-            userSkill.UpdatedAt));
-    }
-
-    [HttpPost("user-skills/{userSkillId:guid}/unverify")] //mentor rut lai xac minh (chi nguoi verify ban dau)
-    public async Task<ActionResult<MentorViewableUserSkillResponse>> UnverifyStudentSkill(
-        Guid userSkillId,
-        CancellationToken cancellationToken)
-    {
-        var mentorId = GetCurrentUserId();
-        var userSkill = await dbContext.UserSkills
-            .Include(item => item.Skill)
-            .SingleOrDefaultAsync(item => item.Id == userSkillId, cancellationToken);
-
-        if (userSkill is null)
-        {
-            return NotFound(new { message = "Không tìm thấy kỹ năng của người dùng." });
-        }
-
-        if (!userSkill.IsVerified)
-        {
-            return Conflict(new { message = "Kỹ năng hiện chưa được xác minh." });
-        }
-
-        // Chi nguoi verify ban dau moi rut lai duoc
-        if (userSkill.VerifiedByUserId != mentorId)
-        {
-            return Forbid();
-        }
-
-        var now = DateTimeOffset.UtcNow;
-        userSkill.IsVerified = false;
-        userSkill.VerifiedByUserId = null;
-        userSkill.VerifiedAt = null;
-        userSkill.UpdatedAt = now;
-
-        await dbContext.SaveChangesAsync(cancellationToken);
-
-        return Ok(new MentorViewableUserSkillResponse(
-            userSkill.Id,
-            userSkill.SkillId,
-            userSkill.Skill.Name,
-            userSkill.Skill.Category,
-            userSkill.Level,
-            userSkill.EvidenceUrl,
-            userSkill.EvidenceType,
-            userSkill.IsVerified,
-            userSkill.VerifiedAt,
-            userSkill.VerifiedByUserId,
-            null,
-            null,
-            userSkill.CreatedAt,
-            userSkill.UpdatedAt));
-    }
+    // Mentor KHÔNG còn verify/unverify kỹ năng trực tiếp (Đường 1 đã gỡ).
+    // Việc xác minh kỹ năng (học thuật) thuộc về Counselor. Mentor chỉ xác minh
+    // gián tiếp khi chấm Passed một node roadmap gắn skill (SyncVerifiedSkillAsync
+    // trong RoadmapReviewController). GetStudentSkills ở trên vẫn cho mentor XEM
+    // kỹ năng của sinh viên (read-only) phục vụ việc chấm node.
 
     [HttpPost("feedback")] //mentor tao feedback cho sinh vien
     public async Task<ActionResult<MentorFeedbackResponse>> CreateFeedback(
@@ -317,6 +221,18 @@ public sealed class IndustryMentorController(
         if (string.IsNullOrWhiteSpace(request.Comment))
         {
             return BadRequest(new { message = "Nhận xét là bắt buộc." });
+        }
+
+        // Đồng bộ ràng buộc độ dài với FE: tối thiểu 50, tối đa 5000 ký tự
+        var commentLength = request.Comment.Trim().Length;
+        if (commentLength < 50)
+        {
+            return BadRequest(new { message = "Nhận xét phải có ít nhất 50 ký tự." });
+        }
+
+        if (commentLength > 5000)
+        {
+            return BadRequest(new { message = "Nhận xét không được vượt quá 5000 ký tự." });
         }
 
         if (request.Rating is < 1 or > 5)
@@ -664,7 +580,7 @@ public sealed class IndustryMentorController(
         [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
-        var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
+        var validationError = await ValidateLearningResourceRequest(request, hasExistingFile: false, cancellationToken);
         if (validationError is not null)
         {
             return BadRequest(new { message = validationError });
@@ -685,7 +601,7 @@ public sealed class IndustryMentorController(
                 Id = resourceId,
                 SkillId = request.SkillId,
                 Title = request.Title!.Trim(),
-                Url = $"/api/storage/learning-resources/{resourceId}/download",
+                Url = NormalizeExternalResourceUrl(request.Url) ?? string.Empty,
                 StorageObjectName = result.ObjectName,
                 ContentType = result.ContentType,
                 FileSize = result.Size,
@@ -733,12 +649,6 @@ public sealed class IndustryMentorController(
         [FromForm] SaveLearningResourceRequest request,
         CancellationToken cancellationToken)
     {
-        var validationError = await ValidateLearningResourceRequest(request, cancellationToken);
-        if (validationError is not null)
-        {
-            return BadRequest(new { message = validationError });
-        }
-
         var resource = await dbContext.LearningResources
             .SingleOrDefaultAsync(item => item.Id == id, cancellationToken);
         if (resource is null)
@@ -746,6 +656,16 @@ public sealed class IndustryMentorController(
             return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
+        var validationError = await ValidateLearningResourceRequest(
+            request,
+            hasExistingFile: !string.IsNullOrWhiteSpace(resource.StorageObjectName),
+            cancellationToken);
+        if (validationError is not null)
+        {
+            return BadRequest(new { message = validationError });
+        }
+
+        var previousSkillId = resource.SkillId;
         resource.SkillId = request.SkillId;
         resource.Title = request.Title!.Trim();
         resource.ResourceType = request.ResourceType!.Trim();
@@ -766,7 +686,7 @@ public sealed class IndustryMentorController(
             await using var stream = request.File.OpenReadStream();
             var result = await storageService.UploadAsync(stream, objectName, request.File.ContentType, cancellationToken);
 
-            resource.Url = $"/api/storage/learning-resources/{id}/download";
+            resource.Url = NormalizeExternalResourceUrl(request.Url) ?? string.Empty;
             resource.StorageObjectName = result.ObjectName;
             resource.ContentType = result.ContentType;
             resource.FileSize = result.Size;
@@ -774,20 +694,31 @@ public sealed class IndustryMentorController(
         else
         {
             var trimmedUrl = request.Url?.Trim() ?? string.Empty;
-            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
+            var isLocalDownloadUrl = IsInternalLearningResourceUrl(trimmedUrl);
+            var hasExistingFile = !string.IsNullOrWhiteSpace(resource.StorageObjectName);
 
-            if (!isLocalDownloadUrl)
+            if (string.IsNullOrWhiteSpace(trimmedUrl) || isLocalDownloadUrl)
             {
-                if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
-                {
-                    await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
-                }
-                resource.StorageObjectName = null;
-                resource.ContentType = null;
-                resource.FileSize = null;
+                resource.Url = string.Empty;
             }
+            else
+            {
+                resource.Url = trimmedUrl;
+                if (!hasExistingFile)
+                {
+                    resource.StorageObjectName = null;
+                    resource.ContentType = null;
+                    resource.FileSize = null;
+                }
+            }
+        }
 
-            resource.Url = trimmedUrl;
+        // Giáo trình đổi thì sinh viên các nghề dùng kỹ năng này cần được gợi ý
+        // cập nhật lộ trình (bump cả skill cũ nếu tài nguyên bị chuyển sang skill khác).
+        await TouchCareerRolesForSkillAsync(previousSkillId, cancellationToken);
+        if (resource.SkillId != previousSkillId)
+        {
+            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
@@ -805,12 +736,31 @@ public sealed class IndustryMentorController(
             return NotFound(new { message = "Không tìm thấy tài nguyên học tập." });
         }
 
-        if (!string.IsNullOrWhiteSpace(resource.StorageObjectName))
+        // Cùng chính sách với DeleteSkill: tài nguyên đang được roadmap/tiến độ học
+        // tham chiếu thì soft-delete. Hard-delete sẽ cascade âm thầm gỡ tài nguyên
+        // khỏi mọi roadmap đang học (có thể làm node < 2 tài nguyên - vi phạm FR2.3)
+        // và xoá LessonProgress của sinh viên.
+        var isUsed = await dbContext.RoadmapNodeResources.AnyAsync(item => item.LearningResourceId == id, cancellationToken)
+            || await dbContext.RoadmapNodes.AnyAsync(item => item.LearningResourceId == id, cancellationToken)
+            || await dbContext.LessonProgresses.AnyAsync(item => item.LearningResourceId == id, cancellationToken);
+
+        if (isUsed)
         {
-            await storageService.DeleteAsync(resource.StorageObjectName, cancellationToken);
+            resource.IsActive = false;
+            resource.UpdatedAt = DateTimeOffset.UtcNow;
+            await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
+            await dbContext.SaveChangesAsync(cancellationToken);
+            return NoContent();
+        }
+
+        // Chỉ gọi GCS khi thực sự là file — marker "auto:*" legacy không phải object.
+        if (LearningResourceFiles.IsStoredFile(resource.StorageObjectName))
+        {
+            await storageService.DeleteAsync(resource.StorageObjectName!, cancellationToken);
         }
 
         dbContext.LearningResources.Remove(resource);
+        await TouchCareerRolesForSkillAsync(resource.SkillId, cancellationToken);
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
@@ -951,6 +901,18 @@ public sealed class IndustryMentorController(
         }
 
         dbContext.RoleSkillRequirements.Remove(requirement);
+
+        // Banner "lộ trình có cập nhật mới" so sánh CreatedAt của roadmap với
+        // MAX(UpdatedAt) của requirements và CareerRole — xoá requirement làm mất
+        // luôn mốc UpdatedAt của nó, nên phải đẩy mốc trên CareerRole để sinh viên
+        // biết roadmap đang dạy kỹ năng đã bị gỡ khỏi vai trò.
+        var careerRole = await dbContext.CareerRoles
+            .SingleOrDefaultAsync(item => item.Id == requirement.CareerRoleId, cancellationToken);
+        if (careerRole is not null)
+        {
+            careerRole.UpdatedAt = DateTimeOffset.UtcNow;
+        }
+
         await dbContext.SaveChangesAsync(cancellationToken);
 
         return NoContent();
@@ -1452,6 +1414,7 @@ public sealed class IndustryMentorController(
 
     private async Task<string?> ValidateLearningResourceRequest(
         SaveLearningResourceRequest request,
+        bool hasExistingFile,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Title))
@@ -1463,27 +1426,45 @@ public sealed class IndustryMentorController(
         {
             if (string.IsNullOrWhiteSpace(request.Url))
             {
-                return "Đường dẫn (URL) hoặc Tệp tin tải lên là bắt buộc.";
+                if (!hasExistingFile)
+                {
+                    return "URL or uploaded file is required.";
+                }
             }
-
-            var trimmedUrl = request.Url.Trim();
-            var isLocalDownloadUrl = trimmedUrl.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
-
-            if (!isLocalDownloadUrl && !Uri.TryCreate(trimmedUrl, UriKind.Absolute, out _))
+            else
             {
-                return "Đường dẫn (URL) tài nguyên học tập phải là đường dẫn tuyệt đối hoặc đường dẫn tải tệp tin hợp lệ.";
+                var trimmedUrl = request.Url.Trim();
+                var isLocalDownloadUrl = IsInternalLearningResourceUrl(trimmedUrl);
+
+                if (isLocalDownloadUrl)
+                {
+                    if (!hasExistingFile)
+                    {
+                        return "URL must be the original external URL, not an internal file download URL.";
+                    }
+                }
+                else if (!Uri.TryCreate(trimmedUrl, UriKind.Absolute, out _))
+                {
+                    return "URL must be absolute.";
+                }
             }
         }
         else
         {
             if (request.File.Length > storageOpts.MaxUploadBytes)
             {
-                return $"Tệp quá lớn. Kích thước tối đa là {storageOpts.MaxUploadBytes} bytes.";
+                return $"File is too large. Maximum size is {storageOpts.MaxUploadBytes} bytes.";
             }
 
             if (!LearningResourceContentTypes.Contains(request.File.ContentType))
             {
-                return $"Định dạng tệp không được hỗ trợ: {request.File.ContentType}.";
+                return $"Unsupported file type: {request.File.ContentType}.";
+            }
+
+            var normalizedUrl = NormalizeExternalResourceUrl(request.Url);
+            if (!string.IsNullOrWhiteSpace(normalizedUrl) && !Uri.TryCreate(normalizedUrl, UriKind.Absolute, out _))
+            {
+                return "URL must be absolute.";
             }
         }
 
@@ -1586,10 +1567,11 @@ public sealed class IndustryMentorController(
             resource.SkillId,
             resource.Skill?.Name,
             resource.Title,
-            resource.Url,
-            resource.StorageObjectName is null ? "Link" : "File",
+            ToExternalResourceUrl(resource.Url),
+            LearningResourceFiles.SourceType(resource.StorageObjectName),
             resource.ContentType,
             resource.FileSize,
+            GetLearningResourceFileName(resource.StorageObjectName),
             resource.ResourceType,
             resource.Difficulty,
             resource.EstimatedHours,
@@ -1647,6 +1629,48 @@ public sealed class IndustryMentorController(
 
         return $"learning-resources/{resourceId}/{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}-{Guid.NewGuid():N}-{baseName}{extension}";
     }
+
+    private static string ToExternalResourceUrl(string? url) =>
+        NormalizeExternalResourceUrl(url) ?? string.Empty;
+
+    private static string? GetLearningResourceFileName(string? storageObjectName) =>
+        LearningResourceFiles.GetFileName(storageObjectName);
+
+    /// <summary>
+    /// Đẩy CareerRole.UpdatedAt của mọi nghề có requirement dùng kỹ năng này.
+    /// Banner "lộ trình có cập nhật mới" so roadmap.CreatedAt với mốc này — nếu
+    /// không bump, mentor đổi/gỡ giáo trình xong sinh viên không hề được gợi ý
+    /// cập nhật lộ trình. KHÔNG tự SaveChanges — caller lưu chung một transaction.
+    /// </summary>
+    private async Task TouchCareerRolesForSkillAsync(Guid? skillId, CancellationToken cancellationToken)
+    {
+        if (skillId is not Guid targetSkillId)
+        {
+            return;
+        }
+
+        var roles = await dbContext.CareerRoles
+            .Where(role => dbContext.RoleSkillRequirements.Any(
+                requirement => requirement.CareerRoleId == role.Id && requirement.SkillId == targetSkillId))
+            .ToListAsync(cancellationToken);
+
+        var now = DateTimeOffset.UtcNow;
+        foreach (var role in roles)
+        {
+            role.UpdatedAt = now;
+        }
+    }
+
+    private static string? NormalizeExternalResourceUrl(string? url)
+    {
+        var trimmedUrl = url?.Trim();
+        return string.IsNullOrWhiteSpace(trimmedUrl) || IsInternalLearningResourceUrl(trimmedUrl)
+            ? null
+            : trimmedUrl;
+    }
+
+    private static bool IsInternalLearningResourceUrl(string url) =>
+        url.StartsWith("/api/storage/learning-resources/", StringComparison.OrdinalIgnoreCase);
 
     private static string GetExtension(string? contentType)
     {
@@ -1793,6 +1817,7 @@ public sealed record LearningResourceResponse(
     string SourceType,
     string? ContentType,
     long? FileSize,
+    string? FileName,
     string ResourceType,
     string? Difficulty,
     int? EstimatedHours,

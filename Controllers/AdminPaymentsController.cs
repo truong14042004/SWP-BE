@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -12,7 +13,8 @@ namespace SWP_BE.Controllers;
 [Route("api/admin/payments")]
 public sealed class AdminPaymentsController(
     AppDbContext dbContext,
-    IPaymentProcessingService paymentProcessingService) : ControllerBase
+    IPaymentProcessingService paymentProcessingService,
+    IAuditLogService auditLog) : ControllerBase
 {
     [HttpGet]
     public async Task<ActionResult<IReadOnlyList<AdminPaymentTransactionResponse>>> GetPayments(
@@ -106,6 +108,7 @@ public sealed class AdminPaymentsController(
         }
 
         var now = DateTimeOffset.UtcNow;
+        var previousStatus = payment.Status;
         var normalizedStatus = request.Status.Trim();
         if (normalizedStatus.Equals("Paid", StringComparison.OrdinalIgnoreCase))
         {
@@ -123,7 +126,25 @@ public sealed class AdminPaymentsController(
         }
 
         await dbContext.SaveChangesAsync(cancellationToken);
+
+        await auditLog.LogAsync(
+            actorUserId: GetCurrentUserId(),
+            actorRole: UserRoles.Admin,
+            action: "AdminPaymentStatusChanged",
+            entityType: "PaymentTransaction",
+            entityId: payment.Id,
+            targetUserId: payment.UserId,
+            summary: $"Đổi trạng thái giao dịch {payment.Amount:N0} {payment.Currency}: {previousStatus} → {payment.Status}.",
+            metadata: new { PreviousStatus = previousStatus, NewStatus = payment.Status, payment.Amount, payment.Currency, payment.ProviderTransactionId },
+            cancellationToken: cancellationToken);
+
         return Ok(ToPaymentResponse(payment));
+    }
+
+    private Guid GetCurrentUserId()
+    {
+        var value = User.FindFirstValue(ClaimTypes.NameIdentifier);
+        return Guid.TryParse(value, out var userId) ? userId : Guid.Empty;
     }
 
     [HttpGet("subscriptions")]
